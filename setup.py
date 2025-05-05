@@ -14,6 +14,7 @@ PLAT_TO_CMAKE = {
     "win-arm32": "ARM",
     "win-arm64": "ARM64",
 }
+USE_COROUTINE = False
 
 
 class CMakeExtension(Extension):
@@ -114,7 +115,7 @@ class CMakeBuild(build_ext):
         # using `python -m build`, we actually have a copy of everything made and pushed
         # into a venv isolation area
         subprocess.run(
-            ["cmake", "-DPYBIND=True", ext.sourcedir] + cmake_args,
+            ["cmake", "-DPYBIND=True", "-DNO_COROUTINE=True" if not USE_COROUTINE else "", ext.sourcedir] + cmake_args,
             cwd=build_temp,
             check=True,
         )
@@ -132,9 +133,9 @@ setup(
     cmdclass={"build_ext": CMakeBuild},
     zip_safe=False,
     package_dir={"alayalite": "pyalaya/src"},
-    options={
-        "bdist_wheel": {
-            "plat_name": "manylinux_2_28_x86_64",
-        },
-    },
+    # options={
+    #     "bdist_wheel": {
+    #         "plat_name": "manylinux_2_28_x86_64",
+    #     },
+    # },
 )

@@ -23,7 +23,10 @@
 #include "../../space/space_concepts.hpp"
 #include "../../utils/prefetch.hpp"
 #include "../../utils/query_utils.hpp"
+#if (not defined (__NO_COROUTINE__))
 #include "coro/task.hpp"
+#endif
+
 #include "job_context.hpp"
 
 namespace alaya {
@@ -46,6 +49,7 @@ struct GraphSearchJob {
     }
   }
 
+#if (not defined (__NO_COROUTINE__))
   auto search(DataType *query, uint32_t k, IDType *ids, uint32_t ef) -> coro::task<> {
     auto query_computer = space_->get_query_computer(query);
     LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
@@ -84,6 +88,7 @@ struct GraphSearchJob {
     }
     co_return;
   }
+#endif
 
   void search_solo(DataType *query, uint32_t k, IDType *ids, uint32_t ef) {
     auto query_computer = space_->get_query_computer(query);

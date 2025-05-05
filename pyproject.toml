@@ -2,13 +2,13 @@
 requires = [
     "setuptools>=59.6",
     "pybind11>=2.10.0",
-    "cmake>=3.1",
+    "cmake>=3.1, <=3.31",
     "wheel",
     "ninja",
 ]
 build-backend = "setuptools.build_meta"
 [project.optional-dependencies]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "build"]
 
 [project]
 name = "alayalite"
@@ -27,7 +27,11 @@ authors = [{ name = "AlayaDB.AI", email = "dev@alayadb.ai" }]
 package-dir = { "" = "pyalaya/src" } # Manually specify the packages to include
 
 [tool.uv]
-dev-dependencies = ["pytest>=8.3.5", "ruff>=0.11.0"]
+dev-dependencies = [
+    "build>=1.2.2.post1",
+    "pytest>=8.3.5",
+    "ruff>=0.11.0",
+]
 
 # https://beta.ruff.rs/docs/settings/
 [tool.ruff]

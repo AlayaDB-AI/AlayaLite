@@ -200,6 +200,8 @@ class PyIndex : public BasePyIndex {
     return ret;
   }
 
+
+#if (not defined (__NO_COROUTINE__))
   auto batch_search(py::array_t<DataType> &queries, uint32_t topk, uint32_t ef,
                     uint32_t num_threads) -> py::array_t<IDType> {
     auto shape = queries.shape();
@@ -242,6 +244,49 @@ class PyIndex : public BasePyIndex {
       for (size_t i = 0; i < query_size; i++) {
         rerank(res_pool[i], ret_ptr + i * topk,
                build_space_->get_query_computer(query_ptr + i * query_dim), ef, topk);
+      }
+    }
+    return ret;
+  }
+#endif
+
+  auto batch_search(py::array_t<DataType> &queries, uint32_t topk, uint32_t ef,
+                    uint32_t num_threads) -> py::array_t<IDType> {
+    auto shape = queries.shape();
+    size_t query_size = shape[0];
+    size_t query_dim = shape[1];
+
+    auto *query_ptr = static_cast<DataType *>(queries.request().ptr);
+
+    Timer timer{};
+    std::vector<std::vector<IDType>> res_pool(query_size, std::vector<IDType>(ef));
+
+    std::vector<CpuID> worker_cpus;
+    std::vector<std::future<void>> futures;
+    for (size_t i = 0; i < query_size; i++) {
+      auto cur_query = query_ptr + (i * query_dim);
+      futures.emplace_back(std::async(std::launch::async, [this, cur_query, topk, ef,
+                                                           &res_pool, i]() {
+        search_job_->search_solo(cur_query, topk, res_pool[i].data(), ef);
+      }));
+    }
+    
+    for (auto &f : futures) {
+      f.get();
+    }
+
+    LOG_INFO("Total time: {} s.", timer.elapsed() / 1000000.0);
+
+    auto ret = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
+    auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
+    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+      for (size_t i = 0; i < query_size; i++) {
+        std::copy(res_pool[i].begin(), res_pool[i].begin() + topk, ret_ptr + (i * topk));
+      }
+    } else {
+      for (size_t i = 0; i < query_size; i++) {
+        rerank(res_pool[i], ret_ptr + (i * topk),
+               build_space_->get_query_computer(query_ptr + (i * query_dim)), ef, topk);
       }
     }
     return ret;

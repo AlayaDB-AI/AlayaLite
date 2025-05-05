@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <immintrin.h>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>

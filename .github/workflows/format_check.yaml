@@ -2,7 +2,7 @@ name: CI
 on: [push]
 jobs:
   commit-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-arm64
     timeout-minutes: 5
     steps:
       - name: Check Commit Type
@@ -16,7 +16,7 @@ jobs:
           accessToken: ${{ secrets.GITHUB_TOKEN }}
 
   typo-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-arm64
     steps:
       - name: Checkout Actions Repository
         uses: actions/checkout@v4
@@ -27,7 +27,7 @@ jobs:
           config: ./.typo.toml
 
   format-check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-arm64
     needs: [typo-check, commit-check]
     steps:
     - name: Checkout code

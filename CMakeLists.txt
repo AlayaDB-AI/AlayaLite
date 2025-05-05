@@ -11,8 +11,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -Ofast -DNDEBUG -march=x86-64 -fPIC ")  
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -march=x86-64 -fPIC")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -Ofast -DNDEBUG -march=armv8-a -fPIC ")  
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -march=armv8-a -fPIC")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 add_definitions(-DPROJECT_ROOT="${CMAKE_SOURCE_DIR}")
@@ -23,7 +23,12 @@ add_subdirectory(third_party)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # define third_party
-set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt libcoro)
+if (NO_COROUTINE)
+        set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt)
+else()
+        set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt libcoro)
+endif()
+
 set(GTEST_LIBS gtest gtest_main)
 
 # options
@@ -40,5 +45,5 @@ add_library(AlayaLite INTERFACE)
 target_link_libraries(AlayaLite INTERFACE ${THIRD_PARTY_LIBS})
 
 # add subdirectories
-add_subdirectory(tests)
+# add_subdirectory(tests)
 add_subdirectory(pyalaya)

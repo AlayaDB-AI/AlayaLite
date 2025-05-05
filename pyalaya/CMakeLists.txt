@@ -33,4 +33,9 @@ if(NOT VERSION_INFO)
   set(VERSION_INFO "0.0.0dev")
 endif()
 
-target_compile_definitions(_alayalitepy PRIVATE VERSION_INFO="${VERSION_INFO}")
+if (NO_COROUTINE)
+  target_compile_definitions(_alayalitepy PRIVATE VERSION_INFO="${VERSION_INFO}" __NO_COROUTINE__)
+else()
+  target_compile_definitions(_alayalitepy PRIVATE VERSION_INFO="${VERSION_INFO}")
+endif()
+

@@ -11,6 +11,7 @@ file=$(ls ${WHEEL_OUTPUT_DIR}/alayalite*.whl 2>/dev/null)
 if [ -n "$file" ]; then
 	echo -e "\e[43mthe previous wheel file: $file will be deleted and re-generated!\e[0m"
     rm $file
+    rm -rf pyalaya/src/alayalite.egg-info pyalaya/src/_alayalitepy.cpython*.so
 else
     echo -e "\e[43mthe wheel file does not exist, it will be generated!\e[0m"
 fi

@@ -15,7 +15,7 @@
  */
 
 #pragma once
-
+#if (not defined (__NO_COROUTINE__))
 #include <atomic>
 #include <coroutine>
 #include <memory>
@@ -219,3 +219,5 @@ class Scheduler {
 };
 
 }  // namespace alaya
+
+#endif
