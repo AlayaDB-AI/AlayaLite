@@ -128,7 +128,7 @@ class Collection:
             self.__index_py = Index(self.__name, params)
             self.__index_py.fit(np.array([item[2] for item in items]), ef_construction=100, num_threads=1)
             print(type(items[0][0]))
-            for i, (id, document, embedding, metadata) in enumerate(items):
+            for i, (id, document, _, metadata) in enumerate(items):
                 self.__dataframe = pd.concat(
                     [self.__dataframe, pd.DataFrame([{"id": id, "document": document, "metadata": metadata}])],
                     ignore_index=True,
