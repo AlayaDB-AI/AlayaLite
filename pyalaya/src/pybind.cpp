@@ -114,15 +114,20 @@ PYBIND11_MODULE(_alayalitepy, m) {
            py::arg("insert_data"),                      //
            py::arg("ef"))
       .def("remove", &alaya::PyIndexInterface::remove, py::arg("id"))
-      .def("batch_search", &alaya::PyIndexInterface::batch_search,  //
-           py::arg("queries"),                                      //
-           py::arg("topk"),                                         //
-           py::arg("ef"),                                           //
-           py::arg("num_threads"))                                  //
-      .def("save",                                                  //
-           &alaya::PyIndexInterface::save,                          //
-           py::arg("index_path"),                                   //
-           py::arg("data_path"),                                    //
+      .def("batch_search", &alaya::PyIndexInterface::batch_search,                              //
+           py::arg("queries"),                                                                  //
+           py::arg("topk"),                                                                     //
+           py::arg("ef"),                                                                       //
+           py::arg("num_threads"))                                                              //
+      .def("batch_search_with_distance", &alaya::PyIndexInterface::batch_search_with_distance,  //
+           py::arg("queries"),                                                                  //
+           py::arg("topk"),                                                                     //
+           py::arg("ef"),                                                                       //
+           py::arg("num_threads"))                                                              //
+      .def("save",                                                                              //
+           &alaya::PyIndexInterface::save,                                                      //
+           py::arg("index_path"),                                                               //
+           py::arg("data_path"),                                                                //
            py::arg("quant_path") = std::string())
       .def("load",                          //
            &alaya::PyIndexInterface::load,  //

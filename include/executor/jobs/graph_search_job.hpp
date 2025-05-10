@@ -31,7 +31,7 @@ namespace alaya {
 template <typename DistanceSpaceType, typename DataType = DistanceSpaceType::DataTypeAlias,
           typename DistanceType = DistanceSpaceType::DistanceTypeAlias,
           typename IDType = DistanceSpaceType::IDTypeAlias>
-  requires Space<DistanceSpaceType, DataType, DistanceType, IDType>
+requires Space<DistanceSpaceType, DataType, DistanceType, IDType>
 struct GraphSearchJob {
   std::shared_ptr<DistanceSpaceType> space_ = nullptr;        ///< The is a data manager interface .
   std::shared_ptr<Graph<DataType, IDType>> graph_ = nullptr;  ///< The search graph.
@@ -81,6 +81,47 @@ struct GraphSearchJob {
 
     for (int i = 0; i < k; i++) {
       ids[i] = pool.id(i);
+    }
+    co_return;
+  }
+
+  auto search(DataType *query, uint32_t k, IDType *ids, DistanceType *distances, uint32_t ef)
+      -> coro::task<> {
+    auto query_computer = space_->get_query_computer(query);
+    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
+    graph_->initialize_search(pool, query_computer);
+
+    space_->prefetch_by_address(query);
+
+    while (pool.has_next()) {
+      auto u = pool.pop();
+
+      mem_prefetch_l1(graph_->edges(u), graph_->max_nbrs_ * sizeof(IDType) / 64);
+      co_await std::suspend_always{};
+
+      for (int i = 0; i < graph_->max_nbrs_; ++i) {
+        int v = graph_->at(u, i);
+
+        if (v == -1) {
+          break;
+        }
+
+        if (pool.vis_.get(v)) {
+          continue;
+        }
+        pool.vis_.set(v);
+
+        space_->prefetch_by_id(v);
+        co_await std::suspend_always{};
+
+        auto cur_dist = query_computer(v);
+        pool.insert(v, cur_dist);
+      }
+    }
+
+    for (int i = 0; i < k; i++) {
+      ids[i] = pool.id(i);
+      distances[i] = pool.dist(i);
     }
     co_return;
   }

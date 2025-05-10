@@ -15,6 +15,7 @@
 
 import json
 import os
+import shutil
 
 from ._alayalitepy import PyIndexInterface as _PyIndexInterface
 from .collection import Collection
@@ -38,6 +39,7 @@ class Client:
     Client manages collections and indices. This class provides methods for
     creating, retrieving, saving, and deleting collections and indices from disk.
     """
+
     def __init__(self, url=None):
         """
         Initialize the Client. Optionally, provide a URL to load data from disk.
@@ -250,7 +252,7 @@ class Client:
             collection_url = os.path.join(self.__url, collection_name)
             if not os.path.exists(collection_url):
                 raise RuntimeError(f"Collection {collection_name} does not exist")
-            os.rmdir(collection_url)
+            shutil.rmtree(collection_url)
             print(f"Collection {collection_name} is deleted")
 
     def delete_index(self, index_name: str, delete_on_disk: bool = False):
@@ -308,7 +310,6 @@ class Client:
         with open(index_schema_url, "w") as f:
             json.dump(schema_map, f)
         print(f"Index {index_name} is saved")
-
 
     def save_collection(self, collection_name: str):
         """

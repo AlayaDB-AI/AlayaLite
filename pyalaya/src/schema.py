@@ -91,23 +91,10 @@ class IndexParams:
         )
 
     def to_json_dict(self) -> str:
-        type_to_str = {
-            np.float32: "float32",
-            np.float64: "float64",
-            np.uint32: "uint32",
-            np.uint64: "uint64",
-            np.uint16: "uint16",
-            np.uint8: "uint8",
-            np.int32: "int32",
-            np.int64: "int64",
-            np.int16: "int16",
-            np.int8: "int8",
-        }
-
         return {
             "index_type": self.index_type,
-            "data_type": type_to_str[self.data_type],  # Convert dtype to string
-            "id_type": type_to_str[self.id_type],  # Convert dtype to string
+            "data_type": np.dtype(self.data_type).name,  # Convert dtype to string
+            "id_type": np.dtype(self.id_type).name,  # Convert dtype to string
             "quantization_type": self.quantization_type,
             "metric": self.metric,
             "capacity": self.capacity,
