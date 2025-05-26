@@ -221,8 +221,8 @@ class Collection:
         mask = self.__dataframe["metadata"].apply(lambda x: all(x.get(k) == v for k, v in filter.items()))
         for _, row in self.__dataframe[mask].iterrows():
             inner_id = self.__outer_inner_map[row["id"]]
-            del self.__outer_inner_map[row["id"]]
             self.__index_py.remove(self.__outer_inner_map[row["id"]])
+            del self.__outer_inner_map[row["id"]]
             del self.__inner_outer_map[inner_id]
         self.__dataframe = self.__dataframe[~mask]
 
