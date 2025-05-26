@@ -59,6 +59,11 @@ class Collection:
 
         Returns:
             pd.DataFrame: A DataFrame containing the retrieved documents and their metadata.
+
+        Example:
+            >>> collection.batch_query([[0.1, 0.2, 0.3]], limit=2, ef_search=10, num_threads=1)
+            {'id': [[1.0, 2.0]], 'document': [['Document 1', 'Document 2']], 'metadata': [[{'category': 'A'}, {'category': 'B'}]], 'distance': [[0.0, 0.27000001072883606]]}
+
         """
         _assert(self.__index_py is not None, "Index is not init yet")
         _assert(len(vectors) > 0, "vectors must not be empty")
@@ -70,22 +75,19 @@ class Collection:
         _assert(ef_search > limit, "ef_search must be greater than limit")
 
         # 2D array: (query_num, k)
-        all_results = self.__index_py.batch_search(np.array(vectors), limit, ef_search, num_threads)
+        all_results, all_distance = self.__index_py.batch_search_with_distance(
+            np.array(vectors), limit, ef_search, num_threads
+        )
 
         ret = {"id": [], "document": [], "metadata": [], "distance": []}
         for each_results in all_results:
             # inner_id (vector id) -> outer_id (document id)
             outer_ids = [self.__inner_outer_map[inner_id] for inner_id in each_results]
-            print(self.__dataframe)
-            print("type: ", type(self.__dataframe))
-            print("type: ", type(self.__dataframe["id"]))
-            print("id", self.__dataframe["id"])
             each_dict = self.__dataframe[self.__dataframe["id"].isin(outer_ids)].to_dict(orient="list")
-            print(each_dict)
             ret["id"].append(each_dict["id"])
             ret["document"].append(each_dict["document"])
             ret["metadata"].append(each_dict["metadata"])
-            ret["distance"].append([0 for _ in range(len(each_dict["id"]))])
+            ret["distance"].append(all_distance.flatten().tolist())
 
         return ret
 
@@ -125,8 +127,8 @@ class Collection:
 
             self.__index_py = Index(self.__name, params)
             self.__index_py.fit(np.array([item[2] for item in items]), ef_construction=100, num_threads=1)
-            for i in range(len(items)):
-                id, document, embedding, metadata = items[i]
+            print(type(items[0][0]))
+            for i, (id, document, embedding, metadata) in enumerate(items):
                 self.__dataframe = pd.concat(
                     [self.__dataframe, pd.DataFrame([{"id": id, "document": document, "metadata": metadata}])],
                     ignore_index=True,

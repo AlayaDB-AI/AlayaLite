@@ -15,6 +15,7 @@
 
 import json
 import os
+import shutil
 
 from ._alayalitepy import PyIndexInterface as _PyIndexInterface
 from .collection import Collection
@@ -251,7 +252,7 @@ class Client:
             collection_url = os.path.join(self.__url, collection_name)
             if not os.path.exists(collection_url):
                 raise RuntimeError(f"Collection {collection_name} does not exist")
-            os.rmdir(collection_url)
+            shutil.rmtree(collection_url)
             print(f"Collection {collection_name} is deleted")
 
     def delete_index(self, index_name: str, delete_on_disk: bool = False):

@@ -106,8 +106,8 @@ class IndexParams:
 
         return {
             "index_type": self.index_type,
-            "data_type": type_to_str[self.data_type],  # Convert dtype to string
-            "id_type": type_to_str[self.id_type],  # Convert dtype to string
+            "data_type": np.dtype(self.data_type).name,  # Convert dtype to string
+            "id_type": np.dtype(self.id_type).name,  # Convert dtype to string
             "quantization_type": self.quantization_type,
             "metric": self.metric,
             "capacity": self.capacity,

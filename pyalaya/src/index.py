@@ -83,7 +83,7 @@ class Index:
 
         _assert(vectors.ndim == 2, "vectors must be a 2D array")
         data_type = np.array(vectors).dtype
-        print(data_type)
+        print("data_type: ", data_type)
         if self.__params.data_type is None:
             self.__params.data_type = data_type
         elif self.__params.data_type != np.array(vectors).dtype:
@@ -187,6 +187,35 @@ class Index:
         )
 
         return self.__index.batch_search(queries, topk, ef_search, num_threads)
+
+    def batch_search_with_distance(
+        self,
+        queries: VectorLikeBatch,
+        topk: int,
+        ef_search: int = 100,
+        num_threads: int = 1,
+    ) -> VectorLikeBatch:
+        """
+        Perform a batch search for multiple query vectors.
+
+        Args:
+            queries (VectorLikeBatch): A 2D array of query vectors.
+            topk (int): Number of nearest neighbors to retrieve per query.
+            ef_search (int): Search accuracy parameter. Default is 100.
+            num_threads (int): Number of threads to use for searching. Default is 1.
+
+        Returns:
+            VectorLikeBatch: The top-k nearest neighbors for each query.
+        """
+        _assert(self.__index is not None, "Index is not init yet")
+        _assert(queries.ndim == 2, "queries must be a 2D array")
+        _assert(
+            queries.shape[1] == self.__dim,
+            f"query dimension must match the dimension of the vectors used to fit the index."
+            f"fit data dimension: {self.__dim}, query dimension: {queries.shape[1]}",
+        )
+
+        return self.__index.batch_search_with_distance(queries, topk, ef_search, num_threads)
 
     def get_dim(self):
         """

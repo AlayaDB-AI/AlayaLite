@@ -15,8 +15,10 @@
  */
 
 #pragma once
+#include <pybind11/cast.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <sys/types.h>
 #include <algorithm>
 #include <cmath>
@@ -64,6 +66,7 @@ class PyIndex : public BasePyIndex {
  public:
   using IDType = typename SearchSpaceType::IDTypeAlias;
   using DataType = typename SearchSpaceType::DataTypeAlias;
+  using DistanceType = typename SearchSpaceType::DistanceTypeAlias;
   using BuildSpaceType = typename GraphBuilderType::DistanceSpaceTypeAlias;
 
   PyIndex() = delete;
@@ -292,6 +295,112 @@ class PyIndex : public BasePyIndex {
     return ret;
   }
 
+  auto batch_search_with_distance(py::array_t<DataType> &queries, uint32_t topk, uint32_t ef,
+                                  uint32_t num_threads) -> py::object {
+    auto shape = queries.shape();
+    size_t query_size = shape[0];
+    size_t query_dim = shape[1];
+
+    auto *query_ptr = static_cast<DataType *>(queries.request().ptr);
+
+    Timer timer{};
+    std::vector<std::vector<IDType>> res_pool(query_size, std::vector<IDType>(ef));
+    std::vector<std::vector<DistanceType>> dist_pool;
+    
+    for (uint32_t i = 0; i < query_size; i++) {
+      auto cur_query = query_ptr + i * query_dim;
+      if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::
+                        value) {  // don't need rerank and need to get distance
+        dist_pool =
+            std::vector<std::vector<DistanceType>>(query_size, std::vector<DistanceType>(ef));
+        search_job_->search_solo(cur_query, topk, res_pool[i].data(), dist_pool[i].data(), ef);
+      } else {
+        search_job_->search_solo(cur_query, topk, res_pool[i].data(), ef);
+      }
+    }
+
+    LOG_INFO("Total time: {} s.", timer.elapsed() / 1000000.0);
+
+    auto ret = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
+    auto ret_dist = py::array_t<DistanceType>({query_size, static_cast<size_t>(topk)});
+    auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
+    auto ret_dist_ptr = static_cast<DistanceType *>(ret_dist.request().ptr);
+    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+      for (size_t i = 0; i < query_size; i++) {
+        std::copy(res_pool[i].begin(), res_pool[i].begin() + topk, ret_ptr + i * topk);
+        std::copy(dist_pool[i].begin(), dist_pool[i].begin() + topk, ret_dist_ptr + i * topk);
+      }
+    } else {
+      for (size_t i = 0; i < query_size; i++) {
+        rerank(res_pool[i], ret_ptr + i * topk, ret_dist_ptr + i * topk,
+               build_space_->get_query_computer(query_ptr + i * query_dim), ef, topk);
+      }
+    }
+    return py::make_tuple(ret, ret_dist);
+  }
+
+#if (not defined (__NO_COROUTINE__))
+  auto batch_search_with_distance(py::array_t<DataType> &queries, uint32_t topk, uint32_t ef,
+                                  uint32_t num_threads) -> py::object {
+    auto shape = queries.shape();
+    size_t query_size = shape[0];
+    size_t query_dim = shape[1];
+
+    auto *query_ptr = static_cast<DataType *>(queries.request().ptr);
+
+    Timer timer{};
+    std::vector<std::vector<IDType>> res_pool(query_size, std::vector<IDType>(ef));
+    std::vector<std::vector<DistanceType>> dist_pool;
+
+    std::vector<CpuID> worker_cpus;
+    std::vector<coro::task<>> coros;
+
+    worker_cpus.reserve(num_threads);
+    coros.reserve(query_size);
+
+    for (uint32_t i = 0; i < num_threads; i++) {
+      worker_cpus.push_back(i);
+    }
+    auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
+    for (uint32_t i = 0; i < query_size; i++) {
+      auto cur_query = query_ptr + i * query_dim;
+      if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::
+                        value) {  // don't need rerank and need to get distance
+        dist_pool =
+            std::vector<std::vector<DistanceType>>(query_size, std::vector<DistanceType>(ef));
+        coros.emplace_back(
+            search_job_->search(cur_query, topk, res_pool[i].data(), dist_pool[i].data(), ef));
+      } else {
+        coros.emplace_back(search_job_->search(cur_query, topk, res_pool[i].data(), ef));
+      }
+
+      scheduler->schedule(coros.back().handle());
+    }
+    LOG_INFO("Scheduling {} tasks.", coros.size());
+    scheduler->begin();
+    scheduler->join();
+
+    LOG_INFO("Total time: {} s.", timer.elapsed() / 1000000.0);
+
+    auto ret = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
+    auto ret_dist = py::array_t<DistanceType>({query_size, static_cast<size_t>(topk)});
+    auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
+    auto ret_dist_ptr = static_cast<DistanceType *>(ret_dist.request().ptr);
+    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+      for (size_t i = 0; i < query_size; i++) {
+        std::copy(res_pool[i].begin(), res_pool[i].begin() + topk, ret_ptr + i * topk);
+        std::copy(dist_pool[i].begin(), dist_pool[i].begin() + topk, ret_dist_ptr + i * topk);
+      }
+    } else {
+      for (size_t i = 0; i < query_size; i++) {
+        rerank(res_pool[i], ret_ptr + i * topk, ret_dist_ptr + i * topk,
+               build_space_->get_query_computer(query_ptr + i * query_dim), ef, topk);
+      }
+    }
+    return py::make_tuple(ret, ret_dist);
+  }
+#endif
+
   template <typename DistanceType = float>
   void rerank(std::vector<IDType> &src, IDType *desc, auto dist_compute, uint32_t ef,
               uint32_t topk) {
@@ -302,6 +411,22 @@ class PyIndex : public BasePyIndex {
       pq.push({dist_compute(src[i]), src[i]});
     }
     for (size_t i = 0; i < topk; i++) {
+      desc[i] = pq.top().second;
+      pq.pop();
+    }
+  }
+
+  template <typename DistanceType = float>
+  void rerank(std::vector<IDType> &src, IDType *desc, DistanceType *distances, auto dist_compute,
+              uint32_t ef, uint32_t topk) {
+    std::priority_queue<std::pair<DistanceType, IDType>,
+                        std::vector<std::pair<DistanceType, IDType>>, std::greater<>>
+        pq;
+    for (size_t i = 0; i < ef; i++) {
+      pq.push({dist_compute(src[i]), src[i]});
+    }
+    for (size_t i = 0; i < topk; i++) {
+      distances[i] = pq.top().first;
       desc[i] = pq.top().second;
       pq.pop();
     }
@@ -361,6 +486,13 @@ class PyIndexInterface {
                     uint32_t num_threads) -> py::array {
     DISPATCH_AND_CAST_WITH_ARR(queries, typed_queries, index,
                                return index->batch_search(typed_queries, topk, ef, num_threads););
+  }
+
+  auto batch_search_with_distance(py::array &queries, uint32_t topk, uint32_t ef,  // NOLINT
+                                  uint32_t num_threads) -> py::object {
+    DISPATCH_AND_CAST_WITH_ARR(
+        queries, typed_queries, index,
+        return index->batch_search_with_distance(typed_queries, topk, ef, num_threads););
   }
 
   auto load(const std::string &index_path,  // NOLINT
