@@ -46,7 +46,7 @@ class Collection:
         self.__inner_outer_map = {}  # index_id -> id
 
     def batch_query(
-        self, vectors: list[list[float | int]], limit: int, ef_search: int = 100, num_threads: int = 1
+        self, vectors: List[List[float]], limit: int, ef_search: int = 100, num_threads: int = 1
     ) -> pd.DataFrame:
         """
         Queries the index using a batch of vectors and retrieves the nearest documents.

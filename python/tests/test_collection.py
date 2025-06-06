@@ -15,6 +15,7 @@
 import unittest
 
 import numpy as np
+
 from alayalite import Collection
 
 
