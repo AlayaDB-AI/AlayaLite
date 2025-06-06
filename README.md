@@ -20,7 +20,7 @@
 - **High Performance**: Modern vector techniques integrated into a well-designed architecture. 
 - **Elastic Scalability**: Seamlessly scale across multiple threads, which is optimized by C++20 coroutines.
 - **Adaptive Flexibility**: Easy customization for quantization methods, metrics, and data types.
-- **Ease of Use**: [Intuitive APIs](./pyalaya/README.md) in Python.
+- **Ease of Use**: [Intuitive APIs](./python/README.md) in Python.
 
 
 ## Getting Started!

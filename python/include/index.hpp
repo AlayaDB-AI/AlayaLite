@@ -276,7 +276,7 @@ class PyIndex : public BasePyIndex {
 
     auto *query_ptr = static_cast<DataType *>(queries.request().ptr);
 
-    Timer timer{};
+    // Timer timer{};
     std::vector<std::vector<IDType>> res_pool(query_size, std::vector<IDType>(ef));
     std::vector<std::vector<DistanceType>> dist_pool;
 
@@ -305,11 +305,11 @@ class PyIndex : public BasePyIndex {
 
       scheduler->schedule(coros.back().handle());
     }
-    LOG_INFO("Scheduling {} tasks.", coros.size());
+    // LOG_INFO("Scheduling {} tasks.", coros.size());
     scheduler->begin();
     scheduler->join();
 
-    LOG_INFO("Total time: {} s.", timer.elapsed() / 1000000.0);
+    // LOG_INFO("Total time: {} s.", timer.elapsed() / 1000000.0);
 
     auto ret_id = get_topk_array(res_pool, topk);
     auto ret_dist = get_topk_array(dist_pool, topk);
