@@ -29,7 +29,7 @@ from .common import (
     valid_quantization_type,
 )
 from .index import Index
-from .schema import IndexParams, is_collection_url, is_index_url
+from .schema import IndexParams, is_collection_url, is_index_url, save_schema
 
 __all__ = ["Client"]
 
@@ -50,7 +50,7 @@ class Client:
         """
         self.__collection_map = {}
         self.__index_map = {}
-
+        self.__url = None
         if url is not None:
             url = os.path.abspath(url)
             self.__url = url
@@ -113,9 +113,13 @@ class Client:
             name (str, optional): The name of the index to retrieve. Defaults to "default".
 
         Returns:
-            _PyIndexInterface (cpp class): The index if found.
+            _PyIndexInterface (cpp class): The index if found, else None
         """
-        return self.__index_map[name]
+        if name in self.__index_map:
+            return self.__index_map[name]
+        else: 
+            print(f"Index {name} does not exist")
+            return None
 
     def create_collection(self, name: str = "default", **kwargs) -> Collection:
         """
@@ -159,39 +163,8 @@ class Client:
             raise RuntimeError(f"Collection {name} already exists")
         if name in self.__index_map:
             raise RuntimeError(f"Index {name} already exists")
-
-        index_type = None
-        data_type = None
-        id_type = None
-        quantization_type = None
-        metric = None
-        capacity = None
-        max_nbrs = None
-
-        if kwargs.get("index_type") is not None:
-            index_type = valid_index_type(kwargs.get("index_type"))
-        if kwargs.get("data_type") is not None:
-            data_type = valid_dtype(kwargs.get("data_type"))
-        if kwargs.get("id_type") is not None:
-            id_type = valid_id_type(kwargs.get("id_type"))
-        if kwargs.get("quantization_type") is not None:
-            quantization_type = valid_quantization_type(kwargs.get("quantization_type"))
-        if kwargs.get("metric") is not None:
-            metric = valid_metric_type(kwargs.get("metric"))
-        if kwargs.get("capacity") is not None:
-            capacity = valid_capacity_type(kwargs.get("capacity"))
-        if kwargs.get("max_nbrs") is not None:
-            max_nbrs = valid_max_nbrs(kwargs.get("max_nbrs"))
-
-        constraints = IndexParams(
-            index_type=index_type,
-            data_type=data_type,
-            id_type=id_type,
-            quantization_type=quantization_type,
-            metric=metric,
-            capacity=capacity,
-            max_nbrs=max_nbrs,
-        )
+        
+        constraints = IndexParams.from_kwargs(**kwargs)
         index = Index(name, constraints)
         self.__index_map[name] = index
         return index
@@ -275,7 +248,8 @@ class Client:
             index_url = os.path.join(self.__url, index_name)
             if not os.path.exists(index_url):
                 raise RuntimeError(f"Index {index_name} does not exist")
-            os.rmdir(index_url)
+            # os.rmdir(index_url)
+            shutil.rmtree(index_url)
             print(f"Index {index_name} is deleted")
 
     def reset(self):
@@ -303,9 +277,7 @@ class Client:
             raise RuntimeError(f"Index {index_name} does not exist")
 
         index_url = os.path.join(self.__url, index_name)
-        if not os.path.exists(index_url):
-            os.makedirs(index_url)
-        schema_map = self.__index_map[index_name].save(index_name)
+        schema_map = self.__index_map[index_name].save(index_url)
         index_schema_url = os.path.join(index_url, "schema.json")
         with open(index_schema_url, "w") as f:
             json.dump(schema_map, f)
@@ -326,12 +298,8 @@ class Client:
         if collection_name not in self.__collection_map:
             raise RuntimeError(f"Collection {collection_name} does not exist")
         collection_url = os.path.join(self.__url, collection_name)
-        if not os.path.exists(collection_url):
-            os.makedirs(collection_url)
-
         schema_map = self.__collection_map[collection_name].save(collection_url)
         collection_schema_url = os.path.join(collection_url, "schema.json")
-
         with open(collection_schema_url, "w") as f:
             json.dump(schema_map, f)
         print(f"Collection {collection_name} is saved")

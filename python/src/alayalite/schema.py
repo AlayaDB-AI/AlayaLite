@@ -26,9 +26,12 @@ from .common import (
     valid_capacity_type,
     valid_dtype,
     valid_id_type,
+    assert_valid_index_type,
     valid_index_type,
     valid_max_nbrs,
+    assert_valid_metric_type,
     valid_metric_type,
+    assert_valid_quantization_type,
     valid_quantization_type,
 )
 
@@ -37,13 +40,13 @@ __all__ = ["IndexParams", "load_schema", "save_schema"]
 
 @dataclass
 class IndexParams:
-    index_type: str = "hnsw"
-    data_type: VectorDType = np.float32
-    id_type: IDType = np.uint32
-    quantization_type: str = "none"
-    metric: str = "l2"
-    capacity: np.uint32 = 100000
-    max_nbrs: int = 32
+    index_type: str = None
+    data_type: VectorDType = None
+    id_type: IDType = None
+    quantization_type: str = None
+    metric: str = None
+    capacity: np.uint32 = None
+    max_nbrs: int = None
 
     def index_path(self, folder_uri):
         return os.path.join(folder_uri, f"{self.index_type}_{self.metric}_{self.max_nbrs}.index")
@@ -125,15 +128,21 @@ class IndexParams:
         max_nbrs = None
 
         if kwargs.get("index_type") is not None:
-            index_type = valid_index_type(kwargs.get("index_type"))
+            ind_type = kwargs.get("index_type")
+            assert_valid_index_type(ind_type)
+            index_type = ind_type
         if kwargs.get("data_type") is not None:
             data_type = valid_dtype(kwargs.get("data_type"))
         if kwargs.get("id_type") is not None:
             id_type = valid_id_type(kwargs.get("id_type"))
         if kwargs.get("quantization_type") is not None:
-            quantization_type = valid_quantization_type(kwargs.get("quantization_type"))
+            qt = kwargs.get("quantization_type")
+            assert_valid_quantization_type(qt)
+            quantization_type = qt
         if kwargs.get("metric") is not None:
-            metric = valid_metric_type(kwargs.get("metric"))
+            mt = kwargs.get("metric")
+            assert_valid_metric_type(mt)
+            metric = mt
         if kwargs.get("capacity") is not None:
             capacity = valid_capacity_type(kwargs.get("capacity"))
         if kwargs.get("max_nbrs") is not None:

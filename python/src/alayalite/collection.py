@@ -86,8 +86,8 @@ class Collection:
             each_dict = self.__dataframe[self.__dataframe["id"].isin(outer_ids)].to_dict(orient="list")
             ret["id"].append(each_dict["id"])
             ret["document"].append(each_dict["document"])
-            ret["metadata"].append(each_dict["metadata"])
             ret["distance"].append(all_distance.flatten().tolist())
+            ret["metadata"].append(each_dict["metadata"])
 
         return ret
 
@@ -121,13 +121,8 @@ class Collection:
             items (List[tuple]): List of tuples containing (id, document, embedding, metadata).
         """
         if self.__index_py is None:
-            _, _, embedding, _ = items[0]
-
-            params = IndexParams(data_type=np.array(embedding).dtype, metric="l2")
-
-            self.__index_py = Index(self.__name, params)
+            self.__index_py = Index(self.__name, IndexParams())
             self.__index_py.fit(np.array([item[2] for item in items]), ef_construction=100, num_threads=1)
-            print(type(items[0][0]))
             for i, (id, document, _, metadata) in enumerate(items):
                 self.__dataframe = pd.concat(
                     [self.__dataframe, pd.DataFrame([{"id": id, "document": document, "metadata": metadata}])],
@@ -149,7 +144,7 @@ class Collection:
                     ignore_index=True,
                 )
 
-                index_id = self.__index_py.insert(np.array(embedding))
+                index_id = self.__index_py.insert(np.array(embedding))  # 比上面多出来一行
                 self.__outer_inner_map[id] = index_id
                 self.__inner_outer_map[index_id] = id
 
@@ -186,7 +181,7 @@ class Collection:
                         document,
                         metadata,
                     ]
-                else:
+                else:  
                     self.__dataframe = pd.concat(
                         [self.__dataframe, pd.DataFrame([{"id": id, "document": document, "metadata": metadata}])],
                         ignore_index=True,

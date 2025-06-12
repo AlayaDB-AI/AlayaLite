@@ -32,6 +32,22 @@ class TestCollection(unittest.TestCase):
         result = self.collection.filter_query({})
         self.assertEqual(len(result["id"]), 2)
 
+    def test_upsert_fit_and_concat(self):
+        items = [
+            (1, "Document 1", np.array([0.1, 0.2, 0.3]), {"category": "A"}),
+            (2, "Document 2", np.array([0.4, 0.5, 0.6]), {"category": "B"}),
+        ]
+        self.collection.upsert(items)
+        result = self.collection.filter_query({})
+        self.assertEqual(len(result["id"]), 2)
+        new_items = [
+            (3, "Document 3", np.array([0.1, 0.2, 0.3]), {"category": "A"}),
+            (4, "Document 4", np.array([0.4, 0.5, 0.6]), {"category": "B"}),
+        ]
+        self.collection.upsert(new_items)
+        result = self.collection.filter_query({})
+        self.assertEqual(len(result["id"]), 4)
+
     def test_batch_query(self):
         items = [(1, "Document 1", np.array([0.1, 0.2, 0.3]), {}), (2, "Document 2", np.array([0.4, 0.5, 0.6]), {})]
         self.collection.insert(items)
@@ -67,13 +83,22 @@ class TestCollection(unittest.TestCase):
         self.assertEqual(df["id"][0], 3)
 
     def test_filter_query(self):
-        # items = [
-        #   (1, "Document 1", np.array([0.1, 0.2, 0.3]), {"category": "A"}),
-        #   (2, "Document 2", np.array([0.4, 0.5, 0.6]), {"category": "B"}),
-        # ]
-        result = self.collection.filter_query({"category": "A"})
-        print(result)
-        # self.assertEqual(result["document"][0], "Document 1")
+        # (id,document,distance,metadata)
+        items = [
+          (1, "Document 1", np.array([0.1, 0.2, 0.3]), {"category": "A"}),
+          (2, "Document 2", np.array([0.4, 0.5, 0.6]), {"category": "B"}),
+          (3, "Document 3", np.array([0.7, 0.8, 0.9]), {"category": "A"})
+        ]
+        self.collection.insert(items)
+        insert_items = [
+            (4, "Document 4", np.array([0.1, 0.2, 0.3]), {"category": "C"}),
+            (5, "Document 5", np.array([0.4, 0.5, 0.6]), {"category": "B"}),
+        ]
+        self.collection.insert(insert_items)
+        result = self.collection.filter_query({"category": "B"},5)
+        self.assertEqual(result["document"][1], "Document 5")
+
+    
 
 
 if __name__ == "__main__":

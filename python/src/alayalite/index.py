@@ -83,7 +83,6 @@ class Index:
 
         _assert(vectors.ndim == 2, "vectors must be a 2D array")
         data_type = np.array(vectors).dtype
-        print("data_type: ", data_type)
         if self.__params.data_type is None:
             self.__params.data_type = data_type
         elif self.__params.data_type != np.array(vectors).dtype:
