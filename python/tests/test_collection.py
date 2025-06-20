@@ -85,9 +85,9 @@ class TestCollection(unittest.TestCase):
     def test_filter_query(self):
         # (id,document,distance,metadata)
         items = [
-          (1, "Document 1", np.array([0.1, 0.2, 0.3]), {"category": "A"}),
-          (2, "Document 2", np.array([0.4, 0.5, 0.6]), {"category": "B"}),
-          (3, "Document 3", np.array([0.7, 0.8, 0.9]), {"category": "A"})
+            (1, "Document 1", np.array([0.1, 0.2, 0.3]), {"category": "A"}),
+            (2, "Document 2", np.array([0.4, 0.5, 0.6]), {"category": "B"}),
+            (3, "Document 3", np.array([0.7, 0.8, 0.9]), {"category": "A"}),
         ]
         self.collection.insert(items)
         insert_items = [
@@ -95,10 +95,8 @@ class TestCollection(unittest.TestCase):
             (5, "Document 5", np.array([0.4, 0.5, 0.6]), {"category": "B"}),
         ]
         self.collection.insert(insert_items)
-        result = self.collection.filter_query({"category": "B"},5)
+        result = self.collection.filter_query({"category": "B"}, 5)
         self.assertEqual(result["document"][1], "Document 5")
-
-    
 
 
 if __name__ == "__main__":

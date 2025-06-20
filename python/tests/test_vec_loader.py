@@ -2,7 +2,8 @@ import unittest
 import tempfile
 import os
 import numpy as np
-from alayalite.utils import load_fvecs,load_ivecs
+from alayalite.utils import load_fvecs, load_ivecs
+
 
 class TestVectorLoaders(unittest.TestCase):
     def test_load_fvecs(self):
@@ -11,7 +12,7 @@ class TestVectorLoaders(unittest.TestCase):
         with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
             for vec in expected:
                 dim = len(vec)
-                tmpfile.write(dim.to_bytes(4, byteorder='little'))
+                tmpfile.write(dim.to_bytes(4, byteorder="little"))
                 tmpfile.write(vec.tobytes())
 
         result = load_fvecs(tmpfile.name)
@@ -24,7 +25,7 @@ class TestVectorLoaders(unittest.TestCase):
         with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
             for vec in expected:
                 dim = len(vec)
-                tmpfile.write(dim.to_bytes(4, byteorder='little'))
+                tmpfile.write(dim.to_bytes(4, byteorder="little"))
                 tmpfile.write(vec.tobytes())
 
         result = load_ivecs(tmpfile.name)
@@ -33,7 +34,7 @@ class TestVectorLoaders(unittest.TestCase):
 
     def test_empty_file(self):
         with tempfile.NamedTemporaryFile(delete=False) as tmpfile:
-            pass  
+            pass
 
         result_f = load_fvecs(tmpfile.name)
         self.assertEqual(result_f.shape, (0,))
@@ -44,5 +45,5 @@ class TestVectorLoaders(unittest.TestCase):
         os.unlink(tmpfile.name)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

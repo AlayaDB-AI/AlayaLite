@@ -117,7 +117,7 @@ class Client:
         """
         if name in self.__index_map:
             return self.__index_map[name]
-        else: 
+        else:
             print(f"Index {name} does not exist")
             return None
 
@@ -163,7 +163,7 @@ class Client:
             raise RuntimeError(f"Collection {name} already exists")
         if name in self.__index_map:
             raise RuntimeError(f"Index {name} already exists")
-        
+
         constraints = IndexParams.from_kwargs(**kwargs)
         index = Index(name, constraints)
         self.__index_map[name] = index

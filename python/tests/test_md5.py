@@ -3,8 +3,8 @@ import numpy as np
 import hashlib
 from alayalite.utils import md5
 
-class TestMD5Function(unittest.TestCase):
 
+class TestMD5Function(unittest.TestCase):
     def test_same_array_same_hash(self):
         arr = np.array([1, 2, 3], dtype=np.int32)
         hash1 = md5(arr)
@@ -37,5 +37,6 @@ class TestMD5Function(unittest.TestCase):
         hash2 = md5(arr, chunk_size=1024 * 1024)
         self.assertEqual(hash1, hash2)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

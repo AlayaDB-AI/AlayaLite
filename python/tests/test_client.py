@@ -39,7 +39,7 @@ class TestClient(unittest.TestCase):
         self.assertIsInstance(collection, Collection)
 
     def test_create_index(self):
-        index = self.client.create_index("test_index", metric = "ip")
+        index = self.client.create_index("test_index", metric="ip")
         self.assertIsInstance(index, Index)
         self.assertIn("test_index", self.client.list_indices())
         with self.assertRaises(RuntimeError):
@@ -68,7 +68,7 @@ class TestClient(unittest.TestCase):
     def test_delete_collection(self):
         self.client.create_collection("test_collection")
         with self.assertRaises(RuntimeError):  # Without url
-            self.client.delete_collection("test_collection",True)
+            self.client.delete_collection("test_collection", True)
         self.assertNotIn("test_collection", self.client.list_collections())
         with self.assertRaises(RuntimeError):
             self.client.delete_collection("non_exist")
@@ -76,7 +76,7 @@ class TestClient(unittest.TestCase):
     def test_delete_index(self):
         self.client.create_index("test_index")
         with self.assertRaises(RuntimeError):  # Without url
-            self.client.delete_index("test_index",True)
+            self.client.delete_index("test_index", True)
         self.assertNotIn("test_index", self.client.list_indices())
         with self.assertRaises(RuntimeError):
             self.client.delete_index("non_exist")
@@ -95,16 +95,14 @@ class TestClient(unittest.TestCase):
         self.assertIsNone(coll)
 
     def test_dup_ind_coll(self):
-        index = self.client.create_index("dup",metric="cosine",quantization_type=None)
+        index = self.client.create_index("dup", metric="cosine", quantization_type=None)
         with self.assertRaises(RuntimeError):
             index = self.client.create_collection("dup")
-        
+
     def test_dup_coll_ind(self):
         coll = self.client.create_collection("dup")
         with self.assertRaises(RuntimeError):
             coll = self.client.create_index("dup")
-
-    
 
 
 if __name__ == "__main__":

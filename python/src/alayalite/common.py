@@ -33,11 +33,11 @@ VectorDType = Union[
     Type[np.uint32],
 ]
 """ Type alias for one of {`numpy.float32`, `numpy.int8`, `numpy.uint8`} """
-DistanceMetric = Literal["euclidean", "l2", "ip", "cosine","cos"]
+DistanceMetric = Literal["euclidean", "l2", "ip", "cosine", "cos"]
 """ Type alias for one of {"euclidean", "l2", "ip", "cosine","cos"} """
 QuantizationType = Literal[None, "none", "sq8", "sq4"]
 """ Type alias for one of {None, "none", "sq8", "sq4"} """
-IndexType = Literal["hnsw","nsg","fusion"]
+IndexType = Literal["hnsw", "nsg", "fusion"]
 """ Type alias for one of {"hnsw","nsg","fusion"} """
 VectorLike = npt.NDArray[VectorDType]  # type: ignore
 """ Type alias for something that can be treated as a vector """
@@ -86,11 +86,13 @@ def valid_capacity_type(capacity: np.dtype) -> np.uint32:
     )
     return capacity
 
+
 def assert_valid_metric_type(metric: str) -> None:
-     _assert(
+    _assert(
         metric.lower() in _VALID_METRIC_TYPES,
         f"Distance metric must be one of {_VALID_METRIC_TYPES}",
     )
+
 
 def valid_metric_type(metric: str) -> _MetricType:
     assert_valid_metric_type(metric)
@@ -101,11 +103,13 @@ def valid_metric_type(metric: str) -> _MetricType:
     elif metric.lower() == "cosine" or metric.lower() == "cos":
         return _MetricType.COS
 
+
 def assert_valid_quantization_type(quantization_type: str) -> None:
     _assert(
         quantization_type == None or quantization_type.lower() in _VALID_SQ_TYPES,
         f"Quantization type must be one of {_VALID_SQ_TYPES}",
     )
+
 
 def valid_quantization_type(quantization_type: str) -> _QuantizationType:
     assert_valid_quantization_type(quantization_type)
@@ -119,11 +123,13 @@ def valid_quantization_type(quantization_type: str) -> _QuantizationType:
     elif quantization_type.lower() == "sq4":
         return _QuantizationType.SQ4
 
+
 def assert_valid_index_type(index: str) -> None:
     _assert(
         index.lower() in _VALID_INDEX_TYPES,
         f"Index type must be one of {_VALID_INDEX_TYPES}",
     )
+
 
 def valid_index_type(index: str) -> _IndexType:
     assert_valid_index_type(index)

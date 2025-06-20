@@ -69,6 +69,7 @@ def load_ivecs(file_path):
 
     return np.array(vectors)
 
+
 def calc_recall(result, gt_data):
     cnt = 0
     row = result.shape[0]
@@ -76,6 +77,7 @@ def calc_recall(result, gt_data):
     for i in range(row):
         cnt += len(set(result[i]) & set(gt_data[i]))
     return 1.0 * cnt / (row * col)
+
 
 # def calc_recall(result, gt_data):
 #     cnt = 0
@@ -87,6 +89,7 @@ def calc_recall(result, gt_data):
 #                     break
 
 #     return 1.0 * cnt / (len(result) * result.shape[1])
+
 
 def calc_gt(data, query, topk):
     gt = np.zeros((query.shape[0], topk), dtype=np.int32)

@@ -33,6 +33,7 @@ find_package(spdlog REQUIRED)
 find_package(libcoro REQUIRED)
 find_package(fmt REQUIRED)
 find_package(GTest REQUIRED)
+
 set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue libcoro::libcoro)
 set(GTEST_LIBS GTest::gtest GTest::gtest_main)
 

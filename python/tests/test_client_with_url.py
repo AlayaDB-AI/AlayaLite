@@ -6,6 +6,7 @@ import json
 import shutil
 from alayalite import Client, Collection, Index
 
+
 class TestClientWithURL(unittest.TestCase):
     def setUp(self):
         self.tempDire = tempfile.TemporaryDirectory()
@@ -26,7 +27,7 @@ class TestClientWithURL(unittest.TestCase):
         index_name = "ind"
         index = self.client.create_index(index_name)
         index.fit(self.ind_vectors)
-        self.assertIn(index_name,self.client.list_indices())
+        self.assertIn(index_name, self.client.list_indices())
 
         self.client.save_index(index_name)
         index_path = os.path.join(self.url, index_name)
@@ -34,11 +35,10 @@ class TestClientWithURL(unittest.TestCase):
         schema_path = os.path.join(index_path, "schema.json")
         self.assertTrue(os.path.isfile(schema_path))
 
-        self.client.delete_index(index_name,True)
-        self.assertNotIn(index_name,self.client.list_indices())
+        self.client.delete_index(index_name, True)
+        self.assertNotIn(index_name, self.client.list_indices())
         self.assertFalse(os.path.isdir(index_path))
         self.assertFalse(os.path.isfile(schema_path))
-
 
     def test_save_and_delete_coll(self):
         with self.assertRaises(RuntimeError):
@@ -46,7 +46,7 @@ class TestClientWithURL(unittest.TestCase):
         coll_name = "coll"
         coll = self.client.create_collection(coll_name)
         coll.insert(self.coll_items)
-        self.assertIn(coll_name,self.client.list_collections())
+        self.assertIn(coll_name, self.client.list_collections())
 
         self.client.save_collection(coll_name)
         coll_path = os.path.join(self.url, coll_name)
@@ -54,8 +54,8 @@ class TestClientWithURL(unittest.TestCase):
         schema_path = os.path.join(coll_path, "schema.json")
         self.assertTrue(os.path.isfile(schema_path))
 
-        self.client.delete_collection(coll_name,True)
-        self.assertNotIn(coll_name,self.client.list_collections())
+        self.client.delete_collection(coll_name, True)
+        self.assertNotIn(coll_name, self.client.list_collections())
         self.assertFalse(os.path.isdir(coll_path))
         self.assertFalse(os.path.isfile(schema_path))
 
@@ -67,7 +67,7 @@ class TestClientWithURL(unittest.TestCase):
         index_path = os.path.join(self.url, index_name)
         shutil.rmtree(index_path)
         with self.assertRaises(RuntimeError):
-            self.client.delete_index(index_name,True)
+            self.client.delete_index(index_name, True)
 
         coll_name = "coll"
         coll = self.client.create_collection(coll_name)
@@ -76,11 +76,13 @@ class TestClientWithURL(unittest.TestCase):
         coll_path = os.path.join(self.url, coll_name)
         shutil.rmtree(coll_path)
         with self.assertRaises(RuntimeError):
-            self.client.delete_collection(coll_name,True)
+            self.client.delete_collection(coll_name, True)
 
     def test_init_load(self):
         index_name = "ind"
-        index = self.client.create_index(index_name,metric="ip",quantization_type="sq8",index_type="nsg",max_nbrs=100)
+        index = self.client.create_index(
+            index_name, metric="ip", quantization_type="sq8", index_type="nsg", max_nbrs=100
+        )
         index.fit(self.ind_vectors)
         self.client.save_index(index_name)
         coll_name = "coll"
@@ -91,18 +93,20 @@ class TestClientWithURL(unittest.TestCase):
 
     def test_load_different(self):
         index_name = "ind1"
-        index1 = self.client.create_index(index_name,metric="cos",quantization_type="sq4",index_type="fusion",id_type=np.uint32)
+        index1 = self.client.create_index(
+            index_name, metric="cos", quantization_type="sq4", index_type="fusion", id_type=np.uint32
+        )
         index1.fit(self.ind_vectors)
         with self.assertRaises(RuntimeError):  # double fit
             index1.fit(self.ind_vectors)
         self.client.save_index(index_name)
         with self.assertRaises(ValueError):
-            illegal_nbr_ind = self.client.create_index("illegal_nbr_ind",max_nbrs=1000)
+            illegal_nbr_ind = self.client.create_index("illegal_nbr_ind", max_nbrs=1000)
         client2 = Client(self.url)
-   
+
     def test_data_type_mismatch(self):
         index_name = "ind"
-        index = self.client.create_index(index_name,data_type=np.int8)
+        index = self.client.create_index(index_name, data_type=np.int8)
         with self.assertRaises(ValueError):
             index.fit(self.ind_vectors)
 

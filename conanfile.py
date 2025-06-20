@@ -1,5 +1,5 @@
 from conan import ConanFile 
-from conan.tools.cmake import cmake_layout
+from conan.tools.cmake import CMakeToolchain, CMake, cmake_layout
 
 
 class AlayaLiteConan(ConanFile):
@@ -16,6 +16,7 @@ class AlayaLiteConan(ConanFile):
         self.requires("spdlog/1.14.0")
         self.requires("fmt/10.2.1") # depends on spdlog
         self.requires("libcoro/0.14.1")
+        self.requires("eigen/3.4.0")
 
     def configure(self):
         # libcore setting

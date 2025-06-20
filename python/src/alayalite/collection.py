@@ -181,7 +181,7 @@ class Collection:
                         document,
                         metadata,
                     ]
-                else:  
+                else:
                     self.__dataframe = pd.concat(
                         [self.__dataframe, pd.DataFrame([{"id": id, "document": document, "metadata": metadata}])],
                         ignore_index=True,
