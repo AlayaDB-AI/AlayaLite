@@ -3,6 +3,7 @@ CMakeCache.txt
 CMakeFiles
 CMakeScripts
 Testing
+
 # Makefile
 cmake_install.cmake
 install_manifest.txt
@@ -15,8 +16,6 @@ build_support/__pycache__
 .cache
 .vscode/*
 *.so
-
-
 
 #python extension module ignores
 *.py[cod]
@@ -34,4 +33,11 @@ venv*/**
 **/__pycache__
 
 # data
+**/data/
 data/*
+
+# cpp executable
+rbq_sample/exec/
+
+
+

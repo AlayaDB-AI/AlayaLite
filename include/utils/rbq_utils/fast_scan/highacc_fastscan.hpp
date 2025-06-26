@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 
+//NOLINTBEGIN
 namespace alaya::fastscan {
 /**
  * @brief Change u16 lookup table to u8. Since we use more bits (higher accuracy)
@@ -26,7 +27,7 @@ inline void transfer_lut_hacc(const uint16_t *lut, size_t dim, uint8_t *hc_lut) 
     constexpr size_t kRegBits = 256;
     // constexpr size_t B_regi = 256;
 #else
-    static_assert(false, "At least requried AVX2 for using fastscan\n");
+    static_assert(false, "At least required AVX2 for using fastscan\n");
     exit(1);
 #endif
 
@@ -130,3 +131,4 @@ inline void accumulate_hacc(const uint8_t *__restrict__ codes, const uint8_t *__
   _mm512_storeu_epi32(accu_res + 16, res[1]);
 }
 }  // namespace alaya::fastscan
+//NOLINTEND

@@ -17,7 +17,7 @@
 
 // NOLINTBEGIN
 namespace alaya {
-enum class RotatorType : uint8_t { MatrixRotator, FhtKacRotator };
+enum class RotatorType : uint8_t { MatrixRotator, FhtKacRotator};
 
 // abstract rotator
 template <typename T>
@@ -308,7 +308,7 @@ std::unique_ptr<Rotator<T>> choose_rotator(size_t dim, RotatorType type = Rotato
     return std::make_unique<rotator_impl::MatrixRotator<T>>(dim, padded_dim);
   }
 
-  std::cerr << "Invaid rotator type in choose_rotator()\n";
+  std::cerr << "Invaild rotator type in choose_rotator()\n";
   exit(1);
 }
 }  // namespace alaya

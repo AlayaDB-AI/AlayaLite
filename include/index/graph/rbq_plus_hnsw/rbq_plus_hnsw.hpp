@@ -32,10 +32,8 @@ using minheap = std::priority_queue<T, std::vector<T>, std::greater<T>>;
 
 // Bounded priority queue implemented as a sorted vector.
 
-template <typename SpaceType = RBQSpace<>, typename DataType = typename SpaceType::DataTypeAlias,
-          typename DistanceType = typename SpaceType::DistanceTypeAlias,
-          typename IDType = typename SpaceType::IDTypeAlias>
-class RBQ_HNSW {
+template <typename DataType = float, typename IDType = PID, typename DistanceType = float>
+class RBQ_HNSW {  // NOLINT
  private:
   // NOLINTBEGIN
   struct ResultRecord {
@@ -84,15 +82,6 @@ class RBQ_HNSW {
     std::vector<Candidate> queue_;
   };
 
-  struct EstimateRecord {
-    DistanceType ip_x0_qr;
-    DistanceType est_dist;
-    DistanceType low_dist;
-
-    bool operator<(const EstimateRecord &other) const { return this->est_dist < other.est_dist; }
-  };
-  // NOLINTEND
-
   static constexpr IDType kMaxLabelOperationLock = 65536;
   size_t max_elements_{0};
   mutable std::atomic<size_t> cur_element_count_{0};  // current number of elements
@@ -140,13 +129,11 @@ class RBQ_HNSW {
   std::unique_ptr<VisitedListPool> visited_list_pool_{nullptr};
   rabitq_impl::RabitqConfig query_config_;
 
-  std::shared_ptr<RBQSpace<DataType, IDType, DistanceType>> space_ = nullptr;
+  std::unique_ptr<RBQSpace<DataType, IDType, DistanceType>> space_ = nullptr;
 
   const DataType *rawDataPtr_{nullptr};
 
   bool is_valid = false;
-
-  ~RBQ_HNSW() { free_memory(); }
 
   void free_memory() {
     if (!is_valid) {
@@ -164,12 +151,15 @@ class RBQ_HNSW {
     cur_element_count_ = 0;
 
     free(centroids_memory_);
+
+    space_.reset();
+
     is_valid = false;
   }
 
   void set_ef(size_t ef) { ef_ = ef; }
 
-  auto get_lable_op_mutex(IDType label) const -> std::mutex & {
+  auto get_label_op_mutex(IDType label) const -> std::mutex & {
     // calculate hash
     size_t lock_id = label & (kMaxLabelOperationLock - 1);
     return label_op_locks_[lock_id];
@@ -248,7 +238,7 @@ class RBQ_HNSW {
   }
 
   void add_point(IDType label, IDType cluster_id, const rabitq_impl::RabitqConfig &config) {
-    std::unique_lock<std::mutex> lock_label(get_lable_op_mutex(label));
+    std::unique_lock<std::mutex> lock_label(get_label_op_mutex(label));
 
     int level = -1;
     IDType cur_c = 0;
@@ -386,11 +376,11 @@ class RBQ_HNSW {
       size_t size = get_list_count(reinterpret_cast<IDType *>(data));
       auto *datal = reinterpret_cast<IDType *>(data + 1);
 
-      mem_prefetch_l1(reinterpret_cast<char *>(rawDataPtr_ + (get_external_label(*datal) * dim_)),
+      mem_prefetch_l1(reinterpret_cast<const char *>(rawDataPtr_ + (get_external_label(*datal) * dim_)),
                       padded_dim_ / 16);
 
       mem_prefetch_l1(
-          reinterpret_cast<char *>(rawDataPtr_ + (get_external_label(*(datal + 1)) * dim_)),
+          reinterpret_cast<const char *>(rawDataPtr_ + (get_external_label(*(datal + 1)) * dim_)),
           padded_dim_ / 16);
 
       for (size_t j = 0; j < size; j++) {
@@ -402,7 +392,7 @@ class RBQ_HNSW {
 
         if (j < size - 1) {
           mem_prefetch_l1(
-              reinterpret_cast<char *>(rawDataPtr_ + (get_external_label(*(datal + j + 1)) * dim_)),
+              reinterpret_cast<const char *>(rawDataPtr_ + (get_external_label(*(datal + j + 1)) * dim_)),
               padded_dim_ / 16);
         }
 
@@ -570,7 +560,7 @@ class RBQ_HNSW {
 
   // Optimized search function.
   void searchBaseLayerST_AdaptiveRerankOpt(IDType ep_id, size_t ef, size_t TOPK,
-                                           SplitSingleQuery<DataType, IDType> &query_wrapper,
+                                           SplitSingleQuery<DataType> &query_wrapper,
                                            std::vector<DistanceType> &q_to_centroids,  // preprocess
                                            [[maybe_unused]] const DataType *query,
                                            BoundedKNN &boundedKNN) {
@@ -656,8 +646,8 @@ class RBQ_HNSW {
     }
 
     MetricType metric_type = space_->get_metric_type();
-    SplitSingleQuery<DataType, IDType> query_wrapper(rotated_query, padded_dim_, ex_bits_,
-                                                     query_config_, metric_type);
+    SplitSingleQuery<DataType> query_wrapper(rotated_query, padded_dim_, ex_bits_, query_config_,
+                                             metric_type);
 
     // Preprocess - get the distance from query to all centroids
     std::vector<DistanceType> q_to_centroids(num_cluster_);
@@ -726,8 +716,11 @@ class RBQ_HNSW {
   }
 
  public:
-  RBQ_HNSW(SpaceType space, size_t max_elements, size_t dim, size_t total_bits, size_t M,
-           size_t ef_construction, size_t random_seed, MetricType mt, RotatorType rt)
+  RBQ_HNSW() = default;
+  ~RBQ_HNSW() { free_memory(); }
+
+  RBQ_HNSW(size_t max_elements, size_t dim, size_t total_bits, size_t M, size_t ef_construction,
+           size_t random_seed, MetricType mt, RotatorType rt)
       : label_op_locks_(kMaxLabelOperationLock),
         link_list_locks_(max_elements),
         element_levels_(max_elements),
@@ -742,7 +735,7 @@ class RBQ_HNSW {
       exit(1);
     };
 
-    space_ = RBQSpace<DataType, IDType, DistanceType>(dim, mt, rt);
+    space_ = std::make_unique<RBQSpace<DataType, IDType, DistanceType>>(dim, mt, rt);
     padded_dim_ = space_->get_rotator_size();
     assert(padded_dim_ % 64 == 0);
     assert(padded_dim_ >= dim_);
@@ -794,14 +787,15 @@ class RBQ_HNSW {
     mult_ = 1 / log(1.0 * static_cast<double>(M_));
     revSize_ = 1.0 / mult_;
 
-    this->query_config_ = faster_config(padded_dim_, SplitSingleQuery<DataType, IDType>::kNumBits);
+    this->query_config_ =
+        alaya::rabitq_impl::faster_config(padded_dim_, SplitSingleQuery<DataType>::kNumBits);
 
     is_valid = true;
   }
 
   void save(const char *filename) const {
     std::ofstream output(filename, std::ios::binary);
-    space_->save(filename);
+    space_->save(output);
 
     output.write(reinterpret_cast<const char *>(&max_elements_), sizeof(size_t));
     output.write(reinterpret_cast<const char *>(&cur_element_count_), sizeof(size_t));
@@ -859,7 +853,8 @@ class RBQ_HNSW {
 
     free_memory();
 
-    space_.load(filename);
+    space_ = std::make_unique<RBQSpace<DataType, IDType, DistanceType>>();
+    space_->load(input);
 
     input.read(reinterpret_cast<char *>(&max_elements_), sizeof(size_t));
     input.read(reinterpret_cast<char *>(&cur_element_count_), sizeof(size_t));
@@ -936,7 +931,8 @@ class RBQ_HNSW {
 
     input.close();
 
-    this->query_config_ = faster_config(padded_dim_, SplitSingleQuery<DataType, IDType>::kNumBits);
+    this->query_config_ =
+        alaya::rabitq_impl::faster_config(padded_dim_, SplitSingleQuery<DataType>::kNumBits);
 
     is_valid = true;
   }
@@ -987,7 +983,6 @@ class RBQ_HNSW {
     });
     return results;
   }
-  
 };
 }  // namespace alaya
 // NOLINTEND

@@ -20,16 +20,12 @@ namespace alaya {
 
 template <typename DataType = float, typename IDType = PID, typename DistanceType = float>
 class RBQSpace {
-  using DataTypeAlias = DataType;
-  using IDTypeAlias = IDType;
-  using DistanceTypeAlias = DistanceType;
-
  private:
   MetricType metric_{MetricType::L2};
   uint32_t dim_{0};
   std::unique_ptr<Rotator<DataType>> rotator_ = nullptr;
   RotatorType rotator_type_ = RotatorType::FhtKacRotator;
-  DistFunc<DataType, DistanceType> distance_calu_func_;
+  DistFuncRBQ<DataType, DistanceType> distance_calu_func_;
 
   auto set_metric_function() -> void {
     if (metric_ == MetricType::NONE) {
@@ -49,6 +45,9 @@ class RBQSpace {
   }
 
  public:
+  // using DataTypeAlias = DataType;
+  // using IDTypeAlias = IDType;
+  // using DistanceTypeAlias = DistanceType;
   RBQSpace() = default;
   ~RBQSpace() = default;
   RBQSpace(size_t dim, MetricType metric, RotatorType rt)
@@ -57,19 +56,19 @@ class RBQSpace {
     set_metric_function();
   }
 
-  auto operator=(const RBQSpace &other) -> RBQSpace & = default;
-  auto operator=(const RBQSpace &&other) noexcept -> RBQSpace & = default;
+  auto operator=(RBQSpace &other) -> RBQSpace & = default;
+  auto operator=(RBQSpace &&other) noexcept -> RBQSpace & = default;
 
   auto get_metric_type() -> MetricType { return metric_; }
 
-  auto get_dist_func() -> DistFunc<DataType, DistanceType> { return distance_calu_func_; }
+  auto get_dist_func() -> DistFuncRBQ<DataType, DistanceType> { return distance_calu_func_; }
 
-  auto get_distance(DataType *v1, DataType *v2, size_t pass_dim) -> DistanceType {
+  auto get_distance(const DataType *v1,const DataType *v2, size_t pass_dim) -> DistanceType {
     return distance_calu_func_(v1, v2, pass_dim);
   }
 
   auto get_bin_est(std::vector<DistanceType> &q_to_centroids,
-                   SplitSingleQuery<DataType, IDType> &query_wrapper, EstimateRecord &res,
+                   SplitSingleQuery<DataType> &query_wrapper, EstimateRecord &res,
                    size_t num_cluster, IDType cluster_id /*get_clusterid_by_internalid(currObj)*/,
                    char *bin_data /*get_bindata_by_internalid(currObj)*/
                    ) -> void {
@@ -86,7 +85,7 @@ class RBQSpace {
   }
 
   auto get_ex_est(std::vector<DistanceType> &q_to_centroids,
-                  SplitSingleQuery<DataType, IDType> &query_wrapper, EstimateRecord &res,
+                  SplitSingleQuery<DataType> &query_wrapper, EstimateRecord &res,
                   size_t ex_bits, IDType cluster_id /*get_clusterid_by_internalid(currObj)*/,
                   char *ex_data /*get_exdata_by_internalid(currObj)*/
                   ) -> void {
@@ -100,7 +99,7 @@ class RBQSpace {
   }
 
   auto get_full_est(std::vector<DistanceType> &q_to_centroids,
-                    SplitSingleQuery<DataType, IDType> &query_wrapper, EstimateRecord &res,
+                    SplitSingleQuery<DataType> &query_wrapper, EstimateRecord &res,
                     size_t num_cluster, size_t ex_bits,
                     IDType cluster_id /*get_clusterid_by_internalid(currObj)*/,
                     char *bin_data /*get_bindata_by_internalid(currObj)*/,
@@ -150,7 +149,7 @@ class RBQSpace {
     LOG_INFO("RBQSpace is saved.");
   }
 
-  auto get_rotator_size() -> size_t { return rotator_->size(); }
+  auto get_rotator_size() const -> size_t { return rotator_->size(); }
 
   auto rotate_data(const DataType *src, DataType *dst) -> void { rotator_->rotate(src, dst); }
 };

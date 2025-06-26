@@ -18,6 +18,7 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON) # -fPIC
+set(CMAKE_CXX_FLAGS "-mfma -mavx512f -mavx512dq -mavx512bw -mavx512vl") # rbq optimization
 set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG -march=x86-64 ${CMAKE_CXX_FLAGS_RELEASE}")  
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -march=x86-64 ${CMAKE_CXX_FLAGS_RELEASE}")
 
@@ -27,6 +28,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_definitions(-DPROJECT_ROOT="${CMAKE_SOURCE_DIR}")
 
 # define third_party
+find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(concurrentqueue REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
@@ -34,7 +36,8 @@ find_package(libcoro REQUIRED)
 find_package(fmt REQUIRED)
 find_package(GTest REQUIRED)
 
-set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue libcoro::libcoro)
+
+set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue libcoro::libcoro Eigen3::Eigen)
 set(GTEST_LIBS GTest::gtest GTest::gtest_main)
 
 add_definitions(-DSPDLOG_HEADER_ONLY)
@@ -48,3 +51,4 @@ if (ENABLE_UNIT_TESTS)
     add_subdirectory(tests)
 endif()
 add_subdirectory(python)
+add_subdirectory(rbq_sample)

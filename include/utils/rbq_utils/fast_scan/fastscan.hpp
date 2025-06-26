@@ -39,7 +39,7 @@ static inline void get_column(const T *src, size_t rows, size_t cols, size_t row
 }
 
 /**
- * @brief Pack quantization codes, store in blocks, the data orgnization is illustrated in
+ * @brief Pack quantization codes, store in blocks, the data organization is illustrated in
  * the link and kPerm0. Since we pack codes as 32-sized groups, if the num is not a multiple
  * of 32, we have to use some space for these absent data
  *
@@ -66,7 +66,7 @@ inline void pack_codes(size_t padded_dim, const uint8_t *quantization_code, size
   for (size_t row = 0; row < num_rd; row += kBatchSize) {
     // get quantization codes for each column for each batch
     // i.e., we get the codes for 8 dims of 32 vectors and re-orgnize the data layout
-    // based on the shuffle SIMD instruction used during quering
+    // based on the shuffle SIMD instruction used during querying
     for (size_t i = 0; i < cols; ++i) {
       get_column(quantization_code, num, cols, row, i, col);
       for (size_t j = 0; j < 32; ++j) {
@@ -86,7 +86,8 @@ inline void pack_codes(size_t padded_dim, const uint8_t *quantization_code, size
   }
 }
 
-// use fast scan to accumulate one block, dim % 16 == 0
+// NOLINTBEGIN
+//  use fast scan to accumulate one block, dim % 16 == 0
 inline void accumulate(const uint8_t *__restrict__ codes, const uint8_t *__restrict__ lp_table,
                        uint16_t *__restrict__ result, size_t dim) {
   size_t code_length = dim << 2;
@@ -197,6 +198,7 @@ inline void accumulate(const uint8_t *__restrict__ codes, const uint8_t *__restr
   exit(1);
 #endif
 }
+// NOLINTEND
 
 // pack lookup table for fastscan, for each 4 dim, we have 16 (2^4) different results
 // ! dim % 4 == 0

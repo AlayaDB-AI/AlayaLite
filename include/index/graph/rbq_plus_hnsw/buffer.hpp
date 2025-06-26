@@ -3,7 +3,6 @@
 #include <cstddef>
 #include <vector>
 #include "utils/rbq_utils/defines.hpp"
-#include "utils/memory.hpp"
 #include "visited_pool.hpp"
 
 namespace alaya {

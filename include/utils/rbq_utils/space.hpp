@@ -146,7 +146,7 @@ inline T normalize_vec(const T *__restrict__ vec, const T *__restrict__ centroid
   return static_cast<T>(dim) * value;
 }
 
-// pack 0/1 data to usigned integer
+// pack 0/1 data to unsigned integer
 template <typename T>
 inline void pack_binary(const int *__restrict__ binary_code, T *__restrict__ compact_code,
                         size_t length) {
@@ -502,7 +502,7 @@ inline float ip64_fxu7_avx512(const float *__restrict__ query,
 template <typename TF, typename TI>
 inline TF ip_fxi(const TF *__restrict__ vec0, const TI *__restrict__ vec1, size_t dim) {
   static_assert(std::is_floating_point_v<TF>, "TF must be an floating type");
-  static_assert(std::is_integral_v<TI>, "TI must be an integeral type");
+  static_assert(std::is_integral_v<TI>, "TI must be an integral type");
 
   ConstVectorMap<TF> v0(vec0, dim);
   ConstVectorMap<TI> v1(vec1, dim);

@@ -413,7 +413,7 @@ inline void ex_bits_code_with_factor(const T *data, const T *centroid, size_t di
     f_rescale_ex = ipnorm_inv * -l2_norm;
     f_error_ex = 1 * tmp_error;
   } else {
-    std::cerr << "Unsupport metric for ex_bits_code()\n" << std::flush;
+    std::cerr << "Unsupported metric for ex_bits_code()\n" << std::flush;
     exit(1);
   }
 }

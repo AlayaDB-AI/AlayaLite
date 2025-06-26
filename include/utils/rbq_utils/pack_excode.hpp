@@ -97,7 +97,7 @@ inline void packing_3bit_excode(const uint8_t *o_raw, uint8_t *o_compact, size_t
 }
 
 inline void packing_4bit_excode(const uint8_t *o_raw, uint8_t *o_compact, size_t dim) {
-// although this part only requries SSE, computing inner product for this orgnization
+// although this part only requries SSE, computing inner product for this organization
 // requires AVX512F, similar for remaining functions
 #if defined(__AVX512F__)
   // ! require dim % 16 == 0
@@ -250,7 +250,7 @@ inline void packing_8bit_excode(const uint8_t *o_raw, uint8_t *o_compact, size_t
  *
  * @param o_raw unpacked code, code for each dim is represented by uint8
  * @param o_compact compact format of code
- * @param dim   dimension of code, NOTICE: different num of bits requried different
+ * @param dim   dimension of code, NOTICE: different num of bits required different
  *               dimension padding, dim should obey the corresponding requirement
  * @param ex_bits number of bits used for code
  */
