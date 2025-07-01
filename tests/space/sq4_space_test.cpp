@@ -25,7 +25,7 @@
 #include <random>
 #include <string_view>
 #include <vector>
-#include "spdlog/fmt/bundled/core.h"
+// #include "spdlog/fmt/bundled/core.h"
 #include "utils/log.hpp"
 
 namespace alaya {

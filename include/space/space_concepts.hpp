@@ -25,6 +25,10 @@ namespace alaya {
 
 const uint32_t kAlignment = 64;  ///< Constant for alignment (cache line / SIMD)
 
+
+template <typename DataType, typename DistanceType>
+using DistFuncRBQ = DistanceType (*)(const DataType *,const DataType *, size_t);
+
 /**
  * @brief Type alias for a distance function pointer.
  *
