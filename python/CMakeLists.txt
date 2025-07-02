@@ -26,3 +26,8 @@ set_target_properties(${python_module_name}
   INSTALL_RPATH "$ORIGIN"
   BUILD_WITH_INSTALL_RPATH TRUE
 )
+
+install(TARGETS ${python_module_name}
+    LIBRARY DESTINATION alayalite
+    RUNTIME DESTINATION alayalite
+)

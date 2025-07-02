@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 #include "executor/jobs/graph_search_job.hpp"

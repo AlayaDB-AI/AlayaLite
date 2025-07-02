@@ -2,8 +2,8 @@
 set +e
 # 参数设置
 
-SCRIPT_DIR=$(dirname "$(realpath "$0")")
-BUILD_DIR="${SCRIPT_DIR}/../build"
+ROOT_DIR=$(dirname $(dirname $(dirname "$(realpath "$0")")))
+BUILD_DIR="${ROOT_DIR}/build"
 BIN_DIR="${BUILD_DIR}/bin"  # 可执行文件目录
 TEST_DIR="${BUILD_DIR}/tests"
 REPORT_DIR="${BUILD_DIR}/coverage"
