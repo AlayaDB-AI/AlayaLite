@@ -60,7 +60,7 @@ sync:
 # This allows you to make changes to the code without having to reinstall the project.
 install: clean
 	@echo "$(GREEN)Installing project in editable mode...$(RESET)"
-	uv sync -p $(PYTHON_VERSION) --dev -v
+	uv sync -p $(PYTHON_VERSION) --dev --reinstall -v
 	@echo "$(GREEN)Project installed in editable mode!$(RESET)"
 
 build: clean
@@ -93,9 +93,8 @@ format: sync
 # This target removes the virtual environment, cache files, and other temporary files.
 clean:
 	@echo "$(RED)Cleaning project...$(RESET)"
-	@rm -rf ../CMakeUserPresets.json ../build
-	@rm -rf build pyalaya
-	@rm -rf src/alayalite.egg-info src/alayalite/__pycache__ src/alayalite/_alayalitepy.so
+	@rm -rf CMakeUserPresets.json build .venv .pytest_cache .ruff_cache
+	@rm -rf python/.pytest_cache python/.ruff_cache python/tests/__pycache__
 	@echo "$(RED)Project cleaned!$(RESET)"
 
 # -----------------------------------------------------------------------------

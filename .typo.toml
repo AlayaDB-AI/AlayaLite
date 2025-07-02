@@ -1,2 +1,2 @@
 [files]
-extend-exclude = ["third_party/*.cpp", "build_support/*.py", "python/src/*.py"]
+extend-exclude = ["third_party/*.cpp", "scripts/**/*.py", "python/src/**/*.py", "python/test/*.py"]

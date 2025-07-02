@@ -1,8 +1,8 @@
 #!/bin/bash
 set +e
 # 参数设置
-SCRIPT_DIR=$(dirname "$(realpath "$0")")
-BUILD_DIR="${SCRIPT_DIR}/../build"
+ROOT_DIR=$(dirname $(dirname $(dirname "$(realpath "$0")")))
+BUILD_DIR="${ROOT_DIR}/build"
 BIN_DIR="${BUILD_DIR}/bin"         
 REPORT_DIR="${BUILD_DIR}/coverage_llvm"
 PROFDATA_FILE="merged.profdata" 
@@ -19,10 +19,10 @@ find "$BIN_DIR" -type f -executable | while read -r executable; do
 done
 
 # 合并所有 .profraw 文件
-llvm-profdata-18 merge "$REPORT_DIR"/*.profraw -o "$REPORT_DIR/$PROFDATA_FILE"
+llvm-profdata merge "$REPORT_DIR"/*.profraw -o "$REPORT_DIR/$PROFDATA_FILE"
 
 # 生成 HTML 报告
-llvm-cov-18 show --format=html --output-dir="$REPORT_DIR" \
+llvm-cov show --format=html --output-dir="$REPORT_DIR" \
 	${BIN_DIR}/* \
 	--ignore-filename-regex='build/*' \
 	-instr-profile="$REPORT_DIR/$PROFDATA_FILE" \

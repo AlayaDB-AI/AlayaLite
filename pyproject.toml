@@ -1,13 +1,12 @@
 [build-system]
 requires = [
-    "setuptools>=77.0.0",
+    "setuptools>=65.0.0,<77",
     "pybind11>=2.10.0",
-    "cmake>=3.1,<=3.31",
     "wheel",
-    "conan",
-    "ninja",
+    "conan>=2.0",
+    "scikit-build-core",
 ]
-build-backend = "setuptools.build_meta"
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "alayalite"
@@ -17,16 +16,39 @@ authors = [{ name = "AlayaDB.AI", email = "dev@alayadb.ai" }]
 description = "AlayaLite Python extension module"
 readme = "README.md"
 requires-python = ">=3.8"
-license = "Apache-2.0"
-dependencies = [
-    "pandas>=1.3.3",
-]
+license = { text = "Apache-2.0" }
+dependencies = ["pandas>=1.3.3"]
 
 [project.urls]
 "Homepage" = "https://github.com/AlayaDB-AI/AlayaLite"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+
+# ----------------- build whl begin ------------------
+[tool.scikit-build]
+cmake.version = ">=3.15,<=3.31"
+wheel.packages = ["python/src/alayalite"]
+
+[tool.scikit-build.cmake.define]
+ENABLE_COVERAGE="OFF"
+ENABLE_UNIT_TESTS="OFF"
+
+[tool.cibuildwheel]
+# build = "cp38-*"
+build-frontend = "build[uv]"
+skip = [
+    "*-manylinux_i686",  # 不编 32 位 Linux
+    "*-musllinux*",      # 不编 musl 版
+    "cp36-* cp37-* pp*",
+]
+environment = { BUILD_TIME = "$(date)" }
+
+[tool.cibuildwheel.linux]
+manylinux-x86_64-image = "manylinux_2_28"
+archs = ["x86_64"]
+before-build = "yum -y install perl-IPC-Cmd perl-Digest-SHA"
+# ----------------- build whl end ------------------
 
 [tool.uv]
 dev-dependencies = ["pytest", "ruff"]
@@ -42,7 +64,7 @@ default = true
 line-length = 120
 # Exclude a variety of commonly ignored directories.
 respect-gitignore = true
-extend-exclude = ["build_support"]
+# extend-exclude = ["build_support"]
 
 [tool.ruff.lint]
 select = [

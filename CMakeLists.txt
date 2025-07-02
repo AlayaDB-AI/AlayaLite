@@ -1,13 +1,43 @@
-cmake_minimum_required(VERSION 3.1...3.31)
+cmake_minimum_required(VERSION 3.15...3.31)
 
 set(project_name AlayaLite)
 project(${project_name} LANGUAGES CXX)
 
 # options
 option(ENABLE_COVERAGE "Enable profiling test coverage" OFF)
-option(ENABLE_UNIT_TESTS "Enable unit tests" ON)
+option(ENABLE_UNIT_TESTS "Enable unit tests" OFF)
 
-message("Building with CMake version: ${CMAKE_VERSION}")
+# set CMAKE_BUILD_TYPE
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "Build type not specified, defaulting to 'Release'.")
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the build type" FORCE)
+endif()
+
+# --- Conan Integration Start ---
+# This block automatically calls 'conan install' during configuration.
+set(CONAN_OUTPUT_FOLDER "${CMAKE_BINARY_DIR}/conan_generate")
+if(NOT EXISTS "${CONAN_OUTPUT_FOLDER}/conan_toolchain.cmake")
+    message(STATUS "Conan files not found, running 'conan install'")
+    execute_process(COMMAND conan profile detect -e)
+    execute_process(
+        COMMAND conan install ${CMAKE_SOURCE_DIR}
+                --output-folder=${CONAN_OUTPUT_FOLDER}
+                --build=missing
+                --settings=build_type=${CMAKE_BUILD_TYPE}
+                --settings=compiler.cppstd=20
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        RESULT_VARIABLE conan_result
+    )
+    if(conan_result)
+        message(FATAL_ERROR "Conan install failed")
+    endif()
+endif()
+
+# Include the Conan toolchain file. This MUST be before project().
+# For simplicity, we re-invoke project() after including the toolchain.
+include("${CONAN_OUTPUT_FOLDER}/conan_toolchain.cmake")
+project(${project_name} LANGUAGES CXX)
+# --- Conan Integration End ---
 
 # please install clang-18 or g++-13
 set(CMAKE_CXX_STANDARD 20)
@@ -35,9 +65,6 @@ find_package(fmt REQUIRED)
 find_package(GTest REQUIRED)
 set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue libcoro::libcoro)
 set(GTEST_LIBS GTest::gtest GTest::gtest_main)
-
-add_definitions(-DSPDLOG_HEADER_ONLY)
-add_definitions(-DFMT_HEADER_ONLY)
 
 # include directories
 include_directories(${CMAKE_SOURCE_DIR}/include)
