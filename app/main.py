@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+
 from app.routers import client
 
 app = FastAPI(
@@ -9,7 +10,7 @@ app = FastAPI(
 
 app.include_router(client.router, prefix="/api/v1")
 
+
 @app.get("/")
 async def root():
     return {"message": "AlayaLite standalone service is ready! Please use /api to access the API."}
-    
