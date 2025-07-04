@@ -66,12 +66,12 @@ jobs:
   cpp-linter:
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    # needs: [typo-check, commit-check, python-format-check]
+    needs: [typo-check, commit-check, pyformat-check]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Caches
+      - name: Restore Caches
         uses: ./.github/actions/cache-restore
       
       - name: Set up C++ environment

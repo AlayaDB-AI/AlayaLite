@@ -11,6 +11,21 @@ class AlayaLiteConan(ConanFile):
     def generate(self):
         tc = CMakeToolchain(self)
         tc.user_presets_path = False
+
+        CONAN_USER_MARCH_FLAGS = ""
+        if self.settings.os == "Linux" or self.settings.os == "Macos":
+            if self.settings.arch == "x86_64":
+                CONAN_USER_MARCH_FLAGS = "-march=x86-64"
+            elif self.settings.arch == "armv8" or self.settings.arch == "aarch64":
+                CONAN_USER_MARCH_FLAGS = "-march=armv8-a"
+        elif self.settings.os == "Windows":
+            # TODO: add flag for msvc
+            if self.settings.compiler == "msvc": ...
+        else:
+            self.output.info(f'Unknown OS: {self.settings.os}, skipping setting CONAN_USER_MARCH_FLAGS')
+
+        tc.variables["CONAN_USER_MARCH_FLAGS"] = CONAN_USER_MARCH_FLAGS
+
         tc.generate()
 
         cmake = CMakeDeps(self)

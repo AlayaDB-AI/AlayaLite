@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/AlayaDB-AI"><img src="./.assets/banner.jpg" width=300 alt="AlayaDB Log"></a>
+  <a href="https://github.com/AlayaDB-AI"><img src="https://github.com/AlayaDB-AI/AlayaLite/blob/main/.assets/banner.jpg?raw=true" width=300 alt="AlayaDB Log"></a>
 </p>
 
 
@@ -10,9 +10,9 @@
 
 
 <p align="center">
-<img src="https://img.shields.io/badge/Release-Ver0.1.0a1-blue.svg" alt="Release">
-<img src="https://img.shields.io/pypi/v/alayalite" alt="PyPi">
-<img src="https://img.shields.io/github/last-commit/AlayaDB-AI/AlayaLite" alt="Last Commit">
+  <a href="https://github.com/AlayaDB-AI/AlayaLite/releases"><img src="https://img.shields.io/badge/Release-Ver0.1.0a1-blue.svg" alt="Release"></a>
+  <a href="https://pypi.org/project/alayalite/"><img src="https://img.shields.io/pypi/v/alayalite" alt="PyPi"></a>
+  <a href="https://github.com/AlayaDB-AI/AlayaLite/commits"><img src="https://img.shields.io/github/last-commit/AlayaDB-AI/AlayaLite" alt="Last Commit"></a>
 </p>
 
 ## Features

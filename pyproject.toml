@@ -10,7 +10,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "alayalite"
-version = "0.1.1a1"
+version = "0.1.0a2"
 authors = [{ name = "AlayaDB.AI", email = "dev@alayadb.ai" }]
 
 description = "AlayaLite Python extension module"
@@ -40,12 +40,13 @@ build-frontend = "build[uv]"
 skip = [
     "*-manylinux_i686",  # 不编 32 位 Linux
     "*-musllinux*",      # 不编 musl 版
-    "cp36-* cp37-* pp*",
 ]
 environment = { BUILD_TIME = "$(date)" }
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+
 archs = ["x86_64"]
 before-build = "yum -y install perl-IPC-Cmd perl-Digest-SHA"
 # ----------------- build whl end ------------------

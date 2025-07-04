@@ -7,14 +7,15 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.conan2
-        key: conan-${{ runner.os }}-${{ hashFiles('conanfile.*') }}
+        key: conan-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('conanfile.*') }}
         restore-keys: |
-          conan-${{ runner.os }}-
+          conan-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Cache pip packages
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+        key: pip-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pyproject.toml') }}
         restore-keys: |
-          pip-${{ runner.os }}-
+          pip-${{ runner.os }}-${{ runner.arch }}-
+  
