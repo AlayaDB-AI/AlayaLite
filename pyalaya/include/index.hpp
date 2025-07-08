@@ -54,6 +54,25 @@
 namespace py = pybind11;
 
 namespace alaya {
+
+template <typename T>
+auto get_topk_array(const std::vector<std::vector<T>> &res_pool, size_t topk) -> py::array_t<T> {
+  size_t query_size = res_pool.size();
+  if (query_size == 0 || topk == 0) {
+    return py::array_t<T>({query_size, topk});  // Return empty array if dimensions are zero
+  }
+
+  py::array_t<T> ret({query_size, topk});
+  T *ret_data = ret.mutable_data();
+
+  size_t output_row_byte_stride = topk * sizeof(T);
+  for (size_t i = 0; i < query_size; ++i) {
+    // ef must be greater or equal to topk
+    std::memcpy(ret_data + (i * topk), res_pool[i].data(), output_row_byte_stride);
+  }
+  return ret;
+}
+
 class BasePyIndex {
  public:
   uint32_t data_dim_{0};
@@ -252,9 +271,8 @@ class PyIndex : public BasePyIndex {
 
   auto batch_search_with_distance(py::array_t<DataType> &queries, uint32_t topk, uint32_t ef,
                                   uint32_t num_threads) -> py::object {
-    auto shape = queries.shape();
-    size_t query_size = shape[0];
-    size_t query_dim = shape[1];
+    size_t query_size = queries.shape(0);
+    size_t query_dim = queries.shape(1);
 
     auto *query_ptr = static_cast<DataType *>(queries.request().ptr);
 
@@ -272,12 +290,13 @@ class PyIndex : public BasePyIndex {
       worker_cpus.push_back(i);
     }
     auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
+    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+      dist_pool = std::vector<std::vector<DistanceType>>(query_size, std::vector<DistanceType>(ef));
+    }
     for (uint32_t i = 0; i < query_size; i++) {
       auto cur_query = query_ptr + i * query_dim;
       if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::
                         value) {  // don't need rerank and need to get distance
-        dist_pool =
-            std::vector<std::vector<DistanceType>>(query_size, std::vector<DistanceType>(ef));
         coros.emplace_back(
             search_job_->search(cur_query, topk, res_pool[i].data(), dist_pool[i].data(), ef));
       } else {
@@ -292,22 +311,9 @@ class PyIndex : public BasePyIndex {
 
     LOG_INFO("Total time: {} s.", timer.elapsed() / 1000000.0);
 
-    auto ret = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
-    auto ret_dist = py::array_t<DistanceType>({query_size, static_cast<size_t>(topk)});
-    auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
-    auto ret_dist_ptr = static_cast<DistanceType *>(ret_dist.request().ptr);
-    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
-      for (size_t i = 0; i < query_size; i++) {
-        std::copy(res_pool[i].begin(), res_pool[i].begin() + topk, ret_ptr + i * topk);
-        std::copy(dist_pool[i].begin(), dist_pool[i].begin() + topk, ret_dist_ptr + i * topk);
-      }
-    } else {
-      for (size_t i = 0; i < query_size; i++) {
-        rerank(res_pool[i], ret_ptr + i * topk, ret_dist_ptr + i * topk,
-               build_space_->get_query_computer(query_ptr + i * query_dim), ef, topk);
-      }
-    }
-    return py::make_tuple(ret, ret_dist);
+    auto ret_id = get_topk_array(res_pool, topk);
+    auto ret_dist = get_topk_array(dist_pool, topk);
+    return py::make_tuple(ret_id, ret_dist);
   }
 
   template <typename DistanceType = float>

@@ -31,11 +31,31 @@ class TestCollection(unittest.TestCase):
         result = self.collection.filter_query({})
         self.assertEqual(len(result["id"]), 2)
 
-    def test_batch_query(self):
+    def test_batch_query1(self):
         items = [(1, "Document 1", np.array([0.1, 0.2, 0.3]), {}), (2, "Document 2", np.array([0.4, 0.5, 0.6]), {})]
         self.collection.insert(items)
         result = self.collection.batch_query([[0.1, 0.2, 0.3]], limit=1, ef_search=10, num_threads=1)
         self.assertEqual(len(result["id"]), 1)
+
+    def test_batch_query2(self):
+        items = [
+            (1, "document1", [1.0, 2.0, 3.0], {}),
+            (2, "document2", [4.0, 5.0, 6.0], {"category": "B"}),
+            (3, "document3", [12.0, 32.0, 31.0], {"category": "C"}),
+        ]
+        self.collection.insert(items)
+
+        result = self.collection.batch_query([[12.0, 32.0, 31.0]], limit=1, ef_search=10, num_threads=1)
+        self.assertEqual(len(result["id"][0]), 1)
+        self.assertEqual(int(result["id"][0][0]), 3)
+
+        result = self.collection.batch_query(
+            [[12.0, 32.0, 31.0], [4.0, 5.0, 6.0]], limit=3, ef_search=10, num_threads=1
+        )
+        self.assertEqual(len(result["id"][0]), 3)
+        self.assertEqual(len(result["id"][1]), 3)
+        self.assertEqual(list(map(int, result["id"][0])), [3, 2, 1])
+        self.assertEqual(list(map(int, result["id"][1])), [2, 1, 3])
 
     def test_upsert(self):
         items = [(1, "Old Doc", np.array([0.1, 0.2, 0.3]), {})]
@@ -52,6 +72,16 @@ class TestCollection(unittest.TestCase):
         self.collection.delete_by_id([1])
         df = self.collection.filter_query({})
         self.assertEqual(len(df), 0)
+
+    def test_get_by_id(self):
+        items = [
+            (1, "Document 1", np.array([0.1, 0.2, 0.3]), {"category": "A"}),
+            (2, "Document 2", np.array([0.4, 0.5, 0.6]), {"category": "B"}),
+        ]
+        self.collection.insert(items)
+        result = self.collection.get_by_id([1])
+        self.assertEqual(len(result["id"]), 1)
+        self.assertEqual(result["document"][0], "Document 1")
 
     def test_delete_by_filter(self):
         items = [

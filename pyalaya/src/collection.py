@@ -80,15 +80,12 @@ class Collection:
         )
 
         ret = {"id": [], "document": [], "metadata": [], "distance": []}
-        for each_results in all_results:
-            # inner_id (vector id) -> outer_id (document id)
-            outer_ids = [self.__inner_outer_map[inner_id] for inner_id in each_results]
-            each_dict = self.__dataframe[self.__dataframe["id"].isin(outer_ids)].to_dict(orient="list")
-            ret["id"].append(each_dict["id"])
-            ret["document"].append(each_dict["document"])
-            ret["metadata"].append(each_dict["metadata"])
-            ret["distance"].append(all_distance.flatten().tolist())
-
+        for ids, distances in zip(all_results, all_distance):
+            df = self.__dataframe.iloc[ids].to_dict(orient="list")
+            ret["id"].append(df["id"])
+            ret["document"].append(df["document"])
+            ret["metadata"].append(df["metadata"])
+            ret["distance"].append(distances.tolist())
         return ret
 
     def filter_query(self, filter: dict, limit: Optional[int] = None) -> pd.DataFrame:
@@ -196,12 +193,12 @@ class Collection:
                     self.__outer_inner_map[id] = index_id
                     self.__inner_outer_map[index_id] = id
 
-    def delete_by_id(self, ids: List[int]):
+    def delete_by_id(self, ids: List[str]):
         """
         Deletes documents from the collection by their IDs.
 
         Args:
-            ids (List[int]): List of document IDs to delete.
+            ids (List[str]): List of document IDs to delete.
         """
         self.__dataframe = self.__dataframe[~self.__dataframe["id"].isin(ids)]
         for id in ids:
@@ -210,6 +207,19 @@ class Collection:
                 inner_id = self.__outer_inner_map[id]
                 del self.__outer_inner_map[id]
                 del self.__inner_outer_map[inner_id]
+
+    def get_by_id(self, ids: List[str]):
+        """
+        Get documents from the collection by their IDs.
+
+        Args:
+            ids (List[str]): List of document IDs to get.
+
+        Example:
+            >>> collection.get_by_id([1])
+            {'document': ['Document 1'], 'metadata': [{'category': 'A'}], 'id': [1.0]}
+        """
+        return self.__dataframe[self.__dataframe["id"].isin(ids)].to_dict(orient="list")
 
     def delete_by_filter(self, filter: dict):
         """
