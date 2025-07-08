@@ -12,19 +12,24 @@ class AlayaLiteConan(ConanFile):
         tc = CMakeToolchain(self)
         tc.user_presets_path = False
 
-        CONAN_USER_MARCH_FLAGS = ""
-        if self.settings.os == "Linux" or self.settings.os == "Macos":
-            if self.settings.arch == "x86_64":
-                CONAN_USER_MARCH_FLAGS = "-march=x86-64"
-            elif self.settings.arch == "armv8" or self.settings.arch == "aarch64":
-                CONAN_USER_MARCH_FLAGS = "-march=armv8-a"
-        elif self.settings.os == "Windows":
-            # TODO: add flag for msvc
-            if self.settings.compiler == "msvc": ...
-        else:
-            self.output.info(f'Unknown OS: {self.settings.os}, skipping setting CONAN_USER_MARCH_FLAGS')
+        march_flags = ""
+        os = str(self.settings.os)
+        arch = str(self.settings.arch)
+        compiler = str(self.settings.compiler)
+        if compiler == "msvc":
+            if arch == "x86_64":
+                march_flags = "/arch:AVX2"
+        elif os in ["Linux", "Macos"]:
+            if arch == "x86_64":
+                march_flags = "-march=x86-64-v2"
+            elif arch in ["armv8", "aarch64", "arm64"]:
+                march_flags = "-march=armv8-a"
 
-        tc.variables["CONAN_USER_MARCH_FLAGS"] = CONAN_USER_MARCH_FLAGS
+        if march_flags:
+            self.output.info(f"Applying architecture flag for {os}/{arch}: {march_flags}")
+            tc.variables["CONAN_USER_MARCH_FLAGS"] = march_flags
+        else:
+            self.output.warning(f"No specific march flag set for this configuration ({os}/{arch}).")
 
         tc.generate()
 

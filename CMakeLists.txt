@@ -13,31 +13,13 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the build type" FORCE)
 endif()
 
-# --- Conan Integration Start ---
-# This block automatically calls 'conan install' during configuration.
 set(CONAN_OUTPUT_FOLDER "${CMAKE_BINARY_DIR}/conan_generate")
-if(NOT EXISTS "${CONAN_OUTPUT_FOLDER}/conan_toolchain.cmake")
-    message(STATUS "Conan files not found, running 'conan install'")
-    execute_process(COMMAND conan profile detect -e)
-    execute_process(
-        COMMAND conan install ${CMAKE_SOURCE_DIR}
-                --output-folder=${CONAN_OUTPUT_FOLDER}
-                --build=missing
-                --settings=build_type=${CMAKE_BUILD_TYPE}
-                --settings=compiler.cppstd=20
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        RESULT_VARIABLE conan_result
-    )
-    if(conan_result)
-        message(FATAL_ERROR "Conan install failed")
-    endif()
+if(EXISTS "${CONAN_OUTPUT_FOLDER}/conan_toolchain.cmake")
+    include("${CONAN_OUTPUT_FOLDER}/conan_toolchain.cmake")
+    message(STATUS "Conan toolchain file found at ${CONAN_OUTPUT_FOLDER}/conan_toolchain.cmake")
+else()
+    message(STATUS "Conan toolchain file not found at ${CONAN_OUTPUT_FOLDER}/conan_toolchain.cmake")
 endif()
-
-# Include the Conan toolchain file. This MUST be before project().
-# For simplicity, we re-invoke project() after including the toolchain.
-include("${CONAN_OUTPUT_FOLDER}/conan_toolchain.cmake")
-project(${project_name} LANGUAGES CXX)
-# --- Conan Integration End ---
 
 # please install clang-18 or g++-13
 set(CMAKE_CXX_STANDARD 20)
@@ -57,7 +39,6 @@ message(STATUS "CONAN_USER_MARCH_FLAGS: ${CONAN_USER_MARCH_FLAGS}")
 if (DEFINED CONAN_USER_MARCH_FLAGS AND NOT "${CONAN_USER_MARCH_FLAGS}" STREQUAL "")
     message(STATUS "Applying custom march flag from Conan: ${CONAN_USER_MARCH_FLAGS}")
     add_compile_options(${CONAN_USER_MARCH_FLAGS}) 
-# TODO: add flag for msvc
 else()
     message(STATUS "No specific march flag set by Conan for this configuration.")
 endif()

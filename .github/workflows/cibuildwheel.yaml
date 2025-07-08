@@ -10,15 +10,14 @@ jobs:
     strategy:
       matrix:
         # os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-13, macos-latest]
-        os: [ubuntu-latest]
+        os: [macos-latest]
 
     steps:
       - uses: actions/checkout@v4
 
-      # - name: Restore Caches
-      #   uses: ./.github/actions/cache-restore
 
       - name: Set up QEMU
+        if: runner.os == 'Linux'
         uses: docker/setup-qemu-action@v3
         with:
           platforms: all
@@ -26,14 +25,15 @@ jobs:
       - name: Restore Caches
         uses: ./.github/actions/cache-restore
 
+      - name: Install uv
+        if: runner.os == 'macOS'
+        uses: astral-sh/setup-uv@v5
+
       - name: Install cibuildwheel
-        uses: pypa/cibuildwheel@v3.0.0
+        uses: pypa/cibuildwheel@v2.19.0
         env:
-          CIBW_PLATFORM: linux
-          # CIBW_MANYLINUX_X86_64_IMAGE: quay.io/pypa/manylinux_2_28_x86_64
-          # CIBW_BUILD: "cp38-*"
-          # CIBW_ENVIRONMENT: "CXXFLAGS='-O3 -pipe'"
-          CIBW_ARCHS: aarch64
+          CIBW_ARCHS_LINUX: aarch64, x86_64
+          CIBW_ARCHS_MACOS: x86_64, arm64
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4

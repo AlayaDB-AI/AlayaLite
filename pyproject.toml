@@ -48,7 +48,18 @@ manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
 
 archs = ["x86_64"]
-before-build = "yum -y install perl-IPC-Cmd perl-Digest-SHA"
+before-build = """
+    yum -y install perl-IPC-Cmd perl-Digest-SHA && \
+    pip3 install --break-system-packages conan && \
+    bash scripts/conan_build/linux.sh
+"""
+
+[tool.cibuildwheel.macos]
+before-build = """
+    pip3 install --break-system-packages conan && \
+    bash scripts/conan_build/macos.sh
+"""
+
 # ----------------- build whl end ------------------
 
 [tool.uv]
