@@ -81,7 +81,8 @@ class Collection:
 
         ret = {"id": [], "document": [], "metadata": [], "distance": []}
         for ids, distances in zip(all_results, all_distance):
-            df = self.__dataframe.iloc[ids].to_dict(orient="list")
+            uuids = [self.__inner_outer_map.get(idx) for idx in ids if idx in self.__inner_outer_map]
+            df = pd.merge(pd.DataFrame({"id": uuids}), self.__dataframe, on="id", how="left").to_dict(orient="list")
             ret["id"].append(df["id"])
             ret["document"].append(df["document"])
             ret["metadata"].append(df["metadata"])

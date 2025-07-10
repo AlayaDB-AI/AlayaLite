@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import random
 import unittest
 
 import numpy as np
@@ -103,6 +104,22 @@ class TestCollection(unittest.TestCase):
         result = self.collection.filter_query({"category": "A"})
         print(result)
         # self.assertEqual(result["document"][0], "Document 1")
+
+    def test_mixed_query(self):
+        uuids = [f"id {i}" for i in range(1, 1000)]
+        documents = [f"Document {i}" for i in range(1, 1000)]
+        embeddings = [[random.random() for _ in range(100)] for _ in range(1000)]
+        self.collection.insert(list(zip(uuids, documents, embeddings, [{} for _ in range(1000)])))
+        self.collection.delete_by_id(uuids[10:500:2])
+        self.collection.insert(
+            list(zip(uuids[10:500:2], documents[10:500:2], embeddings[10:500:2], [{} for _ in range(500)]))
+        )
+
+        for uid, document, embedding in zip(uuids, documents, embeddings):
+            result = self.collection.batch_query([embedding], limit=10, ef_search=50, num_threads=1)
+            self.assertEqual(result["id"][0][0], uid)
+            self.assertEqual(result["document"][0][0], document)
+            self.assertEqual(result["distance"][0][0], 0.0)
 
 
 if __name__ == "__main__":
