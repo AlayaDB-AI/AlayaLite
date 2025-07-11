@@ -2,6 +2,7 @@ name: Build
 
 on: [push, pull_request]
 
+
 jobs:
   build_wheels:
     name: Build wheels on ${{ matrix.os }}
@@ -13,13 +14,26 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+
+      - name: Set up QEMU
+        if: runner.os == 'Linux'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Restore Caches
+        uses: ./.github/actions/cache-restore
+
+      - name: Install uv
+        if: runner.os == 'macOS'
+        uses: astral-sh/setup-uv@v5
+
       - name: Install cibuildwheel
         uses: pypa/cibuildwheel@v3.0.0
         env:
-          CIBW_PLATFORM: linux
-          # CIBW_MANYLINUX_X86_64_IMAGE: quay.io/pypa/manylinux_2_28_x86_64
-          # CIBW_BUILD: "cp38-*"
-          # CIBW_ENVIRONMENT: "CXXFLAGS='-O3 -pipe'"
+          CIBW_ARCHS_LINUX: aarch64, x86_64
+          CIBW_ARCHS_MACOS: x86_64, arm64
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
