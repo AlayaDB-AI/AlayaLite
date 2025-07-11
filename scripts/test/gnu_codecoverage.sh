@@ -1,10 +1,10 @@
 #!/bin/bash
 set +e
-# 参数设置
 
+# Parameter settings
 ROOT_DIR=$(dirname $(dirname $(dirname "$(realpath "$0")")))
 BUILD_DIR="${ROOT_DIR}/build"
-BIN_DIR="${BUILD_DIR}/bin"  # 可执行文件目录
+BIN_DIR="${BUILD_DIR}/bin"  # Directory for executables
 TEST_DIR="${BUILD_DIR}/tests"
 REPORT_DIR="${BUILD_DIR}/coverage"
 mkdir -p "${REPORT_DIR}"
@@ -19,4 +19,3 @@ lcov --gcov-tool /usr/bin/gcov-13 --capture --directory "${REPORT_DIR}" --output
 lcov --remove "${REPORT_DIR}/coverage.info"  '*/_deps/*' '*/13/*' -o "${REPORT_DIR}/coverage_filtered.info"
 
 genhtml "${REPORT_DIR}/coverage_filtered.info" --output-directory "${REPORT_DIR}/coverage_filtered_report"
-
