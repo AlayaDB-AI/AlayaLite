@@ -33,7 +33,7 @@ jobs:
         uses: pypa/cibuildwheel@v3.0.0
         env:
           CIBW_ARCHS_LINUX: aarch64, x86_64
-          CIBW_ARCHS_MACOS: x86_64, arm64
+          # CIBW_ARCHS_MACOS: x86_64, arm64
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4

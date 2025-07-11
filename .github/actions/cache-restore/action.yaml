@@ -11,10 +11,10 @@ runs:
         restore-keys: |
           conan-${{ runner.os }}-
 
-    - name: Cache pip packages
+    - name: Cache uv packages
       uses: actions/cache@v4
       with:
-        path: ~/.cache/pip
-        key: pip-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+        path: ~/.cache/uv
+        key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
         restore-keys: |
-          pip-${{ runner.os }}-
+          uv-${{ runner.os }}-
