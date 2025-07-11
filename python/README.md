@@ -313,7 +313,7 @@ bash build_support/pyinstall.sh
 > python -m build
 > 
 > # Install the compiled package
-> pip install pyalaya/AlayaDBLite/AlayaDBLite-*.whl --force-reinstall
+> pip install python/AlayaDBLite/AlayaDBLite-*.whl --force-reinstall
 > ```
 
 
@@ -409,7 +409,7 @@ Clone the ANN-Benchmarks repository and set up the environment:
 
 ```bash
 git clone git@github.com:erikbern/ann-benchmarks.git
-# Ensure the `pyalaya/AlayaDBLite` is copied to the `ann_benchmarks/algorithms` directory
+# Ensure the `python/AlayaDBLite` is copied to the `ann_benchmarks/algorithms` directory
 ```
 -->
 

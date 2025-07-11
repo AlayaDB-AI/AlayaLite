@@ -3,7 +3,7 @@ CMakeCache.txt
 CMakeFiles
 CMakeScripts
 Testing
-Makefile
+# Makefile
 cmake_install.cmake
 install_manifest.txt
 compile_commands.json
@@ -11,7 +11,7 @@ CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
 build
-build_support/__pycache__
+**/__pycache__
 .cache
 .vscode/*
 *.so

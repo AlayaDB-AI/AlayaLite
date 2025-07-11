@@ -15,6 +15,7 @@
 import unittest
 
 import numpy as np
+
 from alayalite import Client
 from alayalite.utils import calc_gt, calc_recall
 

@@ -80,6 +80,6 @@ def process_directory(directory):
 
 if __name__ == "__main__":
     # Start processing from the current directory
-    process_directory("../pyalaya")
+    process_directory("../python")
     process_directory("../include")
     process_directory("../tests")
