@@ -43,30 +43,30 @@ jobs:
           args: "format --check --diff"
 
   # TODO(ljh): Fix the unsuccessful parts of pylint
-  # pylint-check:
-  #     runs-on: ubuntu-latest
-  #     strategy:
-  #       matrix:
-  #         python-version: ["3.8"]
-  #     steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Set up Python ${{ matrix.python-version }}
-  #       uses: actions/setup-python@v3
-  #       with:
-  #         python-version: ${{ matrix.python-version }}
-  #     - name: Install dependencies
-  #       run: |
-  #         python -m pip install --upgrade pip
-  #         pip install pylint
-  #     - name: Analysing the code with pylint
-  #       run: |
-  #         pylint --rcfile ./python/.pylintrc ./examples/**/*.py ./python/src/alayalite/**/*.py ./python/tests/**/*.py
+  pylint-check:
+      runs-on: ubuntu-latest
+      strategy:
+        matrix:
+          python-version: ["3.8"]
+      steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pylint
+      - name: Analysing the code with pylint
+        run: |
+          pylint --rcfile ./python/.pylintrc ./examples/**/*.py ./python/src/alayalite/**/*.py ./python/tests/**/*.py
 
 
   cpp-linter:
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    needs: [typo-check, commit-check, pyformat-check]
+    needs: [typo-check, commit-check, pyformat-check, pylint-check]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
