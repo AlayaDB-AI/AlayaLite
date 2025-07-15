@@ -39,10 +39,11 @@ LICENSE_HEADER_CPP = """\
 EXTENSIONS_PY = {".py"}
 EXTENSIONS_CPP = {".c", ".cpp", ".h", ".hpp"}
 
+
 def add_license_to_file(file_path, header):
     """
     This function adds the license header to the specified file if it doesn't already contain it.
-    
+
     Parameters:
     file_path (str): Path to the file that needs to be processed.
     header (str): License header to be added to the file.
@@ -50,20 +51,21 @@ def add_license_to_file(file_path, header):
     # Open the file and read its content
     with open(file_path, "r+", encoding="utf-8") as f:
         content = f.read()
-        
+
         # Skip files that already have the license header
         if "Licensed under the Apache License" in content:
             return
-        
+
         # Add the license header at the beginning of the file
         f.seek(0, 0)
         f.write(header + "\n" + content)
+
 
 def process_directory(directory):
     """
     This function recursively processes the specified directory and adds license headers to files with
     supported extensions (Python and C++ files).
-    
+
     Parameters:
     directory (str): The directory to start processing from.
     """
@@ -73,10 +75,11 @@ def process_directory(directory):
             # If the file is a Python file, add Python license header
             if any(file.endswith(ext) for ext in EXTENSIONS_PY):
                 add_license_to_file(os.path.join(root, file), LICENSE_HEADER_PY)
-            
+
             # If the file is a C++ file, add C++ license header
             elif any(file.endswith(ext) for ext in EXTENSIONS_CPP):
                 add_license_to_file(os.path.join(root, file), LICENSE_HEADER_CPP)
+
 
 if __name__ == "__main__":
     # Start processing from the current directory

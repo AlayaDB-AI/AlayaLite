@@ -14,8 +14,9 @@ the configuration in this file.
 
 import re
 
+
 class CheckConfig(object):
-    """ Check paths against the built-in config """
+    """Check paths against the built-in config"""
 
     def __init__(self):
         self._init_config()
@@ -24,18 +25,20 @@ class CheckConfig(object):
         return
 
     def _init_config(self):
-        """ Any path matching one of the ignore_pats regular expressions,
-            denotes that we do NOT want to run clang-tidy on that item.
+        """Any path matching one of the ignore_pats regular expressions,
+        denotes that we do NOT want to run clang-tidy on that item.
         """
-        self.ignore_pats = [".*/build/*", ]
+        self.ignore_pats = [
+            ".*/build/*",
+        ]
         return
 
     def should_skip(self, path):
-        """ Should execution of clang-tidy be skipped?
-            path - to check, against the configuration.
-                   Typically the full path.
-            returns - False if we want to run clang-tidy
-                      True of we want to skip execution on this item
+        """Should execution of clang-tidy be skipped?
+        path - to check, against the configuration.
+               Typically the full path.
+        returns - False if we want to run clang-tidy
+                  True of we want to skip execution on this item
         """
         for pat in self.ignore_pats:
             if re.match(pat, path):

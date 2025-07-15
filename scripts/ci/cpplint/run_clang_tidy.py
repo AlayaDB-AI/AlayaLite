@@ -49,7 +49,7 @@ import tempfile
 import threading
 import traceback
 
-import yaml   # TERRIER: not necessary if we don't want automatic fixes
+import yaml  # TERRIER: not necessary if we don't want automatic fixes
 
 from run_clang_tidy_extra import CheckConfig
 
@@ -178,8 +178,7 @@ def check_clang_apply_replacements_binary(args):
         subprocess.check_call([args.clang_apply_replacements_binary, "--version"])
     except:
         print(
-            "Unable to run clang-apply-replacements. Is clang-apply-replacements "
-            "binary correctly specified?",
+            "Unable to run clang-apply-replacements. Is clang-apply-replacements binary correctly specified?",
             file=sys.stderr,
         )
         traceback.print_exc()
@@ -222,9 +221,7 @@ def run_tidy(args, tmpdir, build_path, queue, lock, failed_files):
             queue.task_done()
             continue
 
-        proc = subprocess.Popen(
-            invocation, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
+        proc = subprocess.Popen(invocation, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         output, err = proc.communicate()
         if proc.returncode != 0:
             failed_files.append(name)
@@ -268,7 +265,7 @@ def main():
     parser.add_argument(
         "-checks",
         default=None,
-        help="checks filter, when not specified, use clang-tidy " "default",
+        help="checks filter, when not specified, use clang-tidy default",
     )
     parser.add_argument(
         "-config",
@@ -293,8 +290,7 @@ def main():
         "-export-fixes",
         metavar="filename",
         dest="export_fixes",
-        help="Create a yaml file to store suggested fixes in, "
-        "which can be applied with clang-apply-replacements.",
+        help="Create a yaml file to store suggested fixes in, which can be applied with clang-apply-replacements.",
     )
     parser.add_argument(
         "-j",
@@ -302,38 +298,30 @@ def main():
         default=0,
         help="number of tidy instances to be run in parallel.",
     )
-    parser.add_argument(
-        "files", nargs="*", default=[".*"], help="files to be processed (regex on path)"
-    )
+    parser.add_argument("files", nargs="*", default=[".*"], help="files to be processed (regex on path)")
     parser.add_argument("-fix", action="store_true", help="apply fix-its")
-    parser.add_argument(
-        "-format", action="store_true", help="Reformat code " "after applying fixes"
-    )
+    parser.add_argument("-format", action="store_true", help="Reformat code after applying fixes")
     parser.add_argument(
         "-style",
         default="file",
-        help="The style of reformat " "code after applying fixes",
+        help="The style of reformat code after applying fixes",
     )
-    parser.add_argument(
-        "-p", dest="build_path", help="Path used to read a compile command database."
-    )
+    parser.add_argument("-p", dest="build_path", help="Path used to read a compile command database.")
     parser.add_argument(
         "-extra-arg",
         dest="extra_arg",
         action="append",
         default=[],
-        help="Additional argument to append to the compiler " "command line.",
+        help="Additional argument to append to the compiler command line.",
     )
     parser.add_argument(
         "-extra-arg-before",
         dest="extra_arg_before",
         action="append",
         default=[],
-        help="Additional argument to prepend to the compiler " "command line.",
+        help="Additional argument to prepend to the compiler command line.",
     )
-    parser.add_argument(
-        "-quiet", action="store_true", help="Run clang-tidy in quiet mode"
-    )
+    parser.add_argument("-quiet", action="store_true", help="Run clang-tidy in quiet mode")
     parser.add_argument(
         "-only-diff",
         action="store_true",
@@ -374,9 +362,7 @@ def main():
     # check.
     if args.only_diff:
         # Get the path of the repo, e.g. /Users/terrier/bustub
-        git_repo = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"], capture_output=True
-        )
+        git_repo = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True)
         git_repo_path = git_repo.stdout.decode("utf-8").strip()
         # Get all files changed compared with origin/master
         result = subprocess.run(
@@ -458,9 +444,7 @@ def main():
             # TERRIER: We want to see the failed files
             print("The files that failed were:")
             print(pprint.pformat(failed_files))
-            print(
-                "Note that a failing .h file will fail all the .cpp files that include it.\n"
-            )
+            print("Note that a failing .h file will fail all the .cpp files that include it.\n")
 
     except KeyboardInterrupt:
         # This is a sad hack. Unfortunately subprocess goes
