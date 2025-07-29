@@ -1,11 +1,16 @@
-name: CI
+name: Code checker
 on: [push, pull_request]
+
 
 env:
   LLVM_VERSION: 18
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  commit-check:
+  commit-format-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -19,6 +24,8 @@ jobs:
           checkAllCommitMessages: "true"
           accessToken: ${{ secrets.GITHUB_TOKEN }}
 
+  # Automatically detect spelling errors in the code library
+  # Pure spelling checks, such as "recieve" for "receive" and "enviroment" for "environment."
   typo-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -27,8 +34,8 @@ jobs:
       - uses: crate-ci/typos@v1.23.6
         with:
           config: ./.typo.toml
-        
-  pyformat-check:
+
+  py-format-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -42,31 +49,28 @@ jobs:
             ./examples
           args: "format --check --diff"
 
-  # TODO(ljh): Fix the unsuccessful parts of pylint
-  pylint-check:
+  py-lint-check:
       runs-on: ubuntu-latest
-      strategy:
-        matrix:
-          python-version: ["3.8"]
+      timeout-minutes: 20
       steps:
       - uses: actions/checkout@v4
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v3
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install pylint
+
+      - name: Install uv
+        # if: runner.os == 'macOS'
+        uses: astral-sh/setup-uv@v5
+
       - name: Analysing the code with pylint
         run: |
-          pylint --rcfile ./python/.pylintrc ./examples/**/*.py ./python/src/alayalite/**/*.py ./python/tests/**/*.py
+          uvx pylint --rcfile 
+            ./python/.pylintrc 
+            ./examples/**/*.py 
+            ./python/src/alayalite/**/*.py 
+            ./python/tests/**/*.py
 
-
-  cpp-linter:
+  cpp-lint-check:
     runs-on: ubuntu-latest
     timeout-minutes: 180
-    needs: [typo-check, commit-check, pyformat-check, pylint-check]
+    needs: [typo-check, commit-format-check, py-format-check, py-lint-check]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -1,6 +1,7 @@
 name: Build
 
-on: [push, pull_request]
+on:
+  workflow_dispatch:
 
 
 jobs:
@@ -14,8 +15,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-
       - name: Set up QEMU
         if: runner.os == 'Linux'
         uses: docker/setup-qemu-action@v3

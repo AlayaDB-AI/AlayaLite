@@ -1,5 +1,7 @@
 import os
+import pathlib
 
+ROOT_DIR = pathlib.Path(__file__)
 # Apache 2.0 License header to be added to the files (Python and C++)
 LICENSE_HEADER_PY = """\
 # Copyright 2025 AlayaDB.AI
