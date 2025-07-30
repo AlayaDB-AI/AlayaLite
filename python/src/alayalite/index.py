@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This module provides the Index class, a Python interface for managing
+and querying a single vector index.
+"""
 
 import os
 
@@ -26,13 +30,10 @@ from .common import (
 from .schema import IndexParams, load_schema
 
 
+# Pylint is incorrectly flagging used private members.
+# pylint: disable=unused-private-member
 class Index:
     """
-    Initialize a new Index instance.
-
-    Args:
-        name (str): Name identifier for the index. Defaults to "default".
-        params (IndexParams): Configuration parameters for the index.
     The Index class provides a Python interface for managing and querying vector indices.
     """
 
@@ -46,23 +47,21 @@ class Index:
         """
         self.__name = name
         self.__params = params
-
         self.__index = None  # late initialization
-
         self.__is_initialized = False
         self.__dim = None  # It will be set when fitting the index
 
-    def get_data_by_id(self, id: int) -> VectorLike:
+    def get_data_by_id(self, vector_id: int) -> VectorLike:
         """
         Retrieve the vector data associated with a given ID.
 
         Args:
-            id (int): The ID of the vector to retrieve.
+            vector_id (int): The ID of the vector to retrieve.
 
         Returns:
             VectorLike: The corresponding vector data.
         """
-        return self.__index.get_data_by_id(id)
+        return self.__index.get_data_by_id(vector_id)
 
     def fit(
         self,
@@ -75,19 +74,19 @@ class Index:
 
         Args:
             vectors (VectorLikeBatch): A 2D array of vectors to construct the index.
-            ef_construction (int): Controls the accuracy of index construction. Default is 100.
-            num_threads (int): Number of threads to use during index construction. Default is 1.
+            ef_construction (int): Controls index construction accuracy. Default is 100.
+            num_threads (int): Number of threads for index construction. Default is 1.
         """
         if self.__is_initialized:
             raise RuntimeError("An index can be only fitted once")
 
         _assert(vectors.ndim == 2, "vectors must be a 2D array")
         data_type = np.array(vectors).dtype
-        print("data_type: ", data_type)
         if self.__params.data_type is None:
             self.__params.data_type = data_type
-        elif self.__params.data_type != np.array(vectors).dtype:
+        elif self.__params.data_type != data_type:
             raise ValueError(f"Data type mismatch: {self.__params.data_type} vs {data_type}")
+
         self.__params.fill_none_values()
         self.__dim = vectors.shape[1]
         self.__index = _PyIndexInterface(self.__params.to_cpp_params())
@@ -119,23 +118,22 @@ class Index:
             f"fit data dimension: {self.__dim}, vectors dimension: {vectors.shape[0]}",
         )
         ret = self.__index.insert(vectors, ef)
-        if (
-            (self.__params.id_type == np.uint32 and ret == 4294967295)
-            or (self.__params.id_type == np.uint64 and ret == 18446744073709551615)
-            or ret == -1
-        ):
+        is_full_uint32 = self.__params.id_type == np.uint32 and ret == 4294967295
+        is_full_uint64 = self.__params.id_type == np.uint64 and ret == 18446744073709551615
+
+        if is_full_uint32 or is_full_uint64 or ret == -1:
             raise RuntimeError("The index is full, cannot insert more vectors")
         return ret
 
-    def remove(self, id: int) -> None:
+    def remove(self, vector_id: int) -> None:
         """
         Remove a vector from the index by ID.
 
         Args:
-            id (int): The ID of the vector to remove.
+            vector_id (int): The ID of the vector to remove.
         """
         _assert(self.__index is not None, "Index is not init yet")
-        self.__index.remove(id)
+        self.__index.remove(vector_id)
 
     def search(self, query: VectorLike, topk: int, ef_search: int = 100) -> VectorLike:
         """
@@ -156,7 +154,6 @@ class Index:
             f"query dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, query dimension: {query.shape[0]}",
         )
-
         return self.__index.search(query, topk, ef_search)
 
     def batch_search(
@@ -185,7 +182,6 @@ class Index:
             f"query dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, query dimension: {queries.shape[1]}",
         )
-
         return self.__index.batch_search(queries, topk, ef_search, num_threads)
 
     def batch_search_with_distance(
@@ -214,7 +210,6 @@ class Index:
             f"query dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, query dimension: {queries.shape[1]}",
         )
-
         return self.__index.batch_search_with_distance(queries, topk, ef_search, num_threads)
 
     def get_dim(self):

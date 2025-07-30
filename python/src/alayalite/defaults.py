@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This module defines and exposes default configuration parameters for the AlayaLite library,
+such as default values for index build and search parameters.
+"""
+
 from ._alayalitepy import defaults as _defaults
 
 R = _defaults.R

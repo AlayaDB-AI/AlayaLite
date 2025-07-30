@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# RAG/Chunker/__init__.py
+"""
+This package provides various text chunking strategies, including fixed-size,
+sentence-based, and semantic chunking.
+"""
 
-from .Chunker import chunker, get_chunker
-from .FixSizeChunker import FixSizeChunker
-from .SemanticChunker import SemanticChunker
-from .SentenceChunker import SentenceChunker
+from .chunker import chunker, get_chunker
+from .fix_size_chunker import FixSizeChunker
+from .semantic_chunker import SemanticChunker
+from .sentence_chunker import SentenceChunker
 
 __all__ = ["FixSizeChunker", "SemanticChunker", "SentenceChunker", "chunker", "get_chunker"]

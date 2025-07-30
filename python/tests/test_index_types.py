@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+Unit tests for the AlayaLite Index, focusing on handling various vector data types.
+"""
+
 import unittest
 
 import numpy as np
@@ -21,6 +25,8 @@ from alayalite.utils import calc_gt, calc_recall
 
 
 class TestAlayaLiteIndex(unittest.TestCase):
+    """Test suite for index creation, fitting, and searching with different dtypes."""
+
     def setUp(self):
         self.client = Client()
 

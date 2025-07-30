@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This module provides the base class for all text chunker implementations.
+"""
+
 
 class BaseChunker:
     def __init__(self, chunk_size, chunk_overlap, separator=" ", length_function=len):

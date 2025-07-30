@@ -12,8 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This module defines common types, constants, and validation functions used throughout the alayalite library.
+"""
+
 from pathlib import Path
-from typing import Literal, Type, Union
+from typing import Literal, Type, Union, TypeAlias
 
 import numpy as np
 from numpy import typing as npt
@@ -22,9 +26,10 @@ from ._alayalitepy import IndexType as _IndexType
 from ._alayalitepy import MetricType as _MetricType
 from ._alayalitepy import QuantizationType as _QuantizationType
 
-IDType = Union[Type[np.uint64], Type[np.uint32]]
+IDType: TypeAlias = Union[Type[np.uint64], Type[np.uint32]]
 """ Type alias for one of {`numpy.uint64`, `numpy.uint32`} """
-VectorDType = Union[
+# pylint: disable=invalid-name
+VectorDType: TypeAlias = Union[
     Type[np.float32],
     Type[np.int8],
     Type[np.uint8],
@@ -33,15 +38,15 @@ VectorDType = Union[
     Type[np.uint32],
 ]
 """ Type alias for one of {`numpy.float32`, `numpy.int8`, `numpy.uint8`} """
-DistanceMetric = Literal["euclidean", "l2", "ip", "cosine"]
+DistanceMetric: TypeAlias = Literal["euclidean", "l2", "ip", "cosine"]
 """ Type alias for one of {"euclidean", "l2", "ip", "cosine"} """
-QuantizationType = Literal[None, "none", "sq8", "sq4"]
+QuantizationType: TypeAlias = Literal[None, "none", "sq8", "sq4"]
 """ Type alias for one of {None, "none", "sq8", "sq4"} """
-IndexType = Literal["hnsw", "flat"]
+IndexType: TypeAlias = Literal["hnsw", "flat"]
 """ Type alias for one of {"hnsw", "flat"} """
-VectorLike = npt.NDArray[VectorDType]  # type: ignore
+VectorLike: TypeAlias = npt.NDArray[VectorDType]  # type: ignore
 """ Type alias for something that can be treated as a vector """
-VectorLikeBatch = npt.NDArray[VectorDType]  # type: ignore
+VectorLikeBatch: TypeAlias = npt.NDArray[VectorDType]  # type: ignore
 """ Type alias for a batch of VectorLikes """
 
 _VALID_IDTYPES = [np.uint64, np.uint32]
@@ -65,15 +70,16 @@ __all__ = [
 
 def valid_dtype(dtype) -> np.dtype:
     _assert(
-        any(np.can_cast(dtype, _dtype) for _dtype in _VALID_DTYPES),
-        "Vector dtype must be of one of type {(np.single, np.float32), (np.byte, np.int8), (np.ubyte, np.uint8), (np.double, np.float64), (np.int32, np.int32), (np.uint32, np.uint32)}",
+        any(np.can_cast(dtype, dtype_) for dtype_ in _VALID_DTYPES),
+        "Vector dtype must be one of type {(np.single, np.float32), (np.byte, np.int8), "
+        "(np.ubyte, np.uint8), (np.double, np.float64), (np.int32, np.int32), (np.uint32, np.uint32)}",
     )
     return np.dtype(dtype)
 
 
 def valid_id_type(id_type) -> np.dtype:
     _assert(
-        any(np.can_cast(id_type, _dtype) for _dtype in _VALID_IDTYPES),
+        any(np.can_cast(id_type, dtype_) for dtype_ in _VALID_IDTYPES),
         "ID dtype must be of one of type {(np.uint64), (np.uint32)}",
     )
     return np.dtype(id_type)
@@ -133,7 +139,7 @@ def valid_index_type(index: str) -> _IndexType:
 
 def valid_max_nbrs(max_nbrs: np.uint32) -> np.uint32:
     _assert(
-        max_nbrs > 0 and max_nbrs < 1000,
+        0 < max_nbrs < 1000,
         "Max neighbors must be greater than 0 and less than 1000",
     )
     return max_nbrs

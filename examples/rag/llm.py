@@ -1,9 +1,21 @@
+"""
+This module provides a function to interact with a Large Language Model (LLM) API.
+"""
+
 import requests
 import json
 from typing import Callable, Generator
 
-def ask_llm(base_url: str, api_key: str, model: str, query: str, retrieved_docs: str, is_stream: bool = True) -> str | Callable[[], Generator[str, None, None]]:
 
+def ask_llm(
+    base_url: str,
+    api_key: str,
+    model: str,
+    *,
+    query: str,
+    retrieved_docs: str,
+    is_stream: bool = True,
+) -> str | Callable[[], Generator[str, None, None]]:
     prompt = f"""
     You are an expert Q&A system that is trusted around the world for your factual accuracy.
     Always answer the query using the provided context information, and not prior knowledge. Ensure your answers are fact-based and accurately reflect the context provided.
@@ -19,10 +31,7 @@ def ask_llm(base_url: str, api_key: str, model: str, query: str, retrieved_docs:
     Query: {query}
     """
 
-    header = {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + api_key
-    }
+    header = {"Content-Type": "application/json", "Authorization": "Bearer " + api_key}
 
     context = [{"role": "user", "content": prompt}]
     data = {"model": model, "messages": context, "stream": is_stream}
@@ -40,10 +49,11 @@ def ask_llm(base_url: str, api_key: str, model: str, query: str, retrieved_docs:
         if not is_stream:
             if not response.ok:
                 print(f"Error during requesting: {response.status_code}")
-                return ''
+                return ""
             result = response.json()
-            return result['choices'][0]['message']['content'].strip()
+            return result["choices"][0]["message"]["content"].strip()
         else:
+
             def generate():
                 i = 0
                 for line in response.iter_lines():
@@ -69,8 +79,9 @@ def ask_llm(base_url: str, api_key: str, model: str, query: str, retrieved_docs:
                     elif len(line_str.strip()) > 0:
                         print(line_str)
                         yield line_str
-            return generate
 
+            return generate
+    # pylint: disable=broad-exception-caught
     except Exception as e:
         print(f"Error during requesting: {e}")
-        return ''
+        return ""

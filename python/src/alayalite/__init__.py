@@ -12,9 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# 忽略与 "subnormal numbers" 相关的警告
-import warnings
+"""
+AlayaLite Python SDK.
 
+This is the main entry point for the alayalite package, providing easy access
+to all key components like the Client, Collection, and utility functions.
+"""
+
+import warnings
+from .client import Client  # noqa: E402
+from .collection import Collection  # noqa: E402
+from .index import Index  # noqa: E402
+from .utils import calc_gt, calc_recall, load_fvecs, load_ivecs  # noqa: E402
+
+# 忽略与 "subnormal numbers" 相关的警告
 warnings.filterwarnings(
     "ignore",  # 隐藏警告
     message="The value of the smallest subnormal for <class 'numpy.float32'> type is zero.",
@@ -23,10 +34,6 @@ warnings.filterwarnings(
     "ignore", message="The value of the smallest subnormal for <class 'numpy.float64'> type is zero."
 )
 
-from .client import Client  # noqa: E402
-from .collection import Collection  # noqa: E402
-from .index import Index  # noqa: E402
-from .utils import calc_gt, calc_recall, load_fvecs, load_ivecs  # noqa: E402
 
 __all__ = [
     "Client",

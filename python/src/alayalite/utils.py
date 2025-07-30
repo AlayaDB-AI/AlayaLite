@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This module provides utility functions for vector database operations,
+including loading vector files, calculating recall, and generating ground truth data.
+"""
+
 import hashlib
 
 import numpy as np

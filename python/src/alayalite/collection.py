@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This module defines the Collection class, which manages documents,
+their embeddings, and the associated vector index.
+"""
+
 import os
 import pickle
 from typing import List, Optional
@@ -24,6 +29,7 @@ from .index import Index
 from .schema import IndexParams, load_schema
 
 
+# pylint: disable=unused-private-member
 class Collection:
     """
     @brief Collection class to manage a collection of documents and their embeddings.
@@ -54,16 +60,16 @@ class Collection:
         Args:
             vectors (List[List[float]]): A list of query vectors.
             limit (int): The number of nearest neighbors to retrieve per query.
-            ef_search (int, optional): Search parameter controlling the trade-off between accuracy and speed. Default is 100.
+            ef_search (int, optional): Search parameter. Default is 100.
             num_threads (int, optional): Number of threads for search. Default is 1.
 
         Returns:
             pd.DataFrame: A DataFrame containing the retrieved documents and their metadata.
 
         Example:
-            >>> collection.batch_query([[0.1, 0.2, 0.3]], limit=2, ef_search=10, num_threads=1)
-            {'id': [[1.0, 2.0]], 'document': [['Document 1', 'Document 2']], 'metadata': [[{'category': 'A'}, {'category': 'B'}]], 'distance': [[0.0, 0.27000001072883606]]}
-
+            >>> collection.batch_query([[0.1, 0.2, 0.3]], limit=2, ef_search=10)
+            {'id': [[1.0, 2.0]], 'document': [['Doc 1', 'Doc 2']],
+             'metadata': [[{'cat': 'A'}, {'cat': 'B'}]], 'distance': [[0.0, 0.27]]}
         """
         _assert(self.__index_py is not None, "Index is not init yet")
         _assert(len(vectors) > 0, "vectors must not be empty")
@@ -89,20 +95,19 @@ class Collection:
             ret["distance"].append(distances.tolist())
         return ret
 
-    def filter_query(self, filter: dict, limit: Optional[int] = None) -> pd.DataFrame:
+    def filter_query(self, metadata_filter: dict, limit: Optional[int] = None) -> pd.DataFrame:
         """
         Filter the DataFrame based on given conditions and return a subset of rows.
 
         Args:
-            filter (dict): A dictionary storing the filter conditions on metadata.
-            limit (Optional[int]): Maximum number of rows to return. If None, returns all matching rows.
+            metadata_filter (dict): A dictionary storing the filter conditions on metadata.
+            limit (Optional[int]): Maximum number of rows to return.
         Returns:
             pd.DataFrame: A filtered copy of the original DataFrame matching all conditions.
         Example:
-            >>> collection.filter_query({'category': ['A', 'B'], 'status': 1}, limit=10)
-            Returns first 10 rows where category is either 'A' or 'B' AND status equals 1 in metadata column.
+            >>> collection.filter_query({'category': 'A', 'status': 1}, limit=10)
         """
-        mask = self.__dataframe["metadata"].apply(lambda x: all(x.get(k) == v for k, v in filter.items()))
+        mask = self.__dataframe["metadata"].apply(lambda x: all(x.get(k) == v for k, v in metadata_filter.items()))
         filtered_df = self.__dataframe[mask]
 
         if limit is not None:
@@ -126,30 +131,19 @@ class Collection:
             self.__index_py = Index(self.__name, params)
             self.__index_py.fit(np.array([item[2] for item in items]), ef_construction=100, num_threads=1)
             print(type(items[0][0]))
-            for i, (id, document, _, metadata) in enumerate(items):
-                self.__dataframe = pd.concat(
-                    [self.__dataframe, pd.DataFrame([{"id": id, "document": document, "metadata": metadata}])],
-                    ignore_index=True,
-                )
-
-                self.__outer_inner_map[id] = i  # the inner index is start from 0, and increase by 1 when fitting.
-                self.__inner_outer_map[i] = id
+            for i, (item_id, document, _, metadata) in enumerate(items):
+                df_to_add = pd.DataFrame([{"id": item_id, "document": document, "metadata": metadata}])
+                self.__dataframe = pd.concat([self.__dataframe, df_to_add], ignore_index=True)
+                self.__outer_inner_map[item_id] = i
+                self.__inner_outer_map[i] = item_id
         else:
             for item in items:
-                (
-                    id,
-                    document,
-                    embedding,
-                    metadata,
-                ) = item
-                self.__dataframe = pd.concat(
-                    [self.__dataframe, pd.DataFrame([{"id": id, "document": document, "metadata": metadata}])],
-                    ignore_index=True,
-                )
-
+                item_id, document, embedding, metadata = item
+                df_to_add = pd.DataFrame([{"id": item_id, "document": document, "metadata": metadata}])
+                self.__dataframe = pd.concat([self.__dataframe, df_to_add], ignore_index=True)
                 index_id = self.__index_py.insert(np.array(embedding))
-                self.__outer_inner_map[id] = index_id
-                self.__inner_outer_map[index_id] = id
+                self.__outer_inner_map[item_id] = index_id
+                self.__inner_outer_map[index_id] = item_id
 
     # List of (id, document, metadata, distance)
     def upsert(self, items: List[tuple]):
@@ -160,39 +154,25 @@ class Collection:
             items (List[tuple]): A list of tuples containing (id, document, embedding, metadata).
         """
         if self.__index_py is None:
-            self.__index_py = Index(self.__name, IndexParams())
-            self.__index_py.fit(np.array([item[2] for item in items]), ef_construction=100, num_threads=1)
-            for i in range(len(items)):
-                id, document, embedding, metadata = items[i]
-                self.__dataframe = pd.concat(
-                    [self.__dataframe, pd.DataFrame([{"id": id, "document": document, "metadata": metadata}])],
-                    ignore_index=True,
-                )
-
-                self.__outer_inner_map[id] = i  # the inner index is start from 0, and increase by 1 when fitting.
-                self.__inner_outer_map[i] = id
+            self.insert(items)
         else:
             for item in items:
-                id, document, embedding, metadata = item
-                if id in self.__outer_inner_map:
-                    self.__index_py.remove(self.__outer_inner_map[id])
+                item_id, document, embedding, metadata = item
+                if item_id in self.__outer_inner_map:
+                    self.__index_py.remove(self.__outer_inner_map[item_id])
                     new_index_id = self.__index_py.insert(np.array(embedding))
-                    self.__outer_inner_map[id] = new_index_id
-                    self.__inner_outer_map[new_index_id] = id
-                    self.__dataframe.loc[self.__dataframe["id"] == id, ["id", "document", "metadata"]] = [
-                        id,
+                    self.__outer_inner_map[item_id] = new_index_id
+                    self.__inner_outer_map[new_index_id] = item_id
+                    self.__dataframe.loc[self.__dataframe["id"] == item_id, ["document", "metadata"]] = [
                         document,
                         metadata,
                     ]
                 else:
-                    self.__dataframe = pd.concat(
-                        [self.__dataframe, pd.DataFrame([{"id": id, "document": document, "metadata": metadata}])],
-                        ignore_index=True,
-                    )
-
+                    df_to_add = pd.DataFrame([{"id": item_id, "document": document, "metadata": metadata}])
+                    self.__dataframe = pd.concat([self.__dataframe, df_to_add], ignore_index=True)
                     index_id = self.__index_py.insert(embedding)
-                    self.__outer_inner_map[id] = index_id
-                    self.__inner_outer_map[index_id] = id
+                    self.__outer_inner_map[item_id] = index_id
+                    self.__inner_outer_map[index_id] = item_id
 
     def delete_by_id(self, ids: List[str]):
         """
@@ -201,12 +181,12 @@ class Collection:
         Args:
             ids (List[str]): List of document IDs to delete.
         """
-        self.__dataframe = self.__dataframe[~self.__dataframe["id"].isin(ids)]
-        for id in ids:
-            if id in self.__outer_inner_map:
-                self.__index_py.remove(self.__outer_inner_map[id])
-                inner_id = self.__outer_inner_map[id]
-                del self.__outer_inner_map[id]
+        self.__dataframe.drop(ids, inplace=True, errors="ignore")
+        for item_id in ids:
+            if item_id in self.__outer_inner_map:
+                inner_id = self.__outer_inner_map[item_id]
+                self.__index_py.remove(inner_id)
+                del self.__outer_inner_map[item_id]
                 del self.__inner_outer_map[inner_id]
 
     def get_by_id(self, ids: List[str]):
@@ -222,19 +202,22 @@ class Collection:
         """
         return self.__dataframe[self.__dataframe["id"].isin(ids)].to_dict(orient="list")
 
-    def delete_by_filter(self, filter: dict):
+    def delete_by_filter(self, metadata_filter: dict):
         """
         Deletes items from the collection based on a metadata filter.
 
         Args:
-            filter (dict): A dictionary storing the filter conditions on metadata.
+            metadata_filter (dict): A dictionary storing the filter conditions on metadata.
         """
-        mask = self.__dataframe["metadata"].apply(lambda x: all(x.get(k) == v for k, v in filter.items()))
-        for _, row in self.__dataframe[mask].iterrows():
-            inner_id = self.__outer_inner_map[row["id"]]
-            self.__index_py.remove(self.__outer_inner_map[row["id"]])
-            del self.__outer_inner_map[row["id"]]
-            del self.__inner_outer_map[inner_id]
+        mask = self.__dataframe["metadata"].apply(lambda x: all(x.get(k) == v for k, v in metadata_filter.items()))
+        rows_to_delete = self.__dataframe[mask]
+        for _, row in rows_to_delete.iterrows():
+            item_id = row.name
+            if item_id in self.__outer_inner_map:
+                inner_id = self.__outer_inner_map[item_id]
+                self.__index_py.remove(inner_id)
+                del self.__outer_inner_map[item_id]
+                del self.__inner_outer_map[inner_id]
         self.__dataframe = self.__dataframe[~mask]
 
     def save(self, url):

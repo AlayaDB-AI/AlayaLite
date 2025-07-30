@@ -12,6 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This module defines the schema for indices and collections, including
+parameter classes and functions for saving and loading schema files.
+"""
+
 import json
 import os
 import shutil
@@ -37,6 +42,8 @@ __all__ = ["IndexParams", "load_schema", "save_schema"]
 
 @dataclass
 class IndexParams:
+    """Parameters for defining a vector index."""
+
     index_type: str = "hnsw"
     data_type: VectorDType = np.float32
     id_type: IDType = np.uint32
@@ -151,6 +158,8 @@ class IndexParams:
 
 @classmethod
 class RAGParams:
+    """Parameters for configuring Retrieval-Augmented Generation (RAG) processes."""
+
     chunker: str = "fix_size"  # [fix_size, semantic, sentence]
     chunk_size: int = 1024
     chunk_overlap: int = 0
@@ -163,14 +172,14 @@ class RAGParams:
 def load_schema(url) -> dict:
     if not os.path.exists(url):
         raise FileNotFoundError("The schema file does not exist!")
-    with open(url) as f:
+    with open(url, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
 def save_schema(schema_url, schema_map):
     schema_bak_address = schema_url + ".bak"
     shutil.copy2(schema_url, schema_bak_address)
-    with open(schema_url, "w") as f:
+    with open(schema_url, "w", encoding="utf-8") as f:
         json.dump(schema_map, f, indent=4)
         os.remove(schema_bak_address)
 

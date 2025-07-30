@@ -12,9 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+This module provides the FixSizeChunker class for splitting text into fixed-size chunks.
+"""
+
 import os
 import sys
 
+from langchain_text_splitters import CharacterTextSplitter
 from rag.chunker.base import BaseChunker
 
 parent_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -28,19 +33,20 @@ class FixSizeChunker(BaseChunker):
     Attributes:
         chunk_size (int): The maximum size of each chunk.
         chunk_overlap (int): The number of overlapping tokens between chunks.
-        separator (str): The separator string to use for chunking (default is "\n\n").
+        separator (str): The separator string to use for chunking (default is "\\n\\n").
         length_function (function): Function to calculate the length of a chunk (default is len).
     """
 
-    def __init__(self, chunk_size, chunk_overlap, separator=" ", length_function=len):
-        super().__init__(chunk_size, chunk_overlap, separator, length_function)
-
     def chunking(self, docs):
-        # print(f"输入文本类型: {type(docs)}")  # 应为 str
-        # print(f"文本中的换行符数量: {docs.count('\n')}")
+        """
+        Splits a document into chunks of a fixed size.
 
-        from langchain_text_splitters import CharacterTextSplitter
+        Args:
+            docs (str): The document text to be chunked.
 
+        Returns:
+            list: A list of text chunks.
+        """
         text_splitter = CharacterTextSplitter(
             separator="\n",
             chunk_size=self.chunk_size,
@@ -48,5 +54,4 @@ class FixSizeChunker(BaseChunker):
             length_function=self.length_function,
             is_separator_regex=False,
         )
-
         return text_splitter.split_text(docs)

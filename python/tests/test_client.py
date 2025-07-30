@@ -12,12 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""
+Unit tests for the AlayaLite Client class.
+"""
+
 import unittest
 
 from alayalite import Client, Collection, Index
 
 
 class TestClient(unittest.TestCase):
+    """Test suite for client operations like creating, getting, and deleting collections and indices."""
+
     def setUp(self):
         self.client = Client()
 

@@ -1,84 +1,93 @@
+"""
+This module provides functions for a Retrieval-Augmented Generation (RAG)
+example, including database reset, text insertion, and querying using AlayaLite.
+"""
+
 from alayalite import Client
-
 import traceback
-
 from utils import splitter, embedder
 
 
+# Initialize the client globally
 client = Client()
 
+
 def reset_db():
-    global client 
+    """Resets the AlayaLite database."""
     client.reset()
 
-def insert_text(collection_name: str, 
-                docs: str, 
-                embed_model_path: str, 
-                chunksize: int = 256, 
-                overlap: int = 25) -> bool:
 
-    global client 
-
+def insert_text(
+    collection_name: str, docs: str, embed_model_path: str, chunksize: int = 256, overlap: int = 25
+) -> bool:
+    """Splits, embeds, and inserts text into a specified collection."""
     chunks = splitter(docs, chunksize, overlap)
-    print(f'Splitting text into {len(chunks)} chunks')
-    
-    embeddings = embedder(chunks, embed_model_path)
-    print(f'Embedding {len(chunks)} chunks into vectors')
+    print(f"Splitting text into {len(chunks)} chunks")
 
-    if len(embeddings) == 0:
-        print('Fail to embed chunks. Not to insert')
+    embeddings = embedder(chunks, embed_model_path)
+    print(f"Embedding {len(chunks)} chunks into vectors")
+
+    if not embeddings:
+        print("Fail to embed chunks. Not to insert")
         return False
-    
-    print(f'Inserting {len(chunks)} chunks')
+
+    print(f"Inserting {len(chunks)} chunks")
     try:
         collection = client.get_or_create_collection(collection_name)
-        items = []      # List of (id, document, embedding, metadata)
-        for i in range(0, len(chunks)):
-            items.append((str(i), chunks[i], embeddings[i], None))
+        items = [(str(i), chunks[i], embeddings[i], None) for i in range(len(chunks))]
         collection.insert(items)
+    # pylint: disable=broad-exception-caught
     except Exception as e:
         print(f"Error during index creation: {e}")
         traceback.print_exc()
         return False
-    print(f'Insertion done!')
+    print("Insertion done!")
 
-    return True     # success
+    return True  # success
 
 
-def query_text(collection_name: str, embed_model_path: str, query: str, top_k = 5) -> str:
-
-    global client
-
+def query_text(collection_name: str, embed_model_path: str, query: str, top_k=5) -> str:
+    """Queries the collection and retrieves the top_k most relevant documents."""
+    retrieved_docs = ""
     try:
         collection = client.get_collection(collection_name)
         if collection:
             processed_query = embedder([query], embed_model_path)
             # return type: DataFrame[id, document, distance, metadata]
-            # use result[field_name][0] to get the column data
-            result = collection.batch_query(processed_query, top_k)
-            retrieved_docs: str = '\n\n'.join(result['document'][0])
-        else:
-            retrieved_docs: str = ''
+            query_result = collection.batch_query(processed_query, top_k)
+            retrieved_docs = "\n\n".join(query_result["document"][0])
+    # pylint: disable=broad-exception-caught
     except Exception as e:
         print(f"Error during retrieval: {e}")
         traceback.print_exc()
-        retrieved_docs = ''
-    
+
     return retrieved_docs
+
 
 if __name__ == "__main__":
     from llm import ask_llm
 
-    with open("test_docs.txt", "r") as fp:
-        sample_text = fp.read()
-    query = "What are higher-order chunking techniques?"
+    # Specify UTF-8 encoding for cross-platform compatibility.
+    with open("test_docs.txt", "r", encoding="utf-8") as fp:
+        sample_text_main = fp.read()
 
-    llm_url = 'Your LLM service base URL here'
-    llm_api_key = 'Your API key here'
-    llm_model = 'deepseek-v3'
-    embed_model_path = "BAAI/bge-small-zh-v1.5"
+    # Use distinct variable names to avoid conflicts with function parameters.
+    query_main = "What are higher-order chunking techniques?"
+    llm_url_main = "Your LLM service base URL here"
+    llm_api_key_main = "Your API key here"
+    llm_model_main = "deepseek-v3"
+    embed_model_path_main = "BAAI/bge-small-zh-v1.5"
 
-    insert_text(collection_name="test", embed_model_path=embed_model_path, docs=sample_text, chunksize=128)
-    retrieved_docs = query_text(collection_name="test", embed_model_path=embed_model_path, query=query, top_k=5)
-    result = ask_llm(llm_url, llm_api_key, llm_model, query, retrieved_docs, is_stream=False)
-    print(f'=== Response ===\n{result}')
+    insert_text(collection_name="test", embed_model_path=embed_model_path_main, docs=sample_text_main, chunksize=128)
+    retrieved_docs_main = query_text(
+        collection_name="test", embed_model_path=embed_model_path_main, query=query_main, top_k=5
+    )
+    final_result = ask_llm(
+        llm_url_main,
+        llm_api_key_main,
+        llm_model_main,
+        query=query_main,
+        retrieved_docs=retrieved_docs_main,
+        is_stream=False,
+    )
+    print(f"=== Response ===\n{final_result}")
