@@ -19,9 +19,9 @@ target_link_libraries(
   AlayaLite
 )
 
-set_target_properties(${python_module_name} 
-  PROPERTIES 
-  PREFIX "" 
+set_target_properties(${python_module_name}
+  PROPERTIES
+  PREFIX ""
   CXX_VISIBILITY_PRESET "hidden"
   INSTALL_RPATH "$ORIGIN"
   BUILD_WITH_INSTALL_RPATH TRUE

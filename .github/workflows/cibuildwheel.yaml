@@ -1,6 +1,7 @@
+---
 name: Build
 
-on:
+on  :
   workflow_dispatch:
 
 jobs:
@@ -13,28 +14,28 @@ jobs:
         os: [ubuntu-latest]
 
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up QEMU
-        if: runner.os == 'Linux'
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: all
+    - uses: actions/checkout@v4
+    - name: Set up QEMU
+      if: runner.os == 'Linux'
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: all
 
-      - name: Restore Caches
-        uses: ./.github/actions/cache-restore
+    - name: Restore Caches
+      uses: ./.github/actions/cache-restore
 
-      - name: Install uv
-        if: runner.os == 'macOS'
-        uses: astral-sh/setup-uv@v5
+    - name: Install uv
+      if: runner.os == 'macOS'
+      uses: astral-sh/setup-uv@v5
 
-      - name: Install cibuildwheel
-        uses: pypa/cibuildwheel@v3.0.0
-        env:
-          CIBW_ARCHS_LINUX: aarch64, x86_64
+    - name: Install cibuildwheel
+      uses: pypa/cibuildwheel@v3.0.0
+      env:
+        CIBW_ARCHS_LINUX: aarch64, x86_64
           # CIBW_ARCHS_MACOS: x86_64, arm64
 
-      - name: Upload wheels
-        uses: actions/upload-artifact@v4
-        with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
-          path: ./wheelhouse/*.whl
+    - name: Upload wheels
+      uses: actions/upload-artifact@v4
+      with:
+        name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+        path: ./wheelhouse/*.whl

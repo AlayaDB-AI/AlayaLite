@@ -1,3 +1,4 @@
+---
 float:
   any:
   - base_args: ['@metric']
@@ -9,8 +10,8 @@ float:
     run_groups:
       alayalite:
         #### index_type HNSW FLAT
-        args: 
-          M: 32 
+        args:
+          M: 32
           R: [32, 48, 64, 96]
           L: 200
           index_type: HNSW

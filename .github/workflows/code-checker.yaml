@@ -1,27 +1,28 @@
-name: Code checker
-on: [push, pull_request]
+---
+name       : Code checker
+on         : [push, pull_request]
 
-env:
+env        :
   LLVM_VERSION: 18
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-jobs:
+jobs       :
   commit-format-check:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: gsactions/commit-message-checker@v2
-        with:
-          pattern: '^(feat|fix|docs|style|refactor|chore|perf|test|build|ci|revert)(\(\S+\))?: .+'
-          error: "Invalid commit type"
-          excludeDescription: "true"
-          excludeTitle: "false"
-          checkAllCommitMessages: "true"
-          accessToken: ${{ secrets.GITHUB_TOKEN }}
+    - uses: actions/checkout@v4
+    - uses: gsactions/commit-message-checker@v2
+      with:
+        pattern: '^(feat|fix|docs|style|refactor|chore|perf|test|build|ci|revert)(\(\S+\))?: .+'
+        error: Invalid commit type
+        excludeDescription: 'true'
+        excludeTitle: 'false'
+        checkAllCommitMessages: 'true'
+        accessToken: ${{ secrets.GITHUB_TOKEN }}
 
   # Automatically detect spelling errors in the code library
   # Pure spelling checks, such as "recieve" for "receive" and "enviroment" for "environment."
@@ -29,87 +30,89 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: crate-ci/typos@v1.23.6
-        with:
-          config: ./.typo.toml
+    - uses: actions/checkout@v4
+    - uses: crate-ci/typos@v1.23.6
+      with:
+        config: ./.typo.toml
 
   py-format-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/ruff-action@v3
-        with:
-          src: >-
-            ./python
-            ./scripts
-            ./conanfile.py
-            ./examples
-          args: "format --check --diff"
+    - uses: actions/checkout@v4
+    - uses: astral-sh/ruff-action@v3
+      with:
+        src: >-
+          ./python
+          ./scripts
+          ./conanfile.py
+          ./examples
+        args: format --check --diff
 
   py-lint-check:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Install uv
-        # if: runner.os == 'macOS'
-        uses: astral-sh/setup-uv@v5
+    - name: Restore Caches
+      uses: ./.github/actions/cache-restore
 
-      - name: Analysing the code with pylint
-        run: |
-          uvx pylint --rcfile=./python/.pylintrc \
-            ./examples/**/*.py \
-            ./python/src/alayalite/**/*.py \
-            ./python/tests/**/*.py
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Analysing the code with pylint
+      run: |
+        uvx pylint --rcfile=./python/.pylintrc \
+          ./examples/**/*.py \
+          ./python/src/alayalite/**/*.py \
+          ./python/tests/**/*.py
 
   py-unit-test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Restore Caches
-        uses: ./.github/actions/cache-restore
+    - name: Restore Caches
+      uses: ./.github/actions/cache-restore
 
-      - name: Install uv
+    - name: Install uv
         # if: runner.os == 'macOS'
-        uses: astral-sh/setup-uv@v5
+      uses: astral-sh/setup-uv@v5
 
-      - name: Run Python unit tests
-        run: uv run pytest
+    - name: Run Python unit tests
+      run: uv run pytest
 
   cpp-lint-check:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     needs: [typo-check, commit-format-check, py-format-check, py-lint-check]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
 
-      - name: Restore Caches
-        uses: ./.github/actions/cache-restore
+    - name: Restore Caches
+      uses: ./.github/actions/cache-restore
 
-      - name: Set up C++ environment
-        uses: aminya/setup-cpp@v1
-        with:
-          compiler: llvm-${{ env.LLVM_VERSION }}
-          cpplint: true
-          clang-tidy: true
-          clang-format: true
-          cmake: true
-          ninja: true
-          conan: true
+    - name: Set up C++ environment
+      uses: aminya/setup-cpp@v1
+      with:
+        compiler: llvm-${{ env.LLVM_VERSION }}
+        cpplint: true
+        clang-tidy: true
+        clang-format: true
+        cmake: true
+        ninja: true
+        conan: true
 
-      - name: Prepare compile_commands.json
-        run: |
-          mkdir -p build 
-          cd build 
-          clang++ --version
-          CC=clang CXX=clang++ cmake .. -G Ninja -DENABLE_UNIT_TESTS=ON -DENABLE_COVERAGE=ON
+    - name: Prepare compile_commands.json
+      run: |
+        mkdir -p build
+        cd build
+        clang++ --version
+        CC=clang CXX=clang++ cmake .. -G Ninja -DENABLE_UNIT_TESTS=ON -DENABLE_COVERAGE=ON
 
-      - name: run check
-        run: |
-          ./scripts/ci/cpplint/ci_script.sh
+    - name: run check
+      run: |
+        ./scripts/ci/cpplint/ci_script.sh

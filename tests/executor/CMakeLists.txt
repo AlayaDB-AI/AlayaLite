@@ -23,4 +23,3 @@ if(ENABLE_COVERAGE)
 else()
     target_link_libraries(executor_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 endif()
-

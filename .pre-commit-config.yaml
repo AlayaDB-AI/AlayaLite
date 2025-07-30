@@ -12,11 +12,6 @@ repos:
     # - id: ruff-check
     #   args: [--fix]
 
-- repo: https://github.com/pycqa/isort
-  rev: 6.0.1
-  hooks:
-  - id: isort
-
 #===========================================================================
 #                            CODE QUALITY PRE_COMMIT HOOK
 #===========================================================================

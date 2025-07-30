@@ -18,7 +18,7 @@ The overview is shown below
 
 ## 1. Setup Environment
 
-We prepare a docker environment for you to setup the project quickly. 
+We prepare a docker environment for you to setup the project quickly.
 `Docker` is an open source container engine.
 It allows applications to run consistently across environments and platforms.
 
@@ -71,7 +71,7 @@ Input your LLM service URL and api key upload the files, then you can try to ask
 We provide a test document `test_docs.txt` for you.
 
 ```
-Sample question: 
+Sample question:
 What are advanced chunking techniques?
 ```
 

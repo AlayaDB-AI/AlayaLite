@@ -1,20 +1,21 @@
-name: "alayalite cache"
-description: ""
-runs:
-  using: "composite"
+---
+name       : alayalite cache
+description: ''
+runs       :
+  using: composite
   steps:
-    - name: Cache Conan data
-      uses: actions/cache@v4
-      with:
-        path: ~/.conan2
-        key: conan-${{ runner.os }}-${{ hashFiles('conanfile.*') }}
-        restore-keys: |
-          conan-${{ runner.os }}-
+  - name: Cache Conan data
+    uses: actions/cache@v4
+    with:
+      path: ~/.conan2
+      key: conan-${{ runner.os }}-${{ hashFiles('conanfile.*') }}
+      restore-keys: |
+        conan-${{ runner.os }}-
 
-    - name: Cache uv packages
-      uses: actions/cache@v4
-      with:
-        path: ~/.cache/uv
-        key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-        restore-keys: |
-          uv-${{ runner.os }}-
+  - name: Cache uv packages
+    uses: actions/cache@v4
+    with:
+      path: ~/.cache/uv
+      key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+      restore-keys: |
+        uv-${{ runner.os }}-

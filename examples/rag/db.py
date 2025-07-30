@@ -88,7 +88,7 @@ if __name__ == "__main__":
     # Use distinct variable names to avoid conflicts with function parameters.
     query_main = "What are higher-order chunking techniques?"
     llm_url_main = "Your LLM service base URL here"
-    llm_api_key_main = "Your API key here"
+    llm_api_key_main = "Your API key here"  # pragma: allowlist secret
     llm_model_main = "deepseek-v3"
     embed_model_path_main = "BAAI/bge-small-zh-v1.5"
 

@@ -1,4 +1,4 @@
-# AlayaLite Python Interfaces 
+# AlayaLite Python Interfaces
 
 This page introduces the Python interfaces in AlayaLite, which include two layers:
 
@@ -10,7 +10,7 @@ This page introduces the Python interfaces in AlayaLite, which include two layer
     <img src="./.assets/user-protrait.svg" width=800 alt="AlayaDB Logo"></a>
 </p>
 
-In particular, collections and indexes are managed by **Client**. 
+In particular, collections and indexes are managed by **Client**.
 Next, we will introduce **Client**, **Collection** and **Index** in detail.
 
 ## Client
@@ -63,7 +63,7 @@ collection = client.get_or_create_collection(name='your_collection_name')
 index = client.get_or_create_index(name='your_index_name')
 ```
 
-### Delete a collection 
+### Delete a collection
 In addition, you can deleting a collection or an index by following ways:
 ```python
 # Delete a collection
@@ -116,7 +116,7 @@ items = [(1, 'document1', [1.0, 2.0, 3.0], {'category': 'A'}), (2, 'document2', 
 
 collection.insert(items)
 ```
-* `insert(items: List[tuple])`: Inserts a list of tuples, where each tuple contains an id, a document, an embedding, and metadata. 
+* `insert(items: List[tuple])`: Inserts a list of tuples, where each tuple contains an id, a document, an embedding, and metadata.
 
 ### Upsert to a collection
 If you want to insert new items or update existing ones if ids already exist, the upsert method is available:
@@ -146,7 +146,7 @@ filter = {'category': ['A', 'B'], 'status': 1}
 
 filtered_results = collection.filter_query(filter, 10)
 ```
-* `filter_query(filter: dict, limit: Optional[int] = None)`: Filters the collection based on the given metadata conditions. 
+* `filter_query(filter: dict, limit: Optional[int] = None)`: Filters the collection based on the given metadata conditions.
 
 ### Delete by id
 To remove documents from the collection by their id, you can use the delete_by_id method:
@@ -204,7 +204,7 @@ index = Index()
 params = IndexParams()
 index = Index(name='your_index_name', params=params)
 ```
-* The `__init__` method takes an optional name (default is "default") and params (an instance of IndexParams). The index is not fully initialized at this point; it's a late - initialization process. In particular, the dimension, data type, et al. is not known until it is fitted or the first vector is inserted. In addition, you can set the parameter to set the metric type or restrict the index type, data type, et al. 
+* The `__init__` method takes an optional name (default is "default") and params (an instance of IndexParams). The index is not fully initialized at this point; it's a late - initialization process. In particular, the dimension, data type, et al. is not known until it is fitted or the first vector is inserted. In addition, you can set the parameter to set the metric type or restrict the index type, data type, et al.
 
 ### Build an index
 To build the index with a set of vectors, use the fit method:
@@ -292,7 +292,7 @@ loaded_index = Index.load(url, name)
 ```
 * `load(url: str, name: str)`: Loads an index from the specified directory. It returns an instance of the Index class with the loaded index data.
 
-<!-- 
+<!--
 
 ## Installation
 
@@ -311,7 +311,7 @@ bash build_support/pyinstall.sh
 > ```Bash
 > # Locally compile the python package
 > python -m build
-> 
+>
 > # Install the compiled package
 > pip install python/AlayaDBLite/AlayaDBLite-*.whl --force-reinstall
 > ```
@@ -346,11 +346,11 @@ client.fit(base_data, max_nbrs, fit_thread_num)
 >  :param L: The size of the dynamic candidate list for the construction phase.
 >  :param index_path: path to store the index
 >  :param index_prefix: prefix of the index file
-> 
+>
 >  :return: None
 >  """
 > ``` -->
-<!-- 
+<!--
 ### 4. Searching
 
 Perform batch and single searches as follows:
@@ -360,7 +360,7 @@ topk          = 10
 ef            = 100
 search_thread = 32
 
-# batch search 
+# batch search
 results = client.batch_search(query_data, topk, ef, search_thread)
 
 # single search
@@ -381,14 +381,14 @@ result  = client.search(query_data[0], topk, ef)
 >  :param topk: number of nearest neighbors to search for
 >  :param ef_search: the number of candidate to evaluate during the search
 >  :param num_threads: number of threads to use
-> 
+>
 >  :return: 2D array of nearest neighbors for each query
 >  """
-> 
+>
 > def search(
->      self, 
->      query: VectorLike, 
->      topk: int, 
+>      self,
+>      query: VectorLike,
+>      topk: int,
 >      ef_search: int = _defaults.EF_SEARCH
 >  ) -> VectorLike:
 >  """
@@ -396,7 +396,7 @@ result  = client.search(query_data[0], topk, ef)
 >  :param query: 1D array of query
 >  :param topk: number of nearest neighbors to search for
 >  :param ef_search: the number of candidate to evaluate during the search
-> 
+>
 >  :return: 1D array of nearest neighbors for the query
 >  """
 > ```
@@ -417,7 +417,7 @@ git clone git@github.com:erikbern/ann-benchmarks.git
 
 
 
-<!-- 
+<!--
 Install necessary dependencies:
 
 ```Bash

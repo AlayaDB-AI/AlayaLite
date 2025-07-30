@@ -17,7 +17,7 @@
 
 ## Features
 
-- **High Performance**: Modern vector techniques integrated into a well-designed architecture. 
+- **High Performance**: Modern vector techniques integrated into a well-designed architecture.
 - **Elastic Scalability**: Seamlessly scale across multiple threads, which is optimized by C++20 coroutines.
 - **Adaptive Flexibility**: Easy customization for quantization methods, metrics, and data types.
 - **Ease of Use**: [Intuitive APIs](./python/README.md) in Python.
@@ -39,7 +39,7 @@ from alayalite.utils import calc_recall, calc_gt
 import numpy as np
 
 # Initialize the client and create an index. The client can manage multiple indices with distinct names.
-client = Client() 
+client = Client()
 index = client.create_index("default")
 
 # Generate random vectors and queries, then calculate the ground truth top-10 nearest neighbors for each query.

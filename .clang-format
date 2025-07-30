@@ -1,8 +1,9 @@
-BasedOnStyle: Google
+---
+BasedOnStyle          : Google
 DerivePointerAlignment: false
-PointerAlignment: Right
-ColumnLimit: 100
+PointerAlignment      : Right
+ColumnLimit           : 100
 
 # Default for clang-8, changed in later clangs. Set explicitly for forwards
 # compatibility for students with modern clangs
-IncludeBlocks: Preserve
+IncludeBlocks         : Preserve

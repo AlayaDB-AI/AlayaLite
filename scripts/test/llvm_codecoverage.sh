@@ -3,9 +3,9 @@ set +e
 # Parameter settings
 ROOT_DIR=$(dirname $(dirname $(dirname "$(realpath "$0")")))
 BUILD_DIR="${ROOT_DIR}/build"
-BIN_DIR="${BUILD_DIR}/bin"         
+BIN_DIR="${BUILD_DIR}/bin"
 REPORT_DIR="${BUILD_DIR}/coverage_llvm"
-PROFDATA_FILE="merged.profdata" 
+PROFDATA_FILE="merged.profdata"
 
 # Clear old data
 rm -rf "$REPORT_DIR"/*.profraw 2>/dev/null

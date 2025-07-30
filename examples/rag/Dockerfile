@@ -20,7 +20,7 @@ RUN echo "tzdata tzdata/Areas select Asia" | debconf-set-selections && \
 
 # install required packages and alayalite
 RUN python3.11 -m pip install python-docx numpy streamlit langchain_text_splitters FlagEmbedding pypdf
-RUN python3.11 -m pip install alayalite 
+RUN python3.11 -m pip install alayalite
 
 # set the mirror of embedding models
 RUN echo "export HF_ENDPOINT=https://hf-mirror.com" >> ~/.bashrc
