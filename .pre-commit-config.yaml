@@ -1,0 +1,60 @@
+---
+repos:
+
+#===========================================================================
+#                            PYTHON FORMAT HOOK
+#===========================================================================
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.12.2
+  hooks:
+  - id: ruff-format
+    # TODO(zixuan): lint check
+    # - id: ruff-check
+    #   args: [--fix]
+
+- repo: https://github.com/pycqa/isort
+  rev: 6.0.1
+  hooks:
+  - id: isort
+
+#===========================================================================
+#                            CODE QUALITY PRE_COMMIT HOOK
+#===========================================================================
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v5.0.0
+  hooks:
+  - id: trailing-whitespace
+  - id: end-of-file-fixer
+  - id: check-added-large-files
+    args: [--maxkb=1000]
+  - id: check-merge-conflict
+  - id: check-yaml
+
+
+#===========================================================================
+#                            YAML FORMAT HOOK
+#===========================================================================
+- repo: https://github.com/jumanjihouse/pre-commit-hook-yamlfmt
+  rev: 0.2.1
+  hooks:
+  - id: yamlfmt
+    args: [--mapping, '2', --sequence, '2', --offset, '0', --colons, --width, '150']
+
+
+#===========================================================================
+#                            SECRET CHECK HOOK
+#===========================================================================
+- repo: https://github.com/Yelp/detect-secrets
+  rev: v1.5.0
+  hooks:
+  - id: detect-secrets
+
+#===========================================================================
+#                            COMMIT MSG CHECK HOOK
+#===========================================================================
+- repo: https://github.com/compilerla/conventional-pre-commit
+  rev: v4.2.0
+  hooks:
+  - id: conventional-pre-commit
+    stages: [commit-msg]
+    args: [--strict, feat, fix, docs, style, refactor, chore, perf, test, build, ci, revert]

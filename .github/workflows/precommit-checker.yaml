@@ -1,0 +1,22 @@
+---
+name: pre-commit
+
+on  :
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Restore Caches
+      uses: ./.github/actions/cache-restore
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Run pre-commit hooks (including yamlfmt)
+      run: uvx pre-commit run --all-files
