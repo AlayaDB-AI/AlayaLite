@@ -71,11 +71,6 @@ class Index:
     ):
         """
         Build the index with the given set of vectors.
-
-        Args:
-            vectors (VectorLikeBatch): A 2D array of vectors to construct the index.
-            ef_construction (int): Controls index construction accuracy. Default is 100.
-            num_threads (int): Number of threads for index construction. Default is 1.
         """
         if self.__is_initialized:
             raise RuntimeError("An index can be only fitted once")
@@ -102,13 +97,6 @@ class Index:
     def insert(self, vectors: VectorLike, ef: int = 100):
         """
         Insert a new vector into the index.
-
-        Args:
-            vectors (VectorLike): A 1D vector to be inserted.
-            ef (int): Search parameter controlling retrieval accuracy. Default is 100.
-
-        Returns:
-            int: The assigned ID of the inserted vector.
         """
         _assert(self.__index is not None, "Index is not init yet")
         _assert(vectors.ndim == 1, "vectors must be a 1D array")
@@ -128,9 +116,6 @@ class Index:
     def remove(self, vector_id: int) -> None:
         """
         Remove a vector from the index by ID.
-
-        Args:
-            vector_id (int): The ID of the vector to remove.
         """
         _assert(self.__index is not None, "Index is not init yet")
         self.__index.remove(vector_id)
@@ -138,14 +123,6 @@ class Index:
     def search(self, query: VectorLike, topk: int, ef_search: int = 100) -> VectorLike:
         """
         Perform a nearest neighbor search for a given query vector.
-
-        Args:
-            query (VectorLike): A 1D query vector.
-            topk (int): Number of nearest neighbors to retrieve.
-            ef_search (int): Search accuracy parameter. Default is 100.
-
-        Returns:
-            VectorLike: The top-k nearest neighbors.
         """
         _assert(self.__index is not None, "Index is not init yet")
         _assert(query.ndim == 1, "query must be a 1D array")
@@ -165,15 +142,6 @@ class Index:
     ) -> VectorLikeBatch:
         """
         Perform a batch search for multiple query vectors.
-
-        Args:
-            queries (VectorLikeBatch): A 2D array of query vectors.
-            topk (int): Number of nearest neighbors to retrieve per query.
-            ef_search (int): Search accuracy parameter. Default is 100.
-            num_threads (int): Number of threads to use for searching. Default is 1.
-
-        Returns:
-            VectorLikeBatch: The top-k nearest neighbors for each query.
         """
         _assert(self.__index is not None, "Index is not init yet")
         _assert(queries.ndim == 2, "queries must be a 2D array")
@@ -193,15 +161,6 @@ class Index:
     ) -> VectorLikeBatch:
         """
         Perform a batch search for multiple query vectors.
-
-        Args:
-            queries (VectorLikeBatch): A 2D array of query vectors.
-            topk (int): Number of nearest neighbors to retrieve per query.
-            ef_search (int): Search accuracy parameter. Default is 100.
-            num_threads (int): Number of threads to use for searching. Default is 1.
-
-        Returns:
-            VectorLikeBatch: The top-k nearest neighbors for each query.
         """
         _assert(self.__index is not None, "Index is not init yet")
         _assert(queries.ndim == 2, "queries must be a 2D array")
@@ -215,21 +174,18 @@ class Index:
     def get_dim(self):
         """
         Get the dimensionality of vectors stored in the index.
-
-        Returns:
-            int: The dimension of the indexed vectors.
         """
         return self.__dim
+
+    def get_dtype(self):
+        """
+        Get the data type of vectors stored in the index.
+        """
+        return self.__params.data_type
 
     def save(self, url) -> dict:
         """
         Save the index to a specified directory.
-
-        Args:
-            url (str): Path where the index should be saved.
-
-        Returns:
-            dict: Metadata describing the saved index.
         """
         if not os.path.exists(url):
             os.makedirs(url)
@@ -245,13 +201,6 @@ class Index:
     def load(cls, url, name):
         """
         Load an existing index from disk.
-
-        Args:
-            url (str): Directory where the index is stored.
-            name (str): Name of the index.
-
-        Returns:
-            Index: The loaded index instance.
         """
         index_url = os.path.join(url, name)
 
