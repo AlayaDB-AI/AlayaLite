@@ -8,9 +8,8 @@ repos:
   rev: v0.12.2
   hooks:
   - id: ruff-format
-    # TODO(zixuan): lint check
-    # - id: ruff-check
-    #   args: [--fix]
+  - id: ruff-check
+    args: [--fix]
 
 #===========================================================================
 #                            CODE QUALITY PRE_COMMIT HOOK

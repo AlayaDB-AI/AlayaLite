@@ -41,13 +41,17 @@ jobs       :
     steps:
     - uses: actions/checkout@v4
     - uses: astral-sh/ruff-action@v3
+
+    - name: Format code with Ruff
+      uses: astral-sh/ruff-action@v3
       with:
-        src: >-
-          ./python
-          ./scripts
-          ./conanfile.py
-          ./examples
-        args: format --check --diff
+        args: format
+
+    - name: Lint code with Ruff
+      uses: astral-sh/ruff-action@v3
+      with:
+        args: check
+
 
   py-lint-check:
     runs-on: ubuntu-latest
