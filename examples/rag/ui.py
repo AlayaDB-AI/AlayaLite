@@ -14,7 +14,7 @@ from db import reset_db, insert_text, query_text
 from llm import ask_llm
 
 # fix error print:
-# RuntimeError: Tried to instantiate class '__path__._path',
+
 # but it does not exist! Ensure that it is registered via torch::class_
 import torch
 import os
@@ -125,10 +125,11 @@ def main_interface():
                 st.session_state.chat_history = []
                 st.rerun()
 
+            timestamp = datetime.now().strftime("%Y%m%d")
             if st.download_button(
                 "💾 Export all records",
                 data=json.dumps(st.session_state.chat_history),
-                file_name=f"chat_{datetime.now().strftime('%Y%m%d')}.json",
+                file_name=f"chat_{timestamp}.json",
                 mime="application/json",
                 use_container_width=True,
             ):
