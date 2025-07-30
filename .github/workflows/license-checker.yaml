@@ -1,0 +1,19 @@
+name: License Header Checker
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  license-header-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Run License Header Checker (CI mode)
+        run: |
+          python3 scripts/license_check/license_scipt.py --check-only
