@@ -25,9 +25,9 @@ from .collection import Collection  # noqa: E402
 from .index import Index  # noqa: E402
 from .utils import calc_gt, calc_recall, load_fvecs, load_ivecs  # noqa: E402
 
-# 忽略与 "subnormal numbers" 相关的警告
+# Ignore warnings related to "subnormal numbers"
 warnings.filterwarnings(
-    "ignore",  # 隐藏警告
+    "ignore",
     message="The value of the smallest subnormal for <class 'numpy.float32'> type is zero.",
 )
 warnings.filterwarnings(
