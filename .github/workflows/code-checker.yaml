@@ -61,10 +61,9 @@ jobs:
 
       - name: Analysing the code with pylint
         run: |
-          uvx pylint --rcfile 
-            ./python/.pylintrc 
-            ./examples/**/*.py 
-            ./python/src/alayalite/**/*.py 
+          uvx pylint --rcfile=./python/.pylintrc \
+            ./examples/**/*.py \
+            ./python/src/alayalite/**/*.py \
             ./python/tests/**/*.py
 
   cpp-lint-check:
