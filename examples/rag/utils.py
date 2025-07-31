@@ -17,8 +17,8 @@ This module provides utility functions for text processing and embedding,
 including text splitting and interfacing with BAAI embedding models.
 """
 
-from typing import List
 import traceback
+from typing import List
 
 from FlagEmbedding import FlagAutoModel
 from langchain_text_splitters import RecursiveCharacterTextSplitter

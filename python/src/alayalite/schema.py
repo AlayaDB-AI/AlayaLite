@@ -172,7 +172,7 @@ class RAGParams:
 def load_schema(url) -> dict:
     if not os.path.exists(url):
         raise FileNotFoundError("The schema file does not exist!")
-    with open(url, "r", encoding="utf-8") as f:
+    with open(url, encoding="utf-8") as f:
         return json.load(f)
 
 

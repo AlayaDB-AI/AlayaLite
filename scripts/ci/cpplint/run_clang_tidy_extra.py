@@ -15,7 +15,7 @@ the configuration in this file.
 import re
 
 
-class CheckConfig(object):
+class CheckConfig:
     """Check paths against the built-in config"""
 
     def __init__(self):
@@ -43,6 +43,6 @@ class CheckConfig(object):
         for pat in self.ignore_pats:
             if re.match(pat, path):
                 if self.debug:
-                    print("match pat: {}, {} => don't run".format(pat, path))
+                    print(f"match pat: {pat}, {path} => don't run")
                 return True
         return False

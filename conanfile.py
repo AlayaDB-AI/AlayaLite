@@ -1,5 +1,5 @@
 from conan import ConanFile
-from conan.tools.cmake import CMakeToolchain, CMakeDeps, cmake_layout
+from conan.tools.cmake import CMakeDeps, CMakeToolchain
 
 
 class AlayaLiteConan(ConanFile):

@@ -25,7 +25,6 @@ from .collection import Collection
 from .index import Index
 from .schema import IndexParams, is_collection_url, is_index_url
 
-
 __all__ = ["Client"]
 
 

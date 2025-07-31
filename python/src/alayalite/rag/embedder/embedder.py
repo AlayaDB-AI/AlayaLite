@@ -18,11 +18,11 @@ This module provides factory functions for creating and using various text embed
 
 from typing import List, Tuple
 
+from .base import BaseEmbedding
 from .bge_embedder import BgeEmbedder
 from .jina_embedder import JinaEmbedder
 from .m3e_embedder import M3eEmbedder
 from .multilingual_embedder import MultilingualEmbedder
-from .base import BaseEmbedding
 
 
 def get_embedder(model_name: str = "bge-m3", model_path: str = "") -> BaseEmbedding:

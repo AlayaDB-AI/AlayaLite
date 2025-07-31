@@ -16,9 +16,10 @@
 This module provides a function to interact with a Large Language Model (LLM) API.
 """
 
-import requests
 import json
 from typing import Callable, Generator
+
+import requests
 
 
 def ask_llm(

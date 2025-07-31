@@ -17,7 +17,7 @@ This module defines common types, constants, and validation functions used throu
 """
 
 from pathlib import Path
-from typing import Literal, Type, Union, TypeAlias
+from typing import Literal, Type, TypeAlias, Union
 
 import numpy as np
 from numpy import typing as npt

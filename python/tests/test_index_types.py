@@ -19,7 +19,6 @@ Unit tests for the AlayaLite Index, focusing on handling various vector data typ
 import unittest
 
 import numpy as np
-
 from alayalite import Client
 from alayalite.utils import calc_gt, calc_recall
 

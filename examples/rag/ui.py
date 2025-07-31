@@ -17,21 +17,17 @@ This module provides the Streamlit user interface for a Retrieval-Augmented Gene
 It handles file uploads, knowledge base management, and the chat interface.
 """
 
-import streamlit as st
 import json
-from datetime import datetime
-from docx import Document
-from typing import Callable, Generator, Tuple
-from pypdf import PdfReader
-
-from db import reset_db, insert_text, query_text
-from llm import ask_llm
-
-# fix error print:
-
-# but it does not exist! Ensure that it is registered via torch::class_
-import torch
 import os
+from datetime import datetime
+from typing import Callable, Generator, Tuple
+
+import streamlit as st
+import torch
+from db import insert_text, query_text, reset_db
+from docx import Document
+from llm import ask_llm
+from pypdf import PdfReader
 
 torch.classes.__path__ = [os.path.join(torch.__path__[0], torch.classes.__file__)]
 USE_STREAM = True

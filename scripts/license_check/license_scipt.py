@@ -1,5 +1,4 @@
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -28,7 +27,7 @@ LICENSE_HEADER_CPP = """\
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -46,7 +45,8 @@ def has_license(content):
     return "Licensed under the Apache License" in content
 
 
-def check_license_file(file_path: Path, header_type: str):
+# The unused 'header_type' parameter has been removed.
+def check_license_file(file_path: Path):
     with file_path.open("r", encoding="utf-8") as f:
         content = f.read()
     return has_license(content)
@@ -79,7 +79,8 @@ def process_directory(directory: Path, check_only=False, missing_files=None):
             continue
         ext = file_path.suffix.lower()
         if ext in EXTENSIONS_PY:
-            has_it = check_license_file(file_path, "py")
+            # The second argument has been removed from the call.
+            has_it = check_license_file(file_path)
             if check_only:
                 if not has_it:
                     print(f"Missing license: {file_path}")
@@ -93,7 +94,8 @@ def process_directory(directory: Path, check_only=False, missing_files=None):
                 else:
                     unchanged += 1
         elif ext in EXTENSIONS_CPP:
-            has_it = check_license_file(file_path, "cpp")
+            # The second argument has been removed from the call.
+            has_it = check_license_file(file_path)
             if check_only:
                 if not has_it:
                     print(f"Missing license: {file_path}")

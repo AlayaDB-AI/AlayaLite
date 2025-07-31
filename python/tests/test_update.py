@@ -20,7 +20,6 @@ such as inserting vectors and handling capacity limits.
 import unittest
 
 import numpy as np
-
 from alayalite import Client
 
 

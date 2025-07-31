@@ -16,7 +16,6 @@ import os
 from dataclasses import dataclass, field
 
 import numpy as np
-
 from alayalite import Client, IndexParams
 
 from ..base.module import BaseANN

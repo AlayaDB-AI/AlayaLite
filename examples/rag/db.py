@@ -2,9 +2,9 @@
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# You may not use this file except in compliance with the License.
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,10 +17,10 @@ This module provides functions for a Retrieval-Augmented Generation (RAG)
 example, including database reset, text insertion, and querying using AlayaLite.
 """
 
-from alayalite import Client
 import traceback
-from utils import splitter, embedder
 
+from alayalite import Client
+from utils import embedder, splitter
 
 # Initialize the client globally
 client = Client()
@@ -50,7 +50,7 @@ def insert_text(
         collection = client.get_or_create_collection(collection_name)
         items = [(str(i), chunks[i], embeddings[i], None) for i in range(len(chunks))]
         collection.insert(items)
-    # pylint: disable=broad-exception-caught
+        # pylint: disable=broad-exception-caught
     except Exception as e:
         print(f"Error during index creation: {e}")
         traceback.print_exc()
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     from llm import ask_llm
 
     # Specify UTF-8 encoding for cross-platform compatibility.
-    with open("test_docs.txt", "r", encoding="utf-8") as fp:
+    with open("test_docs.txt", encoding="utf-8") as fp:
         sample_text_main = fp.read()
 
     # Use distinct variable names to avoid conflicts with function parameters.

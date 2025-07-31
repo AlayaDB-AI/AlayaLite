@@ -30,7 +30,7 @@ import sys
 def check(arguments, source_dir):
     formatted_filenames = []
     error = False
-    for directory, subdirs, filenames in os.walk(source_dir):
+    for directory, _subdirs, filenames in os.walk(source_dir):
         fullpaths = (os.path.join(directory, filename) for filename in filenames)
         source_files = [x for x in fullpaths if x.endswith(".h") or x.endswith(".cpp")]
         formatted_filenames.extend(
@@ -38,7 +38,7 @@ def check(arguments, source_dir):
             [
                 filename
                 for filename in source_files
-                if not any((fnmatch.fnmatch(filename, exclude_glob) for exclude_glob in exclude_globs))
+                if not any(fnmatch.fnmatch(filename, exclude_glob) for exclude_glob in exclude_globs)
             ]
         )
 
@@ -46,12 +46,12 @@ def check(arguments, source_dir):
         if not arguments.quiet:
             # Print out each file on its own line, but run
             # clang format once for all of the files
-            print("\n".join(map(lambda x: "Formatting {}".format(x), formatted_filenames)))
+            print("\n".join(f"Formatting {x}" for x in formatted_filenames))
         subprocess.check_call([arguments.clang_format_binary, "-i"] + formatted_filenames)
     else:
         for filename in formatted_filenames:
             if not arguments.quiet:
-                print("Checking {}".format(filename))
+                print(f"Checking {filename}")
             #
             # Due to some incompatibilities between Python 2 and
             # Python 3, there are some specific actions we take here
@@ -82,11 +82,11 @@ def check(arguments, source_dir):
                         original.splitlines(True),
                         formatted.splitlines(True),
                         fromfile=filename,
-                        tofile="{} (after clang format)".format(filename),
+                        tofile=f"{filename} (after clang format)",
                     )
                 )
                 if diff:
-                    print("{} had clang-format style issues".format(filename))
+                    print(f"{filename} had clang-format style issues")
                     # Print out the diff to stderr
                     error = True
                     sys.stderr.writelines(diff)

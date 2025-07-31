@@ -32,9 +32,6 @@ Compilation database setup:
 http://clang.llvm.org/docs/HowToSetupToolingForLLVM.html
 """
 
-from __future__ import division
-from __future__ import print_function
-
 import argparse
 import glob
 import json
@@ -50,7 +47,6 @@ import threading
 import traceback
 
 import yaml  # TERRIER: not necessary if we don't want automatic fixes
-
 from run_clang_tidy_extra import CheckConfig
 
 is_py2 = sys.version[0] == "2"
@@ -135,9 +131,9 @@ def get_tidy_invocation(
         os.close(handle)
         start.append(name)
     for arg in extra_arg:
-        start.append("-extra-arg=%s" % arg)
+        start.append(f"-extra-arg={arg}")
     for arg in extra_arg_before:
-        start.append("-extra-arg-before=%s" % arg)
+        start.append(f"-extra-arg-before={arg}")
     start.append("-p=" + build_path)
     if quiet:
         start.append("-quiet")
@@ -154,7 +150,7 @@ def merge_replacement_files(tmpdir, mergefile):
     mergekey = "Diagnostics"
     merged = []
     for replacefile in glob.iglob(os.path.join(tmpdir, "*.yaml")):
-        content = yaml.safe_load(open(replacefile, "r"))
+        content = yaml.safe_load(open(replacefile))
         if not content:
             continue  # Skip empty files.
         merged.extend(content.get(mergekey, []))
@@ -176,7 +172,7 @@ def check_clang_apply_replacements_binary(args):
     """Checks if invoking supplied clang-apply-replacements binary works."""
     try:
         subprocess.check_call([args.clang_apply_replacements_binary, "--version"])
-    except:
+    except Exception:
         print(
             "Unable to run clang-apply-replacements. Is clang-apply-replacements binary correctly specified?",
             file=sys.stderr,
@@ -200,7 +196,7 @@ def run_tidy(args, tmpdir, build_path, queue, lock, failed_files):
     """Takes filenames out of queue and runs clang-tidy on them."""
     while True:
         name = queue.get()
-        print("Checking: {}".format(name))
+        print(f"Checking: {name}")
         sys.stdout.flush()
         invocation = get_tidy_invocation(
             name,
@@ -271,9 +267,9 @@ def main():
         "-config",
         default=None,
         help="Specifies a configuration in YAML/JSON format: "
-        "  -config=\"{Checks: '*', "
-        "                       CheckOptions: [{key: x, "
-        '                                       value: y}]}" '
+        "  -config=\"{Checks: '*' "
+        "               CheckOptions: [{key: x, "
+        "                               value: y}]}"
         "When the value is empty, clang-tidy will "
         "attempt to find a file named .clang-tidy for "
         "each source file in its parent directories.",
@@ -344,7 +340,7 @@ def main():
             invocation.append("-checks=" + args.checks)
         invocation.append("-")
         subprocess.check_call(invocation)
-    except:
+    except Exception:
         print("Unable to run clang-tidy.", file=sys.stderr)
         sys.exit(1)
 
@@ -369,12 +365,9 @@ def main():
             ["git", "--no-pager", "diff", "--name-only", "origin/master"],
             capture_output=True,
         )
-        git_changed_file_list = list(
-            map(
-                lambda x: make_absolute(x, git_repo_path),
-                result.stdout.decode("utf-8").strip().split("\n"),
-            )
-        )
+        git_changed_file_list = [
+            make_absolute(x, git_repo_path) for x in result.stdout.decode("utf-8").strip().split("\n")
+        ]
         git_changed_file_set = set(git_changed_file_list)
         # Only retain files that exists in git diff
         files = list(filter(lambda x: x in git_changed_file_set, files))
@@ -412,9 +405,7 @@ def main():
                 stars = pct // 10
                 spaces = 10 - pct // 10
                 print(
-                    "\rProgress: [{}{}] ({}% / File {} of {})".format(
-                        "x" * stars, " " * spaces, pct, current_file, num_files
-                    ),
+                    f"\rProgress: [{'x' * stars}{' ' * spaces}] ({pct}% / File {current_file} of {num_files})",
                     end="",
                 )
                 sys.stdout.flush()
@@ -422,7 +413,7 @@ def main():
                     print()
 
         # Fill the queue with files.
-        for i, name in enumerate(files):
+        for name in files:
             if file_name_re.search(name):
                 if name.endswith("tools/backtrace.cpp"):
                     continue
@@ -458,7 +449,7 @@ def main():
         print("Writing fixes to " + args.export_fixes + " ...")
         try:
             merge_replacement_files(tmpdir, args.export_fixes)
-        except:
+        except Exception:
             print("Error exporting fixes.\n", file=sys.stderr)
             traceback.print_exc()
             return_code = 1
@@ -467,7 +458,7 @@ def main():
         print("Applying fixes ...")
         try:
             apply_fixes(args, tmpdir)
-        except:
+        except Exception:
             print("Error applying fixes.\n", file=sys.stderr)
             traceback.print_exc()
             return_code = 1

@@ -17,8 +17,8 @@ This module provides the SentenceChunker class for splitting text into sentence-
 """
 
 import os
-import sys
 import re
+import sys
 
 from rag.chunker.base import BaseChunker
 
