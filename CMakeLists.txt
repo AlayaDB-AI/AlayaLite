@@ -18,7 +18,7 @@ endif()
 set(CONAN_OUTPUT_FOLDER "${CMAKE_BINARY_DIR}/conan_generate")
 if(NOT EXISTS "${CONAN_OUTPUT_FOLDER}/conan_toolchain.cmake")
     message(STATUS "Conan files not found, running 'conan install'")
-    execute_process(COMMAND conan profile detect -e)
+    execute_process(COMMAND conan profile detect -e --force)
     execute_process(
         COMMAND conan install ${CMAKE_SOURCE_DIR}
                 --output-folder=${CONAN_OUTPUT_FOLDER}

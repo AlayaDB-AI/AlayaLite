@@ -39,8 +39,8 @@ ENABLE_UNIT_TESTS="OFF"
 # build = "cp38-*"
 build-frontend = "build[uv]"
 skip = [
-    "*-manylinux_i686",  # 不编 32 位 Linux
-    "*-musllinux*",      # 不编 musl 版
+    "*-manylinux_i686",
+    "*-musllinux*", # TODO: Adapt to muslLinux version
 ]
 environment = { BUILD_TIME = "$(date)" }
 
