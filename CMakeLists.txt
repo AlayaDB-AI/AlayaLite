@@ -14,8 +14,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 # conan hook
-execute_process(COMMAND bash scripts/conan_build/conan_hook.sh ${CMAKE_BINARY_DIR}/generators)
-include("${CMAKE_BINARY_DIR}/generators/conan_toolchain.cmake")
+message("asdfasdf${PROJECT_SOURCE_DIR}asdfasdf")
+message("asdfasdf${PROJECT_BINARY_DIR}asdfasdf")
+execute_process(COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${PROJECT_BINARY_DIR}/generators)
+include("${PROJECT_BINARY_DIR}/generators/conan_toolchain.cmake")
 
 # please install clang-18 or g++-13
 set(CMAKE_CXX_STANDARD 20)

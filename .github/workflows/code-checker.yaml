@@ -112,10 +112,10 @@ jobs       :
 
     - name: Prepare compile_commands.json
       run: |
+        clang++ --version
         mkdir -p build
         cd build
-        clang++ --version
-        CC=clang CXX=clang++ cmake .. -G Ninja -DENABLE_UNIT_TESTS=ON -DENABLE_COVERAGE=ON
+        cmake ..
 
     - name: run check
       run: |
