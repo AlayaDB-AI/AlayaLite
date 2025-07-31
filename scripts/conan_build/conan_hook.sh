@@ -10,8 +10,9 @@ PROJECT_SOURCE_DIR="$(dirname "$(dirname "${PWD_DIR}")")"
 # arch="${CIBW_ARCHS_LINUX:-x86_64}"
 arch=$(uname -m)
 
-h_profile="$PWD_DIR/conan_profile.${arch}"
-b_profile="$PWD_DIR/conan_profile.x86_64"
+# TODO: Cross-compilation
+h_profile="$PWD_DIR/conan_profile.${arch}"  # Target machine
+b_profile="$PWD_DIR/conan_profile.x86_64"  # Build machine
 
 conan install ${PROJECT_SOURCE_DIR} \
     --build=missing \
