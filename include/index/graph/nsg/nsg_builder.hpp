@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 #include "index/graph/graph.hpp"
+#include "index/graph/graph_refiner.hpp"
 #include "index/graph/knng/nndescent.hpp"
 #include "index/neighbor.hpp"
 #include "utils/log.hpp"
@@ -142,6 +143,12 @@ struct NSGBuilder {
     }
 
     int num_attached = tree_grow(degrees);
+
+    // graph refinement for rabitq
+    if constexpr (is_rbqspace_v<DistanceSpaceType>) {
+      GraphRefiner<DistanceSpaceType> refiner(space_.get(), final_graph_.get());
+    }
+
     int max_degree = 0;
     int min_degree = 1e6;
     double avg_degree = 0;
@@ -237,8 +244,8 @@ struct NSGBuilder {
     }
     for (int i = 0; i < init_ids.size(); i++) {
       int id = init_ids[i];
-      DistanceType dist =
-          space_->get_dist_func()(const_cast<DataType *>(q), space_->get_data_by_id(id), dim_);
+      DistanceType dist = space_->get_dist_func()(
+          const_cast<DataType *>(q), const_cast<DataType *>(space_->get_data_by_id(id)), dim_);
       retset[i] = Neighbor<IDType>(id, dist, true);
       if (collect_full_set) {
         full_set.emplace_back(id, dist);
@@ -486,12 +493,16 @@ struct NSGBuilder {
    * @return int The number of nodes that were attached to the tree.
    */
   auto tree_grow(std::vector<int> &degrees) -> int {
+    LOG_INFO("Growing tree...");
     int root = ep_;
     std::vector<bool> vis(vector_num_, false);
     int num_attached = 0;
     int cnt = 0;
     while (true) {
       cnt = dfs(vis, root, cnt);
+      if (cnt % 10000 == 0) {
+        LOG_INFO("tree_grow[{}/{}]", cnt, vector_num_);
+      }
       if (cnt >= vector_num_) {
         break;
       }
@@ -558,8 +569,8 @@ struct NSGBuilder {
    * @param degrees A vector containing the degree of each node.
    * @return IDType The ID of the node that was attached.
    */
-  auto attach_unlinked(std::vector<bool> &vis, std::vector<bool> &vis2,
-                       std::vector<int> &degrees) -> IDType {
+  auto attach_unlinked(std::vector<bool> &vis, std::vector<bool> &vis2, std::vector<int> &degrees)
+      -> IDType {
     IDType id = Graph<DataType, IDType>::kEmptyId;
     for (IDType i = 0; i < vector_num_; i++) {
       if (vis[i]) {
@@ -579,19 +590,25 @@ struct NSGBuilder {
     bool found = false;
     for (int i = 0; i < pool.size(); i++) {
       node = pool[i].id_;
-      if (degrees[node] < max_nbrs_ && node != id) {
+      if (!vis[node] &&
+          degrees[node] < max_nbrs_) {  // we can gurantee that node!=id since vis[id]==true
         found = true;
         break;
       }
     }
+
     if (!found) {
-      do {
-        node = rng_.rand_int(vector_num_);
-        if (!vis[node] && degrees[node] < max_nbrs_ && node != id) {
-          found = true;
+      // Fallback: force connect the first unvisited node, even if its degree is full
+      for (IDType i = 0; i < vector_num_; i++) {
+        if (!vis[i]) {
+          // found=true;
+          node = i;
+          degrees[node] -= 1;  // replace its last neighbor
+          break;
         }
-      } while (!found);
+      }
     }
+
     int pos = degrees[node];
     final_graph_->at(node, pos) = id;
     degrees[node] += 1;
@@ -607,8 +624,8 @@ struct NSGBuilder {
    * @param nn The node to insert.
    * @return int The position of the inserted node in the pool.
    */
-  auto insert_into_pool(Neighbor<IDType> *pool, int pool_size,
-                        const Neighbor<IDType> &nn) const -> int {
+  auto insert_into_pool(Neighbor<IDType> *pool, int pool_size, const Neighbor<IDType> &nn) const
+      -> int {
     for (int i = 0; i < pool_size; i++) {
       if (pool[i].id_ == nn.id_) {
         return pool_size;

@@ -226,12 +226,14 @@ inline void load_ivecs(const std::filesystem::path &filepath, std::vector<T> &da
   size_t file_size = file.tellg();
   file.seekg(0, std::ios::beg);
 
-  num = file_size / (sizeof(uint32_t) + dim * sizeof(float));
+  // num = file_size / (sizeof(uint32_t) + dim * sizeof(float));
+  num = file_size / (sizeof(uint32_t) + dim * sizeof(T));
   data.resize(num * dim);
 
   for (uint32_t i = 0; i < num; ++i) {
     file.read(reinterpret_cast<char *>(&dim), sizeof(uint32_t));
-    file.read(reinterpret_cast<char *>(data.data() + i * dim), dim * sizeof(float));
+    // file.read(reinterpret_cast<char *>(data.data() + i * dim), dim * sizeof(float));
+    file.read(reinterpret_cast<char *>(data.data() + i * dim), dim * sizeof(T));
     if (file.fail()) {
       throw std::runtime_error("Failed to read data from file: " + filepath.string());
     }

@@ -5,7 +5,7 @@ project(${project_name} LANGUAGES CXX)
 
 # Configuration options
 option(ENABLE_COVERAGE "Enable profiling test coverage" OFF)
-option(ENABLE_UNIT_TESTS "Enable unit tests" OFF)
+option(ENABLE_UNIT_TESTS "Enable unit tests" ON)
 
 # Set build type if not specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -97,6 +97,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Compilation options with platform-specific adjustments
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)  # Ensure PIC for shared libraries
+# RaBitQ optimization
+set(CMAKE_CXX_FLAGS "-mfma -mavx512f -mavx512dq -mavx512bw -mavx512vl -mavx512bitalg -mavx512vpopcntdq -fopenmp ${CMAKE_CXX_FLAGS}") 
 if(MSVC)
   # Windows MSVC specific flags
   set(CMAKE_CXX_FLAGS "/EHsc /utf-8 ${CMAKE_CXX_FLAGS}")  # Exception handling and UTF-8 support
@@ -121,7 +123,7 @@ find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 find_package(GTest REQUIRED)
-
+find_package(Eigen3 REQUIRED NO_MODULE)
 # Configure third-party libraries based on operating system
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_package(libcoro REQUIRED)
@@ -130,12 +132,14 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     fmt::fmt
     concurrentqueue::concurrentqueue
     libcoro::libcoro
+    Eigen3::Eigen
   )
 else()
   set(THIRD_PARTY_LIBS
     spdlog::spdlog
     fmt::fmt
     concurrentqueue::concurrentqueue
+    Eigen3::Eigen
   )
   set(GTEST_LIBS GTest::gtest GTest::gtest_main)
 endif()
