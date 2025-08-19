@@ -52,8 +52,8 @@ struct NndescentImpl {
 
     auto operator=(const Nhood &other) -> Nhood & {
       max_edge_ = other.max_edge_;
-      std::copy(other.nn_new.begin(), other.nn_new.end(), std::back_inserter(nn_new_));
-      nn_new_.reserve(other.nn_new.capacity());
+      std::copy(other.nn_new_.begin(), other.nn_new_.end(), std::back_inserter(nn_new_));
+      nn_new_.reserve(other.nn_new_.capacity());
       candidate_pool_.reserve(other.candidate_pool_.capacity());
       return *this;
     }

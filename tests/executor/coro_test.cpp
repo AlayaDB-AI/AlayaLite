@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#if defined(__linex__)
 #include <gtest/gtest.h>
 #include <atomic>
 #include <filesystem>
@@ -158,3 +159,5 @@ TEST_F(HNSWCoroutineTest, ConcurrentUpdates) {
 }
 
 }  // namespace alaya
+
+#endif

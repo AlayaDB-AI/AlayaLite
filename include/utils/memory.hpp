@@ -41,7 +41,10 @@ struct AlignAlloc {
     }
     int sz = (n * sizeof(ValueType) + (1 << 21) - 1) >> 21 << 21;
     ptr_ = static_cast<ValueType *>(std::aligned_alloc(1 << 21, sz));
+
+#if defined(__linux__)
     madvise(ptr_, sz, MADV_HUGEPAGE);
+#endif
     return ptr_;
   }
 

@@ -165,6 +165,7 @@ class Worker : public std::enable_shared_from_this<Worker> {
    *
    */
   void set_affinity() {
+#if defined(__linux__)
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     CPU_SET(cpu_id_, &cpuset);
@@ -172,6 +173,7 @@ class Worker : public std::enable_shared_from_this<Worker> {
     if (return_code != 0) {
       LOG_ERROR("Error calling pthread_setaffinity_np");
     }
+#endif
   }
 
   WorkerID id_{0};   ///< Worker identifier

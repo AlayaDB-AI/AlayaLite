@@ -14,10 +14,29 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 # conan hook
-message("asdfasdf${PROJECT_SOURCE_DIR}asdfasdf")
-message("asdfasdf${PROJECT_BINARY_DIR}asdfasdf")
-execute_process(COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${PROJECT_BINARY_DIR}/generators)
-include("${PROJECT_BINARY_DIR}/generators/conan_toolchain.cmake")
+message("PROJECT_SOURCE_DIR: ${PROJECT_SOURCE_DIR}")
+message("PROJECT_BINARY_DIR: ${PROJECT_BINARY_DIR}")
+
+
+if(APPLE)
+  execute_process(COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${PROJECT_BINARY_DIR}/generators "Macos")
+  include("${PROJECT_BINARY_DIR}/generators/conan_toolchain.cmake")
+  # get sdk path
+  execute_process(
+    COMMAND xcrun --show-sdk-path
+    OUTPUT_VARIABLE MACOSX_SDK_PATH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+  # Reset sysroot: canon may set it to a incorrect value.
+  set(CMAKE_OSX_SYSROOT "${MACOSX_SDK_PATH}" CACHE STRING "macOS SDK path" FORCE)
+  message(STATUS "Using macOS SDK: ${CMAKE_OSX_SYSROOT}")
+  # Architecture support: M1/M2
+  set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Build architecture" FORCE)
+else()
+  execute_process(COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${PROJECT_BINARY_DIR}/generators)
+  include("${PROJECT_BINARY_DIR}/generators/conan_toolchain.cmake")
+endif()
+
 
 # please install clang-18 or g++-13
 set(CMAKE_CXX_STANDARD 20)
@@ -41,11 +60,15 @@ add_definitions(-DPROJECT_ROOT="${CMAKE_SOURCE_DIR}")
 find_package(concurrentqueue REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
-find_package(libcoro REQUIRED)
 find_package(fmt REQUIRED)
 find_package(GTest REQUIRED)
-set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue libcoro::libcoro)
-set(GTEST_LIBS GTest::gtest GTest::gtest_main)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  find_package(libcoro REQUIRED)
+  set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue libcoro::libcoro)
+else()
+  set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue)
+  set(GTEST_LIBS GTest::gtest GTest::gtest_main)
+endif()
 
 # include directories
 include_directories(${CMAKE_SOURCE_DIR}/include)

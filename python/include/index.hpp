@@ -89,7 +89,7 @@ class PyIndex : public BasePyIndex {
   using BuildSpaceType = typename GraphBuilderType::DistanceSpaceTypeAlias;
 
   PyIndex() = delete;
-  explicit PyIndex(IndexParams params) : params_(std::move(params)){};
+  explicit PyIndex(IndexParams params) : params_(std::move(params)) {};
 
   auto to_string() const -> std::string { return "PyIndex"; }
 
@@ -222,6 +222,31 @@ class PyIndex : public BasePyIndex {
     return ret;
   }
 
+  auto search_with_distance(py::array_t<DataType> &query, uint32_t topk, uint32_t ef)
+      -> py::object {
+    auto *query_ptr = static_cast<DataType *>(query.request().ptr);
+
+    std::vector<IDType> res_pool(ef);
+    std::vector<DistanceType> dist_pool(ef);
+
+    search_job_->search_solo(query_ptr, topk, res_pool.data(), dist_pool.data(), ef);
+
+    auto ret_ids = py::array_t<IDType>(static_cast<size_t>(topk));
+    auto ret_id_ptr = static_cast<IDType *>(ret_ids.request().ptr);
+
+    auto ret_dists = py::array_t<IDType>(static_cast<size_t>(topk));
+    auto ret_dist_ptr = static_cast<DistanceType *>(ret_dists.request().ptr);
+
+    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+      std::copy(res_pool.begin(), res_pool.begin() + topk, ret_id_ptr);
+      std::copy(dist_pool.begin(), dist_pool.begin() + topk, ret_dist_ptr);
+    } else {
+      rerank<DistanceType>(res_pool, ret_id_ptr, ret_dist_ptr,
+                           build_space_->get_query_computer(query_ptr), ef, topk);
+    }
+    return py::make_tuple(ret_ids, ret_dists);
+  }
+
   auto batch_search(py::array_t<DataType> &queries, uint32_t topk, uint32_t ef,
                     uint32_t num_threads) -> py::array_t<IDType> {
     auto shape = queries.shape();
@@ -230,6 +255,7 @@ class PyIndex : public BasePyIndex {
 
     auto *query_ptr = static_cast<DataType *>(queries.request().ptr);
 
+#if defined(__linux__)
     Timer timer{};
     std::vector<std::vector<IDType>> res_pool(query_size, std::vector<IDType>(ef));
 
@@ -267,6 +293,23 @@ class PyIndex : public BasePyIndex {
       }
     }
     return ret;
+#else
+    auto ret = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
+    auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
+    for (size_t i = 0; i < query_size; i++) {
+      std::vector<IDType> res_pool(ef);
+      auto cur_query = query_ptr + i * query_dim;
+      search_job_->search_solo(cur_query, topk, res_pool.data(), ef);
+
+      if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+        std::copy(res_pool.begin(), res_pool.begin() + topk, ret_ptr + i * topk);
+      } else {
+        rerank(res_pool, ret_ptr + i * topk, build_space_->get_query_computer(query_ptr), ef, topk);
+      }
+    }
+    return ret;
+
+#endif
   }
 
   auto batch_search_with_distance(py::array_t<DataType> &queries, uint32_t topk, uint32_t ef,
@@ -276,7 +319,7 @@ class PyIndex : public BasePyIndex {
 
     auto *query_ptr = static_cast<DataType *>(queries.request().ptr);
 
-    // Timer timer{};
+#if defined(__linux__)
     std::vector<std::vector<IDType>> res_pool(query_size, std::vector<IDType>(ef));
     std::vector<std::vector<DistanceType>> dist_pool;
 
@@ -314,6 +357,31 @@ class PyIndex : public BasePyIndex {
     auto ret_id = get_topk_array(res_pool, topk);
     auto ret_dist = get_topk_array(dist_pool, topk);
     return py::make_tuple(ret_id, ret_dist);
+#else
+    auto ret_id = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
+    auto ret_dist = py::array_t<DistanceType>({query_size, static_cast<size_t>(topk)});
+
+    auto ret_id_ptr = static_cast<IDType *>(ret_id.request().ptr);
+    auto ret_dist_ptr = static_cast<DistanceType *>(ret_dist.request().ptr);
+
+    for (size_t i = 0; i < query_size; i++) {
+      std::vector<IDType> res_pool(ef);
+      std::vector<DistanceType> dist_pool(ef);
+      auto cur_query = query_ptr + i * query_dim;
+
+      search_job_->search_solo(cur_query, topk, res_pool.data(), dist_pool.data(), ef);
+
+      if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+        std::copy(res_pool.begin(), res_pool.begin() + topk, ret_id_ptr + i * topk);
+        std::copy(dist_pool.begin(), dist_pool.begin() + topk, ret_dist_ptr + i * topk);
+      } else {
+        rerank(res_pool, ret_id_ptr + i * topk, ret_dist_ptr + i * topk,
+               build_space_->get_query_computer(query_ptr), ef, topk);
+      }
+    }
+
+    return py::make_tuple(ret_id, ret_dist);
+#endif
   }
 
   template <typename DistanceType = float>

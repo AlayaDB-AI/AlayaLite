@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+#if defined(__linux__)
 #include <gtest/gtest.h>
 #include <coro/mutex.hpp>
 #include <coro/sync_wait.hpp>
@@ -40,3 +40,4 @@ TEST(mutexTest, ConcurrentAccess) {
   EXPECT_EQ(counter, 2 * kN);
 }
 }  // namespace alaya
+#endif

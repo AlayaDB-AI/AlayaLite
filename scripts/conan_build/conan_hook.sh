@@ -3,16 +3,24 @@ set -e
 set -x
 
 output_dir="${1:-build/generator}"
+operating_system="${2:-Linux}"
 
 PWD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_SOURCE_DIR="$(dirname "$(dirname "${PWD_DIR}")")"
 
-# arch="${CIBW_ARCHS_LINUX:-x86_64}"
-arch=$(uname -m)
 
-# TODO: Cross-compilation
-h_profile="$PWD_DIR/conan_profile.${arch}"  # Target machine
-b_profile="$PWD_DIR/conan_profile.x86_64"  # Build machine
+
+if [ ${operating_system} = "Macos" ]; then
+    # Only support Apple Silicon
+    h_profile="$PWD_DIR/conan_profile_mac.aarch64"  # Build machine
+    b_profile="$PWD_DIR/conan_profile_mac.aarch64"  # Target machine
+else
+    arch=$(uname -m)
+    h_profile="$PWD_DIR/conan_profile.${arch}"  # Target machine
+    b_profile="$PWD_DIR/conan_profile.${arch}"  # Build machine
+fi
+
+
 
 conan install ${PROJECT_SOURCE_DIR} \
     --build=missing \

@@ -24,14 +24,15 @@ class AlayaLiteConan(ConanFile):
         self.requires("pybind11/2.13.6")
         self.requires("spdlog/1.14.0")
         self.requires("fmt/10.2.1")  # depends on spdlog
-        self.requires("libcoro/0.14.1")
+        if self.settings.os == "Linux":
+            self.requires("libcoro/0.14.1")
 
     def configure(self):
-        # libcore setting
-        self.options["libcoro"].feature_networking = False
-        self.options["libcoro"].feature_tls = False
-        self.options["libcoro"].build_examples = False
-        self.options["libcoro"].build_tests = False
+        if self.settings.os == "Linux":
+            self.options["libcoro"].feature_networking = False
+            self.options["libcoro"].feature_tls = False
+            self.options["libcoro"].build_examples = False
+            self.options["libcoro"].build_tests = False
 
     def package(self):
         self.copy("*.h", dst="include", src="include")
