@@ -5,7 +5,7 @@ project(${project_name} LANGUAGES CXX)
 
 # options
 option(ENABLE_COVERAGE "Enable profiling test coverage" OFF)
-option(ENABLE_UNIT_TESTS "Enable unit tests" OFF)
+option(ENABLE_UNIT_TESTS "Enable unit tests" ON)
 
 # set CMAKE_BUILD_TYPE
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -28,6 +28,7 @@ set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 set(CMAKE_VERBOSE_MAKEFILE ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON) # -fPIC
+set(CMAKE_CXX_FLAGS "-mfma -mavx512f -mavx512dq -mavx512bw -mavx512vl -mavx512bitalg -mavx512vpopcntdq -fopenmp ${CMAKE_CXX_FLAGS}") # rbq optimization
 set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG ${CMAKE_CXX_FLAGS_RELEASE}")
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 ${CMAKE_CXX_FLAGS_DEBUG}")
 add_compile_options(${CONAN_USER_MARCH_FLAGS})
@@ -44,7 +45,8 @@ find_package(spdlog REQUIRED)
 find_package(libcoro REQUIRED)
 find_package(fmt REQUIRED)
 find_package(GTest REQUIRED)
-set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue libcoro::libcoro)
+find_package(Eigen3 REQUIRED NO_MODULE)
+set(THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue libcoro::libcoro Eigen3::Eigen)
 set(GTEST_LIBS GTest::gtest GTest::gtest_main)
 
 # include directories

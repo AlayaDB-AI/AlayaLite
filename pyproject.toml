@@ -33,7 +33,7 @@ cmake.build-type = "Release"
 
 [tool.scikit-build.cmake.define]
 ENABLE_COVERAGE="OFF"
-ENABLE_UNIT_TESTS="OFF"
+ENABLE_UNIT_TESTS="ON"
 
 [tool.cibuildwheel]
 # build = "cp38-*"

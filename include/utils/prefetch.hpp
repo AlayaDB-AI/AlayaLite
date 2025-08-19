@@ -89,9 +89,9 @@ inline auto prefetch_l3(const void *address) -> void {
  * @param address A pointer to the starting memory address to prefetch.
  * @param line The number of 64-byte memory lines to prefetch.
  */
-inline auto mem_prefetch_l1(void *address, uint32_t line) -> void {
+inline auto mem_prefetch_l1(const void *address, uint32_t line) -> void {
   for (uint32_t i = 0; i < line; ++i) {
-    prefetch_l1(static_cast<char *>(address) + i * 64);
+    prefetch_l1(static_cast<const char *>(address) + i * 64);
   }
 }
 
@@ -105,9 +105,9 @@ inline auto mem_prefetch_l1(void *address, uint32_t line) -> void {
  * @param address A pointer to the starting memory address to prefetch.
  * @param line The number of 64-byte memory lines to prefetch.
  */
-inline auto mem_prefetch_l2(void *address, uint32_t line) -> void {
+inline auto mem_prefetch_l2(const void *address, uint32_t line) -> void {
   for (uint32_t i = 0; i < line; ++i) {
-    prefetch_l2(static_cast<char *>(address) + i * 64);
+    prefetch_l2(static_cast<const char *>(address) + i * 64);
   }
 }
 
@@ -120,9 +120,9 @@ inline auto mem_prefetch_l2(void *address, uint32_t line) -> void {
  * @param address A pointer to the starting memory address to prefetch.
  * @param line The number of 64-byte memory lines to prefetch.
  */
-inline auto mem_prefetch_l3(void *address, uint32_t line) -> void {
+inline auto mem_prefetch_l3(const void *address, uint32_t line) -> void {
   for (uint32_t i = 0; i < line; ++i) {
-    prefetch_l3(static_cast<char *>(address) + i * 64);
+    prefetch_l3(static_cast<const char *>(address) + i * 64);
   }
 }
 };  // namespace alaya

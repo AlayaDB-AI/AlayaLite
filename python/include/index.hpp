@@ -41,6 +41,7 @@
 #include "executor/scheduler.hpp"
 #include "index/graph/fusion_graph.hpp"
 #include "index/graph/graph.hpp"
+#include "index/graph/graph_refiner.hpp"
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "index/graph/nsg/nsg_builder.hpp"
 #include "params.hpp"
@@ -89,7 +90,7 @@ class PyIndex : public BasePyIndex {
   using BuildSpaceType = typename GraphBuilderType::DistanceSpaceTypeAlias;
 
   PyIndex() = delete;
-  explicit PyIndex(IndexParams params) : params_(std::move(params)){};
+  explicit PyIndex(IndexParams params) : params_(std::move(params)) {};
 
   auto to_string() const -> std::string { return "PyIndex"; }
 
@@ -245,7 +246,11 @@ class PyIndex : public BasePyIndex {
     auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
     for (uint32_t i = 0; i < query_size; i++) {
       auto cur_query = query_ptr + i * query_dim;
-      coros.emplace_back(search_job_->search(cur_query, topk, res_pool[i].data(), ef));
+      if constexpr (is_rbqspace_v<SearchSpaceType>) {
+        coros.emplace_back(search_job_->rabitq_search(cur_query, topk, res_pool[i].data(), ef));
+      } else {
+        coros.emplace_back(search_job_->search(cur_query, topk, res_pool[i].data(), ef));
+      }
       scheduler->schedule(coros.back().handle());
     }
     LOG_INFO("Scheduling {} tasks.", coros.size());
@@ -256,7 +261,8 @@ class PyIndex : public BasePyIndex {
 
     auto ret = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
     auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
-    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value ||
+                  is_rbqspace_v<SearchSpaceType>) {  // rabitq doesn't need re-rank
       for (size_t i = 0; i < query_size; i++) {
         std::copy(res_pool[i].begin(), res_pool[i].begin() + topk, ret_ptr + i * topk);
       }

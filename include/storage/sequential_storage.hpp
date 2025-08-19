@@ -107,6 +107,17 @@ struct SequentialStorage {
     return id;
   }
 
+  // For initial insert (in complex data layout)
+  template <typename T>
+  auto point_insert(const T *data, uint ele_cnt) -> IDType {
+    if (pos_ >= capacity_ || sizeof(T) > item_size_) {
+      return -1;
+    }
+    std::memcpy(operator[](pos_), data, sizeof(T) * ele_cnt);
+    bitmap_[pos_ / sizeof(size_t)] |= (1 << (pos_ % sizeof(size_t)));
+    return pos_++;
+  }
+
   auto save(std::ofstream &writer) const -> void {
     writer.write(reinterpret_cast<const char *>(&item_size_), sizeof(item_size_));
     writer.write(reinterpret_cast<const char *>(&aligned_item_size_), sizeof(aligned_item_size_));

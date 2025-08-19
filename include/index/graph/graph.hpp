@@ -52,7 +52,7 @@ struct Graph {
   EdgeIDType max_nbrs_;       ///< max_nbrs_ is the maximum number of neighbors
   DataStorage data_storage_;  ///< the data of the grpah: each node has max_nbrs_ edges, i.e., the
                               ///< node ids of its neighbors
-  std::unique_ptr<OverlayGraphType> overlay_graph_ = nullptr;  ///< the overlay raph of HNSW
+  std::unique_ptr<OverlayGraphType> overlay_graph_ = nullptr;  ///< the overlay graph of HNSW
   std::vector<NodeIDType> eps_;                                ///< the entry points
 
   // bool include_raw_data_;  ///< include_raw_data_ is a flag to indicate whether the raw data is
@@ -132,6 +132,10 @@ struct Graph {
    */
   auto update(NodeIDType node, NodeIDType *edges) -> NodeIDType {
     return data_storage_.update(node, edges);
+  }
+
+  auto get_ep()const->NodeIDType{
+    return overlay_graph_?overlay_graph_->ep_:eps_[0];
   }
 
   /**
