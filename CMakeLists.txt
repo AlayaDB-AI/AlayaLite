@@ -103,16 +103,16 @@ find_package(GTest REQUIRED)
 # Configure third-party libraries based on operating system
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_package(libcoro REQUIRED)
-  set(THIRD_PARTY_LIBS 
-    spdlog::spdlog 
-    fmt::fmt 
-    concurrentqueue::concurrentqueue 
+  set(THIRD_PARTY_LIBS
+    spdlog::spdlog
+    fmt::fmt
+    concurrentqueue::concurrentqueue
     libcoro::libcoro
   )
 else()
-  set(THIRD_PARTY_LIBS 
-    spdlog::spdlog 
-    fmt::fmt 
+  set(THIRD_PARTY_LIBS
+    spdlog::spdlog
+    fmt::fmt
     concurrentqueue::concurrentqueue
   )
   set(GTEST_LIBS GTest::gtest GTest::gtest_main)

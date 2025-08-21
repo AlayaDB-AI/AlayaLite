@@ -10,4 +10,3 @@ build_type=Release
 
 [conf]
 tools.cmake.cmaketoolchain:generator=Visual Studio 17 2022
-    
