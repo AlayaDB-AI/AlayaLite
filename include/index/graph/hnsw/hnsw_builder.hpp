@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <unistd.h>
 #include <chrono>  //NOLINT [build/c++11]
 #include <cstdint>
 #include <memory>

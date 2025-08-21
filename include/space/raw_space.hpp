@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -31,6 +31,10 @@
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
 
+#ifdef _MSC_VER
+#include <malloc.h>
+#endif
+
 namespace alaya {
 
 /**
@@ -43,20 +47,24 @@ namespace alaya {
  * @tparam DistanceType The data type for storing distances, with the default being float.
  * @tparam IDType The data type for storing IDs, with the default being uint32_t.
  */
-template <typename DataType = float, typename DistanceType = float, typename IDType = uint32_t,
+template <typename DataType = float, typename DistanceType = float,
+          typename IDType = uint32_t,
           typename DataStorage = SequentialStorage<DataType, IDType>>
 class RawSpace {
  public:
-  using DistDataType = DataType;  ///< Type alias for the data type used in distance calculations
+  using DistDataType =
+      DataType;  ///< Type alias for the data type used in distance calculations
   using DataTypeAlias = DataType;
   using IDTypeAlias = IDType;
   using DistanceTypeAlias = DistanceType;
   MetricType metric_{MetricType::L2};  ///< Metric type
 
-  DistFunc<DistDataType, DistanceType> distance_calu_func_;  ///< Distance calculation function
-  uint32_t data_size_{0};                                    ///< Size of each data point in bytes
-  uint32_t dim_{0};                                          ///< Dimensionality of the data points
-  IDType item_cnt_{0};        ///< Number of data points (nodes), can be either available or deleted
+  DistFunc<DistDataType, DistanceType>
+      distance_calu_func_;    ///< Distance calculation function
+  uint32_t data_size_{0};     ///< Size of each data point in bytes
+  uint32_t dim_{0};           ///< Dimensionality of the data points
+  IDType item_cnt_{0};        ///< Number of data points (nodes), can be either
+                              ///< available or deleted
   IDType delete_cnt_{0};      ///< Number of deleted data points
   IDType capacity_{0};        ///< The maximum number of data points (nodes)
   DataStorage data_storage_;  ///< Data storage
@@ -74,11 +82,13 @@ class RawSpace {
   RawSpace(IDType capacity, size_t dim, MetricType metric)
       : capacity_(capacity), dim_(dim), metric_(metric) {
     data_size_ = dim * sizeof(DataType);
-    distance_calu_func_ = l2_sqr<DataType, DistanceType>;  // Assign the distance function
+    distance_calu_func_ =
+        l2_sqr<DataType, DistanceType>;  // Assign the distance function
 
     data_storage_.init(data_size_, capacity);
 
-    if constexpr (!(std::is_same_v<DataType, float> || std::is_same_v<DataType, double>)) {
+    if constexpr (!(std::is_same_v<DataType, float> ||
+                    std::is_same_v<DataType, double>)) {
       if (metric_ == MetricType::COS) {
         LOG_ERROR("COS metric only support float or double");
         exit(-1);
@@ -201,7 +211,9 @@ class RawSpace {
    * @brief Get the distance calculation function
    * @return The distance calculation function
    */
-  auto get_dist_func() -> DistFunc<DataType, DistanceType> { return distance_calu_func_; }
+  auto get_dist_func() -> DistFunc<DataType, DistanceType> {
+    return distance_calu_func_;
+  }
 
   /**
    * @brief Get the dimensionality of the data points
@@ -261,22 +273,43 @@ class RawSpace {
         normalize(const_cast<DataType *>(query), distance_space_.dim_);
       }
 
-      size_t aligned_size = (distance_space_.data_size_ + kAlignment - 1) & ~(kAlignment - 1);
-      query_ = static_cast<DataType *>(std::aligned_alloc(kAlignment, aligned_size));
+      size_t aligned_size =
+          (distance_space_.data_size_ + kAlignment - 1) & ~(kAlignment - 1);
+#ifdef _MSC_VER
+      query_ =
+          static_cast<DataType *>(_aligned_malloc(aligned_size, kAlignment));
+#else
+      query_ =
+          static_cast<DataType *>(std::aligned_alloc(kAlignment, aligned_size));
+#endif
       std::memcpy(query_, query, distance_space.data_size_);
     }
 
     QueryComputer(const RawSpace &distance_space, const IDType id)
         : distance_space_(distance_space) {
-      size_t aligned_size = (distance_space_.data_size_ + kAlignment - 1) & ~(kAlignment - 1);
-      query_ = static_cast<DataType *>(std::aligned_alloc(kAlignment, aligned_size));
-      std::memcpy(query_, distance_space.get_data_by_id(id), distance_space.data_size_);
+      size_t aligned_size =
+          (distance_space_.data_size_ + kAlignment - 1) & ~(kAlignment - 1);
+#ifdef _MSC_VER
+      query_ =
+          static_cast<DataType *>(_aligned_malloc(aligned_size, kAlignment));
+#else
+      query_ =
+          static_cast<DataType *>(std::aligned_alloc(kAlignment, aligned_size));
+#endif
+      std::memcpy(query_, distance_space.get_data_by_id(id),
+                  distance_space.data_size_);
     }
 
     /**
      * @brief Destructor
      */
-    ~QueryComputer() { std::free(query_); }
+    ~QueryComputer() {
+#ifdef _MSC_VER
+      _aligned_free(query_);
+#else
+      std::free(query_);
+#endif
+    }
 
     /**
      * @brief Compute the distance between the query and a data point
@@ -287,8 +320,8 @@ class RawSpace {
       if (!distance_space_.data_storage_.is_valid(u)) {
         return std::numeric_limits<float>::max();
       }
-      return distance_space_.distance_calu_func_(query_, distance_space_.get_data_by_id(u),
-                                                 distance_space_.dim_);
+      return distance_space_.distance_calu_func_(
+          query_, distance_space_.get_data_by_id(u), distance_space_.dim_);
     }
   };
 
@@ -308,7 +341,9 @@ class RawSpace {
     mem_prefetch_l1(address, data_size_ / 64);
   }
 
-  auto get_query_computer(const DataType *query) { return QueryComputer(*this, query); }
+  auto get_query_computer(const DataType *query) {
+    return QueryComputer(*this, query);
+  }
 
   auto get_query_computer(IDType id) { return QueryComputer(*this, id); }
 };
