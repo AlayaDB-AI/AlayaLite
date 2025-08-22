@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,18 +28,20 @@
 
 namespace alaya {
 
-template <typename DistanceSpaceType, typename DataType = DistanceSpaceType::DataTypeAlias,
-          typename DistanceType = DistanceSpaceType::DistanceTypeAlias,
-          typename IDType = DistanceSpaceType::IDTypeAlias>
+template <typename DistanceSpaceType,
+          typename DataType = typename DistanceSpaceType::DataTypeAlias,
+          typename DistanceType = typename DistanceSpaceType::DistanceTypeAlias,
+          typename IDType = typename DistanceSpaceType::IDTypeAlias>
   requires Space<DistanceSpaceType, DataType, DistanceType, IDType>
 class GraphUpdateJob {
  public:
-  std::shared_ptr<DistanceSpaceType> space_ = nullptr;        ///< The is a data manager interface .
+  std::shared_ptr<DistanceSpaceType> space_ = nullptr;  ///< The is a data manager interface .
   std::shared_ptr<Graph<DataType, IDType>> graph_ = nullptr;  ///< The search graph.
   std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job_ = nullptr;  ///< The search job
   std::shared_ptr<JobContext<IDType>> job_context_;  ///< The shared job context
 
-  explicit GraphUpdateJob(std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job)
+  explicit GraphUpdateJob(
+      std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job)
       : search_job_(search_job),
         space_(search_job->space_),
         graph_(search_job->graph_),
@@ -65,7 +67,8 @@ class GraphUpdateJob {
   auto insert_and_update(DataType *query, uint32_t ef) -> IDType {
     std::vector<IDType> search_results(graph_->max_nbrs_, -1);
 
-    search_job_->search_solo(query, graph_->max_nbrs_, search_results.data(), ef);
+    search_job_->search_solo(query, graph_->max_nbrs_, search_results.data(),
+                             ef);
     auto node_id = graph_->insert(search_results.data());
     if (node_id == -1) {
       assert(space_->insert(query) == -1);
@@ -109,25 +112,28 @@ class GraphUpdateJob {
       if (nbr == -1) {
         break;
       }
-      if (job_context_->removed_vertices_.find(nbr) != job_context_->removed_vertices_.end()) {
+      if (job_context_->removed_vertices_.count(nbr)) {
         for (auto &second_hop_nbr : job_context_->removed_node_nbrs_.at(nbr)) {
           candidate_nbrs.insert(second_hop_nbr);
         }
       }
       candidate_nbrs.insert(nbr);
     }
-    for (auto inserted_nbr : job_context_->inserted_edges_.at(node_id)) {
-      candidate_nbrs.insert(inserted_nbr);
+    if (job_context_->inserted_edges_.count(node_id)) {
+        for (auto inserted_nbr : job_context_->inserted_edges_.at(node_id)) {
+            candidate_nbrs.insert(inserted_nbr);
+        }
     }
     auto handler = space_->get_query_computer(node_id);
-    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), graph_->max_nbrs_);
+    LinearPool<DistanceType, IDType> pool(space_->get_data_num(),
+                                          graph_->max_nbrs_);
     for (auto &nbr : candidate_nbrs) {
       auto dist = handler(nbr);
       pool.insert(nbr, dist);
     }
 
     std::vector<IDType> updated_edges(graph_->max_nbrs_);
-    for (IDType i = 0; i < graph_->max_nbrs_; i++) {
+    for (IDType i = 0; i < graph_->max_nbrs_ && i < pool.size(); i++) {
       updated_edges[i] = pool.id(i);
     }
     graph_->update(node_id, updated_edges.data());

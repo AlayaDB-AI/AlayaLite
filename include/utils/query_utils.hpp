@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,7 +23,35 @@
 #include "../index/neighbor.hpp"
 #include "memory.hpp"
 
+#if defined(_MSC_VER)
+#include <intrin.h>
+#endif
+
 namespace alaya {
+
+/**
+ * @brief Portable function to count trailing zero bits in a 64-bit integer.
+ *
+ * @param x The 64-bit integer. Assumed to be non-zero.
+ * @return The number of trailing zero bits.
+ */
+inline int count_trailing_zeros(uint64_t x) {
+#if defined(_MSC_VER)
+  unsigned long index;
+  _BitScanForward64(&index, x);
+  return static_cast<int>(index);
+#elif defined(__GNUC__) || defined(__clang__)
+  return __builtin_ctzll(x);
+#else
+  // Fallback for other compilers
+  int count = 0;
+  while ((x & 1) == 0) {
+    x >>= 1;
+    count++;
+  }
+  return count;
+#endif
+}
 
 /**
  * @brief A dynamic bitset implementation using a vector of uint64_t.
@@ -65,7 +93,9 @@ class DynamicBitset {
    * @param pos The position of the bit to get
    * @return true if the bit is set, false otherwise
    */
-  auto get(size_t pos) const -> bool { return (data_[pos / 64] & (1ULL << (pos % 64))) != 0; }
+  auto get(size_t pos) const -> bool {
+    return (data_[pos / 64] & (1ULL << (pos % 64))) != 0;
+  }
 
   /**
    * @brief Get the pos address object
@@ -113,7 +143,9 @@ class SparseBitset {
    * @param pos The position of the bit to get
    * @return true if the bit is set, false otherwise
    */
-  auto get(size_t pos) const -> bool { return set_bits_.find(pos) != set_bits_.end(); }
+  auto get(size_t pos) const -> bool {
+    return set_bits_.find(pos) != set_bits_.end();
+  }
 
   /**
    * @brief Reset the bit at the specified position
@@ -188,13 +220,13 @@ class HierarchicalBitset {
       if (summary_[i] == 0) {
         continue;
       }
-      size_t block = i * kSummaryBlockSize + __builtin_ctzll(summary_[i]);
+      size_t block = i * kSummaryBlockSize + count_trailing_zeros(summary_[i]);
       for (size_t j = 0; j < 8; ++j) {
         if (data_[block * 8 + j] == 0) {
           continue;
         }
         return static_cast<int>((block * kBitsPerBlock) + (j * 64) +
-                                __builtin_ctzll(data_[block * 8 + j]));
+                                count_trailing_zeros(data_[block * 8 + j]));
       }
     }
     return -1;
@@ -204,7 +236,8 @@ class HierarchicalBitset {
 // todo test this class.
 template <typename DistanceType, typename IDType>
 struct LinearPool {
-  LinearPool(IDType n, int capacity) : nb_(n), capacity_(capacity), data_(capacity_ + 1), vis_(n) {}
+  LinearPool(IDType n, int capacity)
+      : nb_(n), capacity_(capacity), data_(capacity_ + 1), vis_(n) {}
 
   auto find_bsearch(DistanceType dist) -> int {
     int l = 0;
@@ -225,7 +258,8 @@ struct LinearPool {
       return false;
     }
     int lo = find_bsearch(dist);
-    std::memmove(&data_[lo + 1], &data_[lo], (size_ - lo) * sizeof(Neighbor<DistanceType>));
+    std::memmove(&data_[lo + 1], &data_[lo],
+                 (size_ - lo) * sizeof(Neighbor<DistanceType, IDType>));
     data_[lo] = {u, dist};
     if (size_ < capacity_) {
       size_++;
@@ -245,7 +279,8 @@ struct LinearPool {
       return;
     }
     int lo = find_bsearch(dist);
-    std::memmove(&data_[lo + 1], &data_[lo], (size_ - lo) * sizeof(Neighbor<IDType>));
+    std::memmove(&data_[lo + 1], &data_[lo],
+                 (size_ - lo) * sizeof(Neighbor<IDType, DistanceType>));
     data_[lo] = {u, dist};
   }
 
@@ -273,7 +308,9 @@ struct LinearPool {
   auto is_checked(IDType id) -> bool { return (id >> 31 & 1) != 0; }
 
   size_t nb_, size_ = 0, cur_ = 0, capacity_;
-  std::vector<Neighbor<IDType, DistanceType>, AlignAlloc<Neighbor<IDType, DistanceType>>> data_;
+  std::vector<Neighbor<IDType, DistanceType>,
+              AlignAlloc<Neighbor<IDType, DistanceType>>>
+      data_;
   DynamicBitset vis_;
 };
 

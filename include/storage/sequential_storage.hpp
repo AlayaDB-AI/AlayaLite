@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -29,6 +29,10 @@
 #include "utils/log.hpp"
 #include "utils/types.hpp"
 
+#ifdef _MSC_VER
+#include <malloc.h>
+#endif
+
 namespace alaya {
 
 template <typename DataType, typename IDType>
@@ -46,22 +50,41 @@ struct SequentialStorage {
 
   ~SequentialStorage() {
     if (data_ != nullptr) {
+#ifdef _MSC_VER
+      _aligned_free(data_);
+#else
       std::free(data_);  // NOLINT
+#endif
     }
     if (bitmap_ != nullptr) {
+#ifdef _MSC_VER
+      _aligned_free(bitmap_);
+#else
       std::free(bitmap_);  // NOLINT
+#endif
     }
   }
 
-  auto init(size_t item_size, size_t capacity, char fill = 0, size_t alignment = 64) -> void {
+  auto init(size_t item_size, size_t capacity, char fill = 0,
+            size_t alignment = 64) -> void {
     item_size_ = item_size;
     capacity_ = capacity;
     alignment_ = alignment;
     aligned_item_size_ = do_align(item_size_, alignment);
-    data_ = static_cast<DataType *>(std::aligned_alloc(alignment, aligned_item_size_ * capacity_));
+#ifdef _MSC_VER
+    data_ = static_cast<DataType *>(
+        _aligned_malloc(aligned_item_size_ * capacity_, alignment));
+#else
+    data_ = static_cast<DataType *>(
+        std::aligned_alloc(alignment, aligned_item_size_ * capacity_));
+#endif
     std::memset(data_, fill, aligned_item_size_ * capacity_);
     auto bitmap_size = do_align(capacity_ / sizeof(char) + 1, alignment);
+#ifdef _MSC_VER
+    bitmap_ = static_cast<size_t *>(_aligned_malloc(bitmap_size, alignment));
+#else
     bitmap_ = static_cast<size_t *>(std::aligned_alloc(alignment, bitmap_size));
+#endif
     std::memset(bitmap_, 0, bitmap_size);
   }
 
@@ -109,30 +132,53 @@ struct SequentialStorage {
 
   auto save(std::ofstream &writer) const -> void {
     writer.write(reinterpret_cast<const char *>(&item_size_), sizeof(item_size_));
-    writer.write(reinterpret_cast<const char *>(&aligned_item_size_), sizeof(aligned_item_size_));
+    writer.write(reinterpret_cast<const char *>(&aligned_item_size_),
+                 sizeof(aligned_item_size_));
     writer.write(reinterpret_cast<const char *>(&capacity_), sizeof(capacity_));
     writer.write(reinterpret_cast<const char *>(&pos_), sizeof(pos_));
     writer.write(reinterpret_cast<const char *>(&alignment_), sizeof(alignment_));
-    writer.write(reinterpret_cast<char *>(data_), aligned_item_size_ * capacity_);
+    writer.write(reinterpret_cast<char *>(data_),
+                 aligned_item_size_ * capacity_);
     writer.write(reinterpret_cast<char *>(bitmap_), capacity_ / sizeof(char) + 1);
   }
 
   auto load(std::ifstream &reader) -> void {
     if (data_ != nullptr) {
+#ifdef _MSC_VER
+      _aligned_free(data_);
+#else
       std::free(data_);  // NOLINT
+#endif
     }
     if (bitmap_ != nullptr) {
+#ifdef _MSC_VER
+      _aligned_free(bitmap_);
+#else
       std::free(bitmap_);  // NOLINT
+#endif
     }
     reader.read(reinterpret_cast<char *>(&item_size_), sizeof(item_size_));
-    reader.read(reinterpret_cast<char *>(&aligned_item_size_), sizeof(aligned_item_size_));
+    reader.read(reinterpret_cast<char *>(&aligned_item_size_),
+                sizeof(aligned_item_size_));
     reader.read(reinterpret_cast<char *>(&capacity_), sizeof(capacity_));
     reader.read(reinterpret_cast<char *>(&pos_), sizeof(pos_));
     reader.read(reinterpret_cast<char *>(&alignment_), sizeof(alignment_));
-    data_ = static_cast<DataType *>(std::aligned_alloc(alignment_, aligned_item_size_ * capacity_));
-    reader.read(reinterpret_cast<char *>(data_), aligned_item_size_ * capacity_);
+#ifdef _MSC_VER
+    data_ = static_cast<DataType *>(
+        _aligned_malloc(aligned_item_size_ * capacity_, alignment_));
+#else
+    data_ = static_cast<DataType *>(
+        std::aligned_alloc(alignment_, aligned_item_size_ * capacity_));
+#endif
+    reader.read(reinterpret_cast<char *>(data_),
+                aligned_item_size_ * capacity_);
     auto bitmap_size = do_align(capacity_ / sizeof(char) + 1, alignment_);
-    bitmap_ = static_cast<size_t *>(std::aligned_alloc(alignment_, bitmap_size));
+#ifdef _MSC_VER
+    bitmap_ = static_cast<size_t *>(_aligned_malloc(bitmap_size, alignment_));
+#else
+    bitmap_ =
+        static_cast<size_t *>(std::aligned_alloc(alignment_, bitmap_size));
+#endif
     reader.read(reinterpret_cast<char *>(bitmap_), capacity_ / sizeof(char) + 1);
   }
 };
