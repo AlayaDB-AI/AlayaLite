@@ -29,9 +29,24 @@ endif()
 # Execute Conan based on platform with proper command formatting
 if(APPLE)
   execute_process(
-    COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${CONAN_GENERATORS_DIR} "Macos"
+    COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${PROJECT_BINARY_DIR}/generators "Macos"
     RESULT_VARIABLE conan_result
   )
+  # In MAC, the following line (include("${PROJECT_BINARY_DIR}/generators/conan_toolchain.cmake")) should between two execute_process
+  include("${PROJECT_BINARY_DIR}/generators/conan_toolchain.cmake")
+  execute_process(
+    COMMAND xcrun --show-sdk-path
+    OUTPUT_VARIABLE MACOSX_SDK_PATH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+
+  # Reset sysroot: canon may set it to a incorrect value.
+  set(CMAKE_OSX_SYSROOT "${MACOSX_SDK_PATH}" CACHE STRING "macOS SDK path" FORCE)
+  message(STATUS "Using macOS SDK: ${CMAKE_OSX_SYSROOT}")
+
+  # Architecture support: M1/M2
+  set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Build architecture" FORCE)
+
 elseif(WIN32)
   # Critical: Use absolute path and ensure proper command separation
   execute_process(
@@ -44,11 +59,28 @@ elseif(WIN32)
   # Print Conan output for debugging Windows issues
   message("Conan output: ${conan_output}")
   message("Conan error: ${conan_error}")
+
+  # Locate and include Conan toolchain file with fallback path check
+  set(CONAN_TOOLCHAIN_FILE "${CONAN_GENERATORS_DIR}/conan_toolchain.cmake")
+
+  # Fallback check for common Conan output structure
+  if(NOT EXISTS ${CONAN_TOOLCHAIN_FILE})
+    set(CONAN_TOOLCHAIN_FILE "${CONAN_GENERATORS_DIR}/generators/conan_toolchain.cmake")
+  endif()
+
+  # Final validation of toolchain file existence
+  if(NOT EXISTS ${CONAN_TOOLCHAIN_FILE})
+    message(FATAL_ERROR "Conan toolchain file not found: ${CONAN_TOOLCHAIN_FILE}")
+  endif()
+
+  include(${CONAN_TOOLCHAIN_FILE})
+
 else()
   execute_process(
     COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${CONAN_GENERATORS_DIR}
     RESULT_VARIABLE conan_result
   )
+  include("${PROJECT_BINARY_DIR}/generators/conan_toolchain.cmake")
 endif()
 
 # Check Conan execution result before proceeding
@@ -56,17 +88,6 @@ if(NOT conan_result EQUAL 0)
   message(FATAL_ERROR "Conan execution failed with error code: ${conan_result}")
 endif()
 
-# Locate and include Conan toolchain file with fallback path check
-set(CONAN_TOOLCHAIN_FILE "${CONAN_GENERATORS_DIR}/conan_toolchain.cmake")
-# Fallback check for common Conan output structure
-if(NOT EXISTS ${CONAN_TOOLCHAIN_FILE})
-  set(CONAN_TOOLCHAIN_FILE "${CONAN_GENERATORS_DIR}/generators/conan_toolchain.cmake")
-endif()
-# Final validation of toolchain file existence
-if(NOT EXISTS ${CONAN_TOOLCHAIN_FILE})
-  message(FATAL_ERROR "Conan toolchain file not found: ${CONAN_TOOLCHAIN_FILE}")
-endif()
-include(${CONAN_TOOLCHAIN_FILE})
 
 # C++ standard configuration (matches project requirements)
 set(CMAKE_CXX_STANDARD 20)
