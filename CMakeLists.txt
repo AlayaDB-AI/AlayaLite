@@ -77,7 +77,7 @@ elseif(WIN32)
 
 else()
   execute_process(
-    COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${CONAN_GENERATORS_DIR}
+    COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${PROJECT_BINARY_DIR}/generators
     RESULT_VARIABLE conan_result
   )
   include("${PROJECT_BINARY_DIR}/generators/conan_toolchain.cmake")
