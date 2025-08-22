@@ -16,9 +16,6 @@ endif()
 message("PROJECT_SOURCE_DIR: ${PROJECT_SOURCE_DIR}")
 message("PROJECT_BINARY_DIR: ${PROJECT_BINARY_DIR}")
 
-# Force set Conan generators directory to avoid temp path issues
-set(CONAN_GENERATORS_DIR "${PROJECT_SOURCE_DIR}/build/generators")
-message("CONAN_GENERATORS_DIR: ${CONAN_GENERATORS_DIR}")
 
 # Explicitly set Visual Studio toolset for Windows (replaces Conan conf)
 if(MSVC)
@@ -48,6 +45,10 @@ if(APPLE)
   set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Build architecture" FORCE)
 
 elseif(WIN32)
+  # Force set Conan generators directory to avoid temp path issues
+  set(CONAN_GENERATORS_DIR "${PROJECT_SOURCE_DIR}/build/generators")
+  message("CONAN_GENERATORS_DIR: ${CONAN_GENERATORS_DIR}")
+
   # Critical: Use absolute path and ensure proper command separation
   execute_process(
     COMMAND cmd /c "${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook_win.bat" "${CONAN_GENERATORS_DIR}" "Windows"
