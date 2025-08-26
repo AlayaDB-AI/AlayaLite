@@ -26,6 +26,7 @@
 #include "../../utils/query_utils.hpp"
 #include "job_context.hpp"
 #include "space/rabitq_space.hpp"
+#include "utils/log.hpp"
 #include "utils/rbq_utils/search_utils/buffer.hpp"
 #include "utils/rbq_utils/search_utils/hashset.hpp"
 #include "index/graph/graph_refiner.hpp"
@@ -79,10 +80,10 @@ struct GraphSearchJob {
       vis.set(cur_node);
 
       // calculate est_dist for centroid's neighbors in batch after loading centroid
-      const IDType *cand_neighbors = graph_->edges(cur_node);
-      q_computer.load_centroid(cur_node, cand_neighbors);
+      q_computer.load_centroid(cur_node);
 
       // scan cur_node's neighbors, insert them with estimated distances
+      const IDType *cand_neighbors = graph_->edges(cur_node);
       for (size_t i = 0; i < degree_bound; ++i) {
         auto cand_nei = cand_neighbors[i];
         DistanceType est_dist = q_computer(i);
@@ -130,14 +131,14 @@ struct GraphSearchJob {
       search_pool.vis_.set(cur_node);
 
       // calculate est_dist for centroid's neighbors in batch after loading centroid
-      const IDType *cand_neighbors = graph_->edges(cur_node);
-      q_computer.load_centroid(cur_node, cand_neighbors);
+      q_computer.load_centroid(cur_node);
 
       // scan cur_node's neighbors, insert them with estimated distances
+      const IDType *cand_neighbors = graph_->edges(cur_node);
       for (size_t i = 0; i < degree_bound; ++i) {
         auto cand_nei = cand_neighbors[i];
         DistanceType est_dist = q_computer(i);
-        if (!search_pool.small_enough(est_dist)||search_pool.vis_.get(cand_nei)) {
+        if (search_pool.vis_.get(cand_nei)) {
           continue;
         }
         // try insert
@@ -159,63 +160,13 @@ struct GraphSearchJob {
     }
   }
 
-  /// todo: to be refined
-  auto rabitq_search(const DataType *query, uint32_t k, IDType *ids, uint32_t ef) -> coro::task<> {
+  
+  auto rabitq_search([[maybe_unused]]const DataType *query,[[maybe_unused]] uint32_t k, [[maybe_unused]]IDType *ids, [[maybe_unused]]uint32_t ef) -> coro::task<> {
     static_assert(is_rbqspace_v<DistanceSpaceType>, "Only support RBQSpace instance!");
-
-    // init
-    auto entry = graph_->get_ep();
-    mem_prefetch_l1(space_->get_data_by_id(entry), 10);
-    space_->prefetch_by_address(query);
-    co_await std::suspend_always{};
-    auto q_computer = space_->get_query_computer(query);
-
-    // sorted by estimated distance
-    LinearPool<DistanceType, IDType> search_pool(space_->get_data_num(), ef);
-    search_pool.insert(entry, std::numeric_limits<DistanceType>::max());
-
-    // sorted by exact distance (implict rerank)
-    LinearPool<DistanceType, IDType> res_pool(space_->get_data_num(), k);
-
-    while (search_pool.has_next()) {
-      auto cur_node = search_pool.pop();
-      if (search_pool.vis_.get(cur_node)) {
-        continue;
-      }
-      search_pool.vis_.set(cur_node);
-
-      // calculate est_dist for centroid's neighbors in batch after loading centroid
-      mem_prefetch_l1(graph_->edges(cur_node), graph_->max_nbrs_ * sizeof(IDType) / 64);
-      co_await std::suspend_always{};
-      const IDType *cand_neighbors = graph_->edges(cur_node);
-      q_computer.load_centroid(cur_node, cand_neighbors);
-
-      // scan cur_node's neighbors, insert them with estimated distances
-      for (size_t i = 0; i < RBQSpace<>::kDegreeBound; ++i) {
-        auto cand_nei = cand_neighbors[i];
-        DistanceType est_dist = q_computer(i);
-        if (search_pool.vis_.get(cand_nei)) {
-          continue;
-        }
-        // try insert
-        search_pool.insert(cand_nei, est_dist);
-        mem_prefetch_l2(space_->get_data_by_id(search_pool.next_id()), 10);
-      }
-
-      // implict rerank
-      res_pool.insert(cur_node, q_computer.get_exact_qr_c_dist());
-    }
-
-    if (!res_pool.is_full()) {
-      LOG_INFO("Failed to return enough knn, res_pool current size: {}", res_pool.size());
-      /// todo: supplement result if necessary
-    }
-
-    // load result
-    for (int i = 0; i < res_pool.size(); i++) {
-      ids[i] = res_pool.id(i);
-    }
-    co_return;
+    
+    /// todo: to be implemented
+    fprintf(stderr, "FATAL: rabitq_search is not implemented!\n");
+    std::abort();
   }
 
   #if defined(__linux__)

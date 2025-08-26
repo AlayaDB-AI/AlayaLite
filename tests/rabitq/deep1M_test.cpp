@@ -132,7 +132,7 @@ TEST_F(Deep1MTest, DISABLED_QuantizationTest) {
 
   // byte size
   size_t bin_code_size = padded_dim * degree_bound / 8;
-  int check_qc_byte_cnt = 4;
+  size_t check_qc_byte_cnt = 4;
   auto qc_ptr = space->get_nei_qc_ptr(centroid);
 
   std::cerr << "qc example(first " << check_qc_byte_cnt << " bytes): \n";
@@ -179,9 +179,9 @@ TEST_F(Deep1MTest, DISABLED_QuantizationTest) {
   std::cerr << "\n";
 
   auto q_computer = space->get_query_computer(query_ptr);
-  q_computer.load_centroid(centroid, neighbors.data());
+  q_computer.load_centroid(centroid);
   std::cerr << "Print est dist for every neighbor:\n";
-  for (int k = 0; k < degree_bound; ++k) {
+  for (size_t k = 0; k < degree_bound; ++k) {
     auto nei_id = neighbors[k];
     fmt::println("{} 's est_dist: {}", nei_id, q_computer(k));
   }
@@ -415,76 +415,76 @@ TEST_F(Deep1MTest, DISABLED_Deep1mHNSWTest) {
   }
 }
 
-// TEST_F(Deep1MTest, Deep1mQGTest) {
-//   // ***************INDEX******************
-//   LOG_INFO("Building QG...");
-//   std::filesystem::path index_file = fmt::format("{}_rabitq.qg", dir_name_.string());
-//   std::string_view path = index_file.native();
+TEST_F(Deep1MTest, Deep1mQGTest) {
+  // ***************INDEX******************
+  LOG_INFO("Building QG...");
+  std::filesystem::path index_file = fmt::format("{}_rabitq.qg", dir_name_.string());
+  std::string_view path = index_file.native();
 
-//   /// todo: save and load space
-//   std::shared_ptr<alaya::RBQSpace<>> space =
-//       std::make_shared<alaya::RBQSpace<>>(points_num_, dim_, MetricType::L2);
-//   space->fit(data_.data(), points_num_);
-//   LOG_INFO("Successfully fit data into space");
-//   if (!std::filesystem::exists(index_file)) {
-//     auto qg = alaya::QGBuilder<RBQSpace<>>(space);
-//     auto graph = qg.build_graph();
-//     graph->save(path);
-//   }
+  /// todo: save and load space
+  std::shared_ptr<alaya::RBQSpace<>> space =
+      std::make_shared<alaya::RBQSpace<>>(points_num_, dim_, MetricType::L2);
+  space->fit(data_.data(), points_num_);
+  LOG_INFO("Successfully fit data into space");
+  if (!std::filesystem::exists(index_file)) {
+    auto qg = alaya::QGBuilder<RBQSpace<>>(space);
+    auto graph = qg.build_graph();
+    graph->save(path);
+  }
 
-//   // ***************QUERY******************
-//   auto load_graph = std::make_shared<alaya::Graph<>>();
-//   load_graph->load(path);
+  // ***************QUERY******************
+  auto load_graph = std::make_shared<alaya::Graph<>>();
+  load_graph->load(path);
 
-//   auto search_job = std::make_unique<alaya::GraphSearchJob<RBQSpace<>>>(space, load_graph);
-//   std::vector<size_t> efs = {10,  20,  40,  50,  60,  80,  100, 150, 170, 190,
-//                              200, 250, 300, 400, 500, 600, 700, 800, 1500};
-//   size_t test_round = 3;
-//   size_t topk = 10;
-//   alaya::StopW timer;
-//   std::vector<std::vector<float>> all_qps(test_round, std::vector<float>(efs.size()));
-//   std::vector<std::vector<float>> all_recall(test_round, std::vector<float>(efs.size()));
+  auto search_job = std::make_unique<alaya::GraphSearchJob<RBQSpace<>>>(space, load_graph);
+  std::vector<size_t> efs = {10,  20,  40,  50,  60,  80,  100, 150, 170, 190,
+                             200, 250, 300, 400, 500, 600, 700, 800, 1500};
+  size_t test_round = 3;
+  size_t topk = 10;
+  alaya::StopW timer;
+  std::vector<std::vector<float>> all_qps(test_round, std::vector<float>(efs.size()));
+  std::vector<std::vector<float>> all_recall(test_round, std::vector<float>(efs.size()));
 
-//   LOG_INFO("Start querying...");
-//   for (size_t r = 0; r < test_round; ++r) {
-//     for (size_t i = 0; i < efs.size(); ++i) {  // NOLINT
-//       size_t ef = efs[i];
-//       size_t total_correct = 0;
-//       float total_time = 0;
-//       std::vector<IDType> results(topk);
-//       LOG_INFO("current ef in this round:{}", ef);
-//       for (uint32_t n = 0; n < query_num_; ++n) {
-//         timer.reset();
-//         // results is overwritten
-//         // search_job->rabitq_search_solo(queries_.data() + (n * query_dim_), topk, results.data(),
-//         //                                ef);
-//         search_job->rabitq_search_optimized(queries_.data() + (n * query_dim_), topk,
-//                                             results.data(), ef);
-//         total_time += timer.get_elapsed_micro();
-//         // recall
-//         for (size_t k = 0; k < topk; ++k) {
-//           for (size_t j = 0; j < topk; ++j) {
-//             if (results[k] == answers_[(n * gt_col_) + j]) {
-//               total_correct++;
-//               break;
-//             }
-//           }
-//         }
-//       }
-//       float qps = static_cast<float>(query_num_) / (total_time / 1e6F);
-//       float recall = static_cast<float>(total_correct) / static_cast<float>(query_num_ * topk);
+  LOG_INFO("Start querying...");
+  for (size_t r = 0; r < test_round; ++r) {
+    for (size_t i = 0; i < efs.size(); ++i) {  // NOLINT
+      size_t ef = efs[i];
+      size_t total_correct = 0;
+      float total_time = 0;
+      std::vector<IDType> results(topk);
+      LOG_INFO("current ef in this round:{}", ef);
+      for (uint32_t n = 0; n < query_num_; ++n) {
+        timer.reset();
+        // results is overwritten
+        // search_job->rabitq_search_solo(queries_.data() + (n * query_dim_), topk, results.data(),
+        //                                ef);
+        search_job->rabitq_search_optimized(queries_.data() + (n * query_dim_), topk,
+                                            results.data(), ef);
+        total_time += timer.get_elapsed_micro();
+        // recall
+        for (size_t k = 0; k < topk; ++k) {
+          for (size_t j = 0; j < topk; ++j) {
+            if (results[k] == answers_[(n * gt_col_) + j]) {
+              total_correct++;
+              break;
+            }
+          }
+        }
+      }
+      float qps = static_cast<float>(query_num_) / (total_time / 1e6F);
+      float recall = static_cast<float>(total_correct) / static_cast<float>(query_num_ * topk);
 
-//       all_qps[r][i] = qps;
-//       all_recall[r][i] = recall;
-//     }
-//   }
+      all_qps[r][i] = qps;
+      all_recall[r][i] = recall;
+    }
+  }
 
-//   auto avg_qps = alaya::horizontal_avg(all_qps);
-//   auto avg_recall = alaya::horizontal_avg(all_recall);
+  auto avg_qps = alaya::horizontal_avg(all_qps);
+  auto avg_recall = alaya::horizontal_avg(all_recall);
 
-//   std::cout << "ef\tQPS\tRecall\n";
-//   for (size_t i = 0; i < avg_qps.size(); ++i) {
-//     std::cout << efs[i] << '\t' << avg_qps[i] << '\t' << avg_recall[i] << '\n';
-//   }
-// }
+  std::cout << "ef\tQPS\tRecall\n";
+  for (size_t i = 0; i < avg_qps.size(); ++i) {
+    std::cout << efs[i] << '\t' << avg_qps[i] << '\t' << avg_recall[i] << '\n';
+  }
+}
 }  // namespace alaya

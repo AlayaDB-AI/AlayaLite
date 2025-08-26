@@ -98,14 +98,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Compilation options with platform-specific adjustments
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)  # Ensure PIC for shared libraries
 # RaBitQ optimization
-set(CMAKE_CXX_FLAGS "-mfma -mavx512f -mavx512dq -mavx512bw -mavx512vl -mavx512bitalg -mavx512vpopcntdq -fopenmp ${CMAKE_CXX_FLAGS}") 
+set(CMAKE_CXX_FLAGS "-mfma -mavx512f -mavx512dq -mavx512bw -mavx512vl -mavx512bitalg -mavx512vpopcntdq -fopenmp -ftree-vectorize ${CMAKE_CXX_FLAGS}") 
 if(MSVC)
   # Windows MSVC specific flags
+  message(STATUS "Using MSVC compiler settings")
   set(CMAKE_CXX_FLAGS "/EHsc /utf-8 ${CMAKE_CXX_FLAGS}")  # Exception handling and UTF-8 support
   set(CMAKE_CXX_FLAGS_RELEASE "/O2 /DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG "/Zi /Od")
 else()
   # GCC/Clang flags
+  message(STATUS "Using GCC/Clang compiler settings")
   set(CMAKE_CXX_FLAGS "-Wall -Wextra ${CMAKE_CXX_FLAGS}")  # Enable common warnings
   set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
@@ -141,8 +143,8 @@ else()
     concurrentqueue::concurrentqueue
     Eigen3::Eigen
   )
-  set(GTEST_LIBS GTest::gtest GTest::gtest_main)
 endif()
+set(GTEST_LIBS GTest::gtest GTest::gtest_main)
 
 # Include project header directories
 include_directories(${CMAKE_SOURCE_DIR}/include)

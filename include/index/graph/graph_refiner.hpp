@@ -438,13 +438,14 @@ struct GraphRefiner {
       }
 
       pool.vis_.set(cur_candi);
-      const IDType *cand_neighbors = graph_->edges(cur_candi);
-      q_computer.load_centroid(cur_candi, cand_neighbors);
+      
+      q_computer.load_centroid(cur_candi);
       if (cur_candi != cur_id) {
         results.emplace_back(cur_candi, q_computer.get_exact_qr_c_dist());
       }
 
       // scan candidate's neighbors for more candidates
+      const IDType *cand_neighbors = graph_->edges(cur_candi);
       for (size_t i = 0; i < degree_bound_; ++i) {
         auto cand_nei = cand_neighbors[i];
         DistanceType est_dist = q_computer(i);

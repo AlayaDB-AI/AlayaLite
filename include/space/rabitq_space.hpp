@@ -54,11 +54,11 @@ class RBQSpace {
   auto operator=(const RBQSpace &) -> RBQSpace & = delete;
   auto operator=(RBQSpace &&) -> RBQSpace & = delete;
 
-  auto insert(DataType *data) -> IDType {
+  auto insert([[maybe_unused]] DataType *data) -> IDType {
     throw std::runtime_error("Insert operation is not supported yet!");
   }
 
-  auto remove(IDType id) -> IDType {
+  auto remove([[maybe_unused]] IDType id) -> IDType {
     throw std::runtime_error("Remove operation is not supported yet!");
   }
 
@@ -89,7 +89,9 @@ class RBQSpace {
     // data layout: (for each node, degree_bound defines their final outdegree)
     // 1. its raw data vector
     // 2. its neighbors' quantization codes
-    // 3. F_add , F_rescale : please refer to rbq.md for detailed information
+    // 3. F_add , F_rescale : please refer to
+    // https://github.com/VectorDB-NTU/RaBitQ-Library/blob/main/docs/docs/rabitq/estimator.md
+    // for detailed information
     size_t rvec_len = dim_ * sizeof(DataType);
     size_t nei_quant_code_len = quantizer_->get_padded_dim() * kDegreeBound / 8;  // 1 b/dim code
     size_t f_add_len = kDegreeBound * sizeof(DataType);
@@ -208,11 +210,14 @@ class RBQSpace {
 
   auto get_query_computer(const DataType *query) const { return QueryComputer(*this, query); }
 
+  auto get_query_computer(const IDType id) const {
+    return QueryComputer(*this, get_data_by_id(id));
+  }
+
   struct QueryComputer {
    private:
     const RBQSpace &distance_space_;
     const DataType *query_;
-    const IDType *edges_;
     IDType c_;
 
     Lut<DataType> lookup_table_;
@@ -221,20 +226,19 @@ class RBQSpace {
     DataType g_k1xsumq_ = 0;
 
     std::vector<DataType> est_dists_;
+    std::vector<uint16_t> accu_res_;
 
     void batch_est_dist() {
-      std::vector<u_int16_t> accu_res(fastscan::kBatchSize);
       size_t padded_dim = distance_space_.get_padded_dim();
-      fastscan::accumulate(distance_space_.get_nei_qc_ptr(c_), lookup_table_.lut(), accu_res.data(),
-                           padded_dim);
+      fastscan::accumulate(distance_space_.get_nei_qc_ptr(c_), lookup_table_.lut(),
+                           accu_res_.data(), padded_dim);
 
-      ConstRowMajorArrayMap<u_int16_t> ip_arr(accu_res.data(), 1, fastscan::kBatchSize);
+      ConstRowMajorArrayMap<u_int16_t> ip_arr(accu_res_.data(), 1, fastscan::kBatchSize);
       ConstRowMajorArrayMap<DataType> f_add_arr(distance_space_.get_f_add_ptr(c_), 1,
                                                 fastscan::kBatchSize);
       ConstRowMajorArrayMap<DataType> f_rescale_arr(distance_space_.get_f_rescale_ptr(c_), 1,
                                                     fastscan::kBatchSize);
 
-      
       RowMajorArrayMap<DistDataType> est_dist_arr(est_dists_.data(), 1, fastscan::kBatchSize);
       est_dist_arr = f_add_arr + g_add_ +
                      f_rescale_arr * (lookup_table_.delta() * (ip_arr.template cast<DataType>()) +
@@ -245,7 +249,7 @@ class RBQSpace {
     QueryComputer() = default;
     ~QueryComputer() = default;
 
-    // delete all since distance space is not allowed to be copied or moved either
+    // delete all since distance space is not allowed to be copied or moved.
     QueryComputer(QueryComputer &&) = delete;
     auto operator=(QueryComputer &&) -> QueryComputer & = delete;
     QueryComputer(const QueryComputer &) = delete;
@@ -253,7 +257,10 @@ class RBQSpace {
 
     /// todo: align?
     QueryComputer(const RBQSpace &distance_space, const DataType *query)
-        : distance_space_(distance_space), query_(query) {
+        : distance_space_(distance_space),
+          query_(query),
+          accu_res_(fastscan::kBatchSize),
+          est_dists_(RBQSpace<>::kDegreeBound) {
       // rotate query vector
       size_t padded_dim = distance_space_.get_padded_dim();
       std::vector<DataType> rotated_query(padded_dim);
@@ -261,17 +268,16 @@ class RBQSpace {
 
       lookup_table_ = std::move(Lut<DataType>(rotated_query.data(), padded_dim));
 
-      float c_1 = -((1 << 1) - 1) / 2.F;
+      float c_1 = -((1 << 1) - 1) / 2.F;  // -0.5F
+
       auto sumq = std::accumulate(rotated_query.begin(), rotated_query.begin() + padded_dim,
                                   static_cast<DataType>(0));
-      g_k1xsumq_ = sumq * c_1;
 
-      est_dists_.resize(RBQSpace<>::kDegreeBound);
+      g_k1xsumq_ = sumq * c_1;
     }
 
-    void load_centroid(IDType c, const IDType *edges) {
+    void load_centroid(IDType c) {
       c_ = c;
-      edges_ = edges;
 
       auto centroid_vec = distance_space_.get_data_by_id(c_);  // len: dim, not padded_dim
       g_add_ = distance_space_.get_dist_func()(query_, centroid_vec, distance_space_.get_dim());
@@ -282,12 +288,13 @@ class RBQSpace {
     auto get_exact_qr_c_dist() const -> DataType { return g_add_; }
 
     /**
-     * @brief Pass neighbors' index in centroid's edges instead of neighbors' id to avoid using unordered_map
-     * 
+     * @brief Pass neighbors' index in centroid's edges instead of neighbors' id to avoid using
+     * unordered_map
+     *
      * @param i_th centroid's neighbors' index
-     * @return DistanceType 
+     * @return DistanceType
      */
-    auto operator()(int i_th) const -> DistanceType { return est_dists_[i_th]; }
+    auto operator()(size_t i_th) const -> DistanceType { return est_dists_[i_th]; }
   };
 
   auto save(std::string_view &filename) -> void {
