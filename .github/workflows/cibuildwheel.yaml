@@ -1,8 +1,8 @@
 ---
 name: Build
-
-on  :
-  workflow_dispatch:
+on         : [push, pull_request]
+# on  :
+#   workflow_dispatch:
 
 
 jobs:
@@ -12,7 +12,7 @@ jobs:
     strategy:
       matrix:
         # os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-13, macos-latest]
-        os: [windows-latest, macos-latest]
+        os: [windows-latest]
 
     steps:
     - uses: actions/checkout@v4
@@ -26,15 +26,14 @@ jobs:
       uses: ./.github/actions/cache-restore
 
     - name: Install uv
-      if: runner.os == 'macOS'
       uses: astral-sh/setup-uv@v5
 
     - name: Install cibuildwheel
       uses: pypa/cibuildwheel@v3.0.0
       env:
         # CIBW_ARCHS_LINUX: aarch64, x86_64
-        CIBW_ARCHS_MACOS: x86_64, arm64
-        CIBW_ARCHS_WINDOWS: x86_64, arm64
+        # CIBW_ARCHS_MACOS: arm64
+        CIBW_ARCHS_WINDOWS: x86_64
 
     - name: Upload wheels
       uses: actions/upload-artifact@v4
