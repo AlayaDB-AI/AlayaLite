@@ -220,10 +220,8 @@ class Collection:
         new_inner_outer_map = {}
         for new_inner_id, old_inner_id in enumerate(self.__inner_outer_map.keys()):
             outer_id = self.__inner_outer_map[old_inner_id]
-            
             # Update outer-to-inner mapping
             self.__outer_inner_map[outer_id] = new_inner_id
-            
             # Update new inner-to-outer mapping
             new_inner_outer_map[new_inner_id] = outer_id
 

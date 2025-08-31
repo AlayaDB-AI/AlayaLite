@@ -142,7 +142,7 @@ class TestCollection(unittest.TestCase):
         self.assertEqual(result["id"][0][0], uuids[test_index])
         self.assertEqual(result["document"][0][0], documents[test_index])
         self.assertAlmostEqual(result["distance"][0][0], 0.0, places=5)
-        
+
     def test_reindex_large_scale(self):
         """Large-scale reindex test with recall evaluation.
 
