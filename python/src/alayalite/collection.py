@@ -206,10 +206,7 @@ class Collection:
         params = self.__index_py.get_params()
 
         # 2. Collect all vectors using the existing internal IDs
-        all_vectors = np.array([
-            self.__index_py.get_data_by_id(inner_id)
-            for inner_id in self.__inner_outer_map.keys()
-        ])
+        all_vectors = np.array([self.__index_py.get_data_by_id(inner_id) for inner_id in self.__inner_outer_map.keys()])
 
         # 3. Reinitialize the index and fit with collected vectors
         #    (this clears the old index, GC happens here)

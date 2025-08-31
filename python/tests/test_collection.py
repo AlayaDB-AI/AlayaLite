@@ -183,7 +183,6 @@ class TestCollection(unittest.TestCase):
         result_remaining = self.collection.get_by_id(remaining_ids)
         self.assertEqual(set(result_remaining["id"]), set(remaining_ids))
 
-
         # --- Recall check after deleting 90% ---
         remaining_vectors = vectors[900:]  # 100 remaining vectors
         queries_after_delete = remaining_vectors[np.random.choice(len(remaining_vectors), 20, replace=True)]
@@ -204,7 +203,7 @@ class TestCollection(unittest.TestCase):
         self.assertGreaterEqual(
             recall_after_reindex,
             recall_before_reindex,
-            f"Recall decreased after reindex: before={recall_before_reindex:.4f}, after={recall_after_reindex:.4f}"
+            f"Recall decreased after reindex: before={recall_before_reindex:.4f}, after={recall_after_reindex:.4f}",
         )
         self.assertGreaterEqual(recall_after_reindex, 0.9, f"Recall too low after reindex: {recall}")
 
