@@ -21,6 +21,7 @@ import unittest
 
 import numpy as np
 from alayalite import Collection
+from alayalite.utils import calc_gt, calc_recall
 
 
 class TestCollection(unittest.TestCase):
@@ -141,6 +142,71 @@ class TestCollection(unittest.TestCase):
         self.assertEqual(result["id"][0][0], uuids[test_index])
         self.assertEqual(result["document"][0][0], documents[test_index])
         self.assertAlmostEqual(result["distance"][0][0], 0.0, places=5)
+        
+    def test_reindex_large_scale(self):
+        """Large-scale reindex test with recall evaluation.
+
+        This test verifies that the Collection class maintains high recall after:
+        1. Building the initial index.
+        2. Deleting a large portion of items (90%).
+        3. Performing a reindex on the remaining items.
+        """
+
+        dim = 128
+        total = 1000
+
+        # Step 1: Insert 1000 random vectors
+        ids = list(range(total))
+        vectors = np.random.rand(total, dim).astype(np.float32)
+        docs = [f"Doc {i}" for i in ids]
+        metas = [{} for _ in ids]
+        self.collection.insert(list(zip(ids, docs, vectors, metas)))
+
+        # --- Initial recall check immediately after building the index ---
+        queries = vectors[np.random.choice(total, 20, replace=False)]  # 20 random queries
+        result = self.collection.batch_query(queries.tolist(), limit=10, ef_search=100)
+        retrieved = np.array(result["id"], dtype=int)
+        gt = calc_gt(vectors, queries, 10)
+        recall = calc_recall(retrieved, gt)
+        self.assertGreaterEqual(recall, 0.9, f"Initial recall too low: {recall}")
+
+        # Step 2: Delete 90% (first 900 ids), then reindex
+        deleted_ids = ids[:900]
+        remaining_ids = ids[900:]
+        self.collection.delete_by_id(deleted_ids)
+
+        # Verify deleted are gone
+        result_deleted = self.collection.get_by_id(deleted_ids)
+        self.assertEqual(len(result_deleted["id"]), 0)
+
+        # Verify remaining are still there
+        result_remaining = self.collection.get_by_id(remaining_ids)
+        self.assertEqual(set(result_remaining["id"]), set(remaining_ids))
+
+
+        # --- Recall check after deleting 90% ---
+        remaining_vectors = vectors[900:]  # 100 remaining vectors
+        queries_after_delete = remaining_vectors[np.random.choice(len(remaining_vectors), 20, replace=True)]
+        result_before_reindex = self.collection.batch_query(queries_after_delete.tolist(), limit=10, ef_search=100)
+        id_before_reindex = np.array(result_before_reindex["id"], dtype=int)
+        gt_before_reindex = calc_gt(remaining_vectors, queries_after_delete, 10)
+        recall_before_reindex = calc_recall(np.array([each - 900 for each in id_before_reindex]), gt_before_reindex)
+        print(f"Recall after deleting 90% of points (before reindex): {recall_before_reindex:.4f}")
+
+        self.collection.reindex()
+
+        result_after_reindex = self.collection.batch_query(queries_after_delete.tolist(), limit=10, ef_search=100)
+        retrieved_after_reindex = np.array(result_after_reindex["id"], dtype=int)
+        gt_after_reindex = calc_gt(remaining_vectors, queries_after_delete, 10)
+        recall_after_reindex = calc_recall(np.array([each - 900 for each in retrieved_after_reindex]), gt_after_reindex)
+        print(f"Recall after deleting 90% of points (after reindex): {recall_after_reindex:.4f}")
+
+        self.assertGreaterEqual(
+            recall_after_reindex,
+            recall_before_reindex,
+            f"Recall decreased after reindex: before={recall_before_reindex:.4f}, after={recall_after_reindex:.4f}"
+        )
+        self.assertGreaterEqual(recall_after_reindex, 0.9, f"Recall too low after reindex: {recall}")
 
 
 if __name__ == "__main__":

@@ -51,6 +51,15 @@ class Index:
         self.__is_initialized = False
         self.__dim = None  # It will be set when fitting the index
 
+    def get_params(self) -> IndexParams:
+        """
+        Retrieve the configuration parameters of the index.
+
+        Returns:
+            IndexParams: The current parameters used to configure the index.
+        """
+        return self.__params
+
     def get_data_by_id(self, vector_id: int) -> VectorLike:
         """
         Retrieve the vector data associated with a given ID.

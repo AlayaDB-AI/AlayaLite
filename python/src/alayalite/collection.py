@@ -191,6 +191,45 @@ class Collection:
         if ids_to_delete:
             self.delete_by_id(ids_to_delete)
 
+    def reindex(self):
+        """
+        Rebuilds the index and remaps internal IDs to external IDs.
+
+        Steps:
+        1. Save the current index parameters.
+        2. Collect all vectors from the current index (ordered by internal IDs).
+        3. Reinitialize the index with the same parameters and fit it on the collected vectors.
+        4. Rebuild the inner-to-outer and outer-to-inner ID mappings.
+        """
+
+        # 1. Keep current index parameters
+        params = self.__index_py.get_params()
+
+        # 2. Collect all vectors using the existing internal IDs
+        all_vectors = np.array([
+            self.__index_py.get_data_by_id(inner_id)
+            for inner_id in self.__inner_outer_map.keys()
+        ])
+
+        # 3. Reinitialize the index and fit with collected vectors
+        #    (this clears the old index, GC happens here)
+        self.__index_py = Index(self.__name, params)
+        self.__index_py.fit(all_vectors)
+
+        # 4. Rebuild ID mappings
+        new_inner_outer_map = {}
+        for new_inner_id, old_inner_id in enumerate(self.__inner_outer_map.keys()):
+            outer_id = self.__inner_outer_map[old_inner_id]
+            
+            # Update outer-to-inner mapping
+            self.__outer_inner_map[outer_id] = new_inner_id
+            
+            # Update new inner-to-outer mapping
+            new_inner_outer_map[new_inner_id] = outer_id
+
+        # Replace the old inner-to-outer map
+        self.__inner_outer_map = new_inner_outer_map
+
     def save(self, url):
         """
         Saves the collection to disk.
