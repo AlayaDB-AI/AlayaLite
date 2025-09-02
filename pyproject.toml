@@ -57,8 +57,8 @@ dev-dependencies = ["pytest", "ruff"]
 
 [[tool.uv.index]]
 # url = "https://mirrors.sustech.edu.cn/pypi/web/simple" # SUSTech mirror
-# url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" # Tsinghua mirror
-url = "https://pypi.org/simple"
+url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple" # Tsinghua mirror
+# url = "https://pypi.org/simple"
 default = true
 
 # https://beta.ruff.rs/docs/settings/

@@ -38,12 +38,12 @@ VectorDType: TypeAlias = Union[
     Type[np.uint32],
 ]
 """ Type alias for one of {`numpy.float32`, `numpy.int8`, `numpy.uint8`} """
-DistanceMetric: TypeAlias = Literal["euclidean", "l2", "ip", "cosine"]
-""" Type alias for one of {"euclidean", "l2", "ip", "cosine"} """
+DistanceMetric: TypeAlias = Literal["euclidean", "l2", "ip", "cosine", "cos"]
+""" Type alias for one of {"euclidean", "l2", "ip", "cosine", "cos"} """
 QuantizationType: TypeAlias = Literal[None, "none", "sq8", "sq4"]
 """ Type alias for one of {None, "none", "sq8", "sq4"} """
-IndexType: TypeAlias = Literal["hnsw", "flat"]
-""" Type alias for one of {"hnsw", "flat"} """
+IndexType: TypeAlias = Literal["hnsw", "nsg", "fusion"]
+""" Type alias for one of {"hnsw", "nsg" ,"fusion"} """
 VectorLike: TypeAlias = npt.NDArray[VectorDType]  # type: ignore
 """ Type alias for something that can be treated as a vector """
 VectorLikeBatch: TypeAlias = npt.NDArray[VectorDType]  # type: ignore
@@ -51,8 +51,8 @@ VectorLikeBatch: TypeAlias = npt.NDArray[VectorDType]  # type: ignore
 
 _VALID_IDTYPES = [np.uint64, np.uint32]
 _VALID_DTYPES = [np.float32, np.int8, np.uint8, np.float64, np.int32, np.uint32]
-_VALID_METRIC_TYPES = ["euclidean", "l2", "ip", "cosine"]
-_VALID_INDEX_TYPES = ["hnsw", "flat", "nsg", "fusion"]
+_VALID_METRIC_TYPES = ["euclidean", "l2", "ip", "cosine", "cos"]
+_VALID_INDEX_TYPES = ["hnsw", "nsg", "fusion"]
 _VALID_SQ_TYPES = [None, "none", "sq8", "sq4"]
 
 __all__ = [
@@ -93,24 +93,32 @@ def valid_capacity_type(capacity: np.dtype) -> np.uint32:
     return capacity
 
 
-def valid_metric_type(metric: str) -> _MetricType:
+def assert_valid_metric_type(metric: str) -> None:
     _assert(
         metric.lower() in _VALID_METRIC_TYPES,
         f"Distance metric must be one of {_VALID_METRIC_TYPES}",
     )
+
+
+def valid_metric_type(metric: str) -> _MetricType:
+    assert_valid_metric_type(metric)
     if metric.lower() == "ip":
         return _MetricType.IP
     elif metric.lower() == "l2" or metric.lower() == "euclidean":
         return _MetricType.L2
-    elif metric.lower() == "cosine":
-        return _MetricType.COSINE
+    elif metric.lower() == "cosine" or metric.lower() == "cos":
+        return _MetricType.COS
+
+
+def assert_valid_quantization_type(quantization_type: str) -> None:
+    _assert(
+        quantization_type is None or quantization_type.lower() in _VALID_SQ_TYPES,
+        f"Quantization type must be one of {_VALID_SQ_TYPES}",
+    )
 
 
 def valid_quantization_type(quantization_type: str) -> _QuantizationType:
-    _assert(
-        quantization_type.lower() in _VALID_SQ_TYPES,
-        f"Quantization type must be one of {_VALID_SQ_TYPES}",
-    )
+    assert_valid_quantization_type(quantization_type)
 
     if quantization_type is None:
         return _QuantizationType.NONE
@@ -122,15 +130,18 @@ def valid_quantization_type(quantization_type: str) -> _QuantizationType:
         return _QuantizationType.SQ4
 
 
-def valid_index_type(index: str) -> _IndexType:
+def assert_valid_index_type(index: str) -> None:
     _assert(
         index.lower() in _VALID_INDEX_TYPES,
         f"Index type must be one of {_VALID_INDEX_TYPES}",
     )
+
+
+def valid_index_type(index: str) -> _IndexType:
+    assert_valid_index_type(index)
+
     if index.lower() == "hnsw":
         return _IndexType.HNSW
-    elif index.lower() == "flat":
-        return _IndexType.FLAT
     elif index.lower() == "nsg":
         return _IndexType.NSG
     elif index.lower() == "fusion":

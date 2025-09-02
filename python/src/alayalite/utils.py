@@ -21,7 +21,7 @@ import hashlib
 
 import numpy as np
 
-__all__ = ["load_fvecs", "load_ivecs", "calc_recall", "calc_gt"]
+__all__ = ["load_fvecs", "load_ivecs", "calc_recall", "calc_gt", "md5"]
 
 
 def load_fvecs(file_path):
@@ -77,14 +77,23 @@ def load_ivecs(file_path):
 
 def calc_recall(result, gt_data):
     cnt = 0
-    for i in range(result.shape[0]):
-        for j in range(result.shape[1]):
-            for k in range(result.shape[1]):
-                if result[i][j] == gt_data[i][k]:
-                    cnt += 1
-                    break
+    row = result.shape[0]
+    col = result.shape[1]
+    for i in range(row):
+        cnt += len(set(result[i]) & set(gt_data[i]))
+    return 1.0 * cnt / (row * col)
 
-    return 1.0 * cnt / (len(result) * result.shape[1])
+
+# def calc_recall(result, gt_data):
+#     cnt = 0
+#     for i in range(result.shape[0]):
+#         for j in range(result.shape[1]):
+#             for k in range(result.shape[1]):
+#                 if result[i][j] == gt_data[i][k]:
+#                     cnt += 1
+#                     break
+
+#     return 1.0 * cnt / (len(result) * result.shape[1])
 
 
 def calc_gt(data, query, topk):

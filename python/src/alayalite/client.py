@@ -45,7 +45,6 @@ class Client:
         self.__collection_map = {}
         self.__index_map = {}
         self.__url = None
-
         if url is not None:
             self.__url = os.path.abspath(url)
             if not os.path.exists(self.__url):
@@ -103,9 +102,13 @@ class Client:
             name (str, optional): The name of the index to retrieve. Defaults to "default".
 
         Returns:
-            Index or None: The index if found, else None.
+            _PyIndexInterface (cpp class): The index if found, else None
         """
-        return self.__index_map.get(name)
+        if name in self.__index_map:
+            return self.__index_map[name]
+        else:
+            print(f"Index {name} does not exist")
+            return None
 
     def create_collection(self, name: str = "default", **_kwargs) -> Collection:
         """
@@ -249,8 +252,6 @@ class Client:
             raise RuntimeError(f"Index '{index_name}' does not exist")
 
         index_url = os.path.join(self.__url, index_name)
-        if not os.path.exists(index_url):
-            os.makedirs(index_url)
         schema_map = self.__index_map[index_name].save(index_url)
         index_schema_url = os.path.join(index_url, "schema.json")
         with open(index_schema_url, "w", encoding="utf-8") as f:
@@ -273,9 +274,6 @@ class Client:
             raise RuntimeError(f"Collection '{collection_name}' does not exist")
 
         collection_url = os.path.join(self.__url, collection_name)
-        if not os.path.exists(collection_url):
-            os.makedirs(collection_url)
-
         schema_map = self.__collection_map[collection_name].save(collection_url)
         collection_schema_url = os.path.join(collection_url, "schema.json")
 
