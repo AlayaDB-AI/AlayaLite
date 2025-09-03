@@ -88,6 +88,31 @@ jobs       :
     - name: Run Python unit tests
       run: uv run pytest
 
+  codecov:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
+
+    - name: Restore Caches
+      uses: ./.github/actions/cache-restore
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Install dependencies
+      run: pip install pytest pytest-cov
+
+    - name: Run tests
+      run: uv run pytest --cov --cov-branch --cov-report=xml
+
+    - name: Upload results to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+
   cpp-lint-check:
     runs-on: ubuntu-latest
     timeout-minutes: 180
