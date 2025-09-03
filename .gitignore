@@ -35,3 +35,7 @@ venv*/**
 
 # data
 data/*
+
+# codecov
+.coverage
+coverage.xml
