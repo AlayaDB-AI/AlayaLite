@@ -45,6 +45,8 @@ __all__ = ["IndexParams", "load_schema", "save_schema"]
 
 @dataclass
 class IndexParams:
+    """Parameters for configuring vector index creation and management."""
+
     index_type: str = None
     data_type: VectorDType = None
     id_type: IDType = None
