@@ -13,7 +13,7 @@ There are only 4 core files:
 
 The overview is shown below
 
-![Overview](./figures/overview.png)
+![Overview](https://github.com/AlayaDB-AI/AlayaLite/blob/main/examples/rag/figures/overview.png?raw=true)
 
 
 ## 1. Setup Environment
@@ -64,7 +64,7 @@ Your app will start at the port `8501`.
 You CANNOT visit the webpage by using the URL shown in the terminal, but `Github Codespaces` will forward the service to a public location.
 You can switch to the tab `PORT` to see the forwarded URL.
 
-![PORT](./figures/port.png)
+![PORT](https://github.com/AlayaDB-AI/AlayaLite/blob/main/examples/rag/figures/port.png?raw=true)
 
 Open the URL, you will see the interface.
 Input your LLM service URL and api key upload the files, then you can try to ask LLM about your files.
@@ -75,7 +75,7 @@ Sample question:
 What are advanced chunking techniques?
 ```
 
-![Interface](./figures/interface.png)
+![Interface](https://github.com/AlayaDB-AI/AlayaLite/blob/main/examples/rag/figures/interface.png?raw=true)
 
 ```
 Notice: the first time after you set/change the embedding model, the system takes some time to download it.

@@ -2,12 +2,12 @@
 
 This page introduces the Python interfaces in AlayaLite, which include two layers:
 
-**Collection**: Manages raw data and its relationship with indexes. Users can build their knowledge base by integrating our *Collection* into other tools like [Open WebUI](https://github.com/open-webui/open-webui) and [LangChain](https://github.com/langchain-ai/langchain), or building their own RAG application following [our tutorial](../examples/rag/README.md).
+**Collection**: Manages raw data and its relationship with indexes. Users can build their knowledge base by integrating our *Collection* into other tools like [Open WebUI](https://github.com/open-webui/open-webui) and [LangChain](https://github.com/langchain-ai/langchain), or building their own RAG application following [our tutorial](https://github.com/AlayaDB-AI/AlayaLite/blob/main/examples/rag/README.md).
 
-**Index**: Handles search, insert, and delete operations for indexes. Researchers and developers can modify it to enhance algorithms or mechanisms. We support ANN-Benchmark evaluation in [here](./alayalite).
+**Index**: Handles search, insert, and delete operations for indexes. Researchers and developers can modify it to enhance algorithms or mechanisms. We support ANN-Benchmark evaluation in [here](https://github.com/AlayaDB-AI/AlayaLite/blob/main/python/adapters/annbenchmark/alayalite).
 
 <p align="center">
-    <img src="./.assets/user-protrait.svg" width=800 alt="AlayaDB Logo"></a>
+    <img src="https://github.com/AlayaDB-AI/AlayaLite/blob/main/.assets/user-protrait.svg?raw=true" width=800 alt="AlayaDB Logo"></a>
 </p>
 
 In particular, collections and indexes are managed by **Client**.

@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="https://github.com/AlayaDB-AI"><img src="./.assets/banner.jpg" width=300 alt="AlayaDB Log"></a>
+  <a href="https://github.com/AlayaDB-AI"><img src="https://github.com/AlayaDB-AI/AlayaLite/blob/main/.assets/banner.jpg?raw=true" width=300 alt="AlayaDB Log"></a>
 </p>
 
 
@@ -8,19 +8,21 @@
     Seamless Knowledge, Smarter Outcomes.
 </p>
 
+<div class="column" align="middle">
+  <a href="https://github.com/AlayaDB-AI/AlayaLite/releases"><img height="20" src="https://img.shields.io/badge/alayalite-blue" alt="release"></a>
+  <a href="https://pypi.org/project/alayalite/"><img src="https://img.shields.io/pypi/v/alayalite" alt="PyPi"></a>
+  <a href="https://github.com/AlayaDB-AI/AlayaLite/blob/main/LICENSE"><img height="20" src="https://img.shields.io/badge/license-Apache--2.0-green.svg" alt="LICENSE"></a>
+  <a href="https://codecov.io/github/AlayaDB-AI/AlayaLite"><img height="20" src="https://codecov.io/github/AlayaDB-AI/AlayaLite/graph/badge.svg?token=KA6V0DHHUU" alt="codecov"></a>
+  <a href="https://github.com/AlayaDB-AI/AlayaLite/actions/workflows/code-checker.yaml"><img height="20" src="https://github.com/AlayaDB-AI/AlayaLite/actions/workflows/code-checker.yaml/badge.svg?branch=main" alt="CI"></a>
+</div>
 
-<p align="center">
-<img src="https://img.shields.io/badge/Release-Ver0.1.0a1-blue.svg" alt="Release">
-<img src="https://img.shields.io/pypi/v/alayalite" alt="PyPi">
-<img src="https://img.shields.io/github/last-commit/AlayaDB-AI/AlayaLite" alt="Last Commit">
-</p>
 
 ## Features
 
 - **High Performance**: Modern vector techniques integrated into a well-designed architecture.
 - **Elastic Scalability**: Seamlessly scale across multiple threads, which is optimized by C++20 coroutines.
 - **Adaptive Flexibility**: Easy customization for quantization methods, metrics, and data types.
-- **Ease of Use**: [Intuitive APIs](./python/README.md) in Python.
+- **Ease of Use**: [Intuitive APIs](https://github.com/AlayaDB-AI/AlayaLite/blob/main/python/README.md) in Python.
 
 
 ## Getting Started!
@@ -91,4 +93,4 @@ If you have any questions or suggestions, please feel free to open an issue or c
 
 ## License
 
-[Apache 2.0](./LICENSE)
+[Apache 2.0](https://github.com/AlayaDB-AI/AlayaLite/blob/main/LICENSE)
