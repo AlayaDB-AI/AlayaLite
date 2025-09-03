@@ -1,6 +1,8 @@
 ---
 name       : Code checker
-on         : [push, pull_request]
+# on         : [push, pull_request]
+on         :
+  workflow_dispatch:
 
 env        :
   LLVM_VERSION: 18
