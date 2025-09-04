@@ -56,9 +56,8 @@ repos:
 #===========================================================================
 #                            TYPOS CHECK
 #===========================================================================
-repos:
-  - repo: https://github.com/crate-ci/typos
-    rev: v1.36.1
-    hooks:
-      - id: typos
-        args: [-c, .typo.toml]
+- repo: https://github.com/crate-ci/typos
+  rev: v1.36.1
+  hooks:
+  - id: typos
+    args: [-c, .typo.toml]
