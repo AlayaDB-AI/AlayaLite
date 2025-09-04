@@ -517,7 +517,7 @@ class HNSWImpl {
     selected_neighbors.reserve(max_edge_num_);  // Reserve space for efficiency.
     // Extract neighbors from the priority queue into the selected_neighbors vector.
     while (top_candidates.size() > 0) {
-      // LOG_INFO("mutally first : u {} , v {} , dist {}", get_external_label(cur_c),
+      // LOG_INFO("mutually first : u {} , v {} , dist {}", get_external_label(cur_c),
       //  top_candidates.top().second, top_candidates.top().first);
       selected_neighbors.push_back(top_candidates.top().second);
       top_candidates.pop();
@@ -712,13 +712,13 @@ class HNSWImpl {
             top_candidates = search_base_layer(curr_node, label, level);
 
         // {
-        //   auto candidata = search_base_layer(curr_obj, label, level);
-        //   while (!candidata.empty()) {
-        //     auto candidata_v = candidata.top();
-        //     candidata.pop();
+        //   auto candidate = search_base_layer(curr_obj, label, level);
+        //   while (!candidate.empty()) {
+        //     auto candidate_v = candidate.top();
+        //     candidate.pop();
 
-        //     LOG_INFO("the node id = {} , candidata id = {} , dist = {}", label,
-        //              get_external_label(candidata_v.second), candidata_v.first);
+        //     LOG_INFO("the node id = {} , candidate id = {} , dist = {}", label,
+        //              get_external_label(candidate_v.second), candidate_v.first);
         //   }
         // }
 

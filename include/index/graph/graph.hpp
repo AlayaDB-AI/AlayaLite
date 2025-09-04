@@ -50,7 +50,7 @@ struct Graph {
 
   NodeIDType max_nodes_;      ///< node_num_ is the number of nodes in the graph
   EdgeIDType max_nbrs_;       ///< max_nbrs_ is the maximum number of neighbors
-  DataStorage data_storage_;  ///< the data of the grpah: each node has max_nbrs_ edges, i.e., the
+  DataStorage data_storage_;  ///< the data of the graph: each node has max_nbrs_ edges, i.e., the
                               ///< node ids of its neighbors
   std::unique_ptr<OverlayGraphType> overlay_graph_ = nullptr;  ///< the overlay raph of HNSW
   std::vector<NodeIDType> eps_;                                ///< the entry points

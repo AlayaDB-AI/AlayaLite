@@ -17,4 +17,4 @@ jobs:
 
     - name: Run License Header Checker (CI mode)
       run: |
-        python3 scripts/license_check/license_scipt.py --check-only
+        python3 scripts/license_check/license_script.py --check-only
