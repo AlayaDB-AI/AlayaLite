@@ -21,8 +21,19 @@
 #include <iostream>
 #include <ostream>
 #include "dist_config.hpp"
+#include "utils/rbq_utils/defines.hpp"
 
 namespace alaya {
+
+FAST_BEGIN
+template <typename DataType = float, typename DistanceType = float>
+inline auto l2_sqr_rabitq(const DataType *__restrict__ x, const DataType *__restrict__ y,
+                          size_t dim) -> DistanceType {
+  ConstVectorMap<DataType> v0(x, dim);
+  ConstVectorMap<DataType> v1(y, dim);
+  return (v0 - v1).dot(v0 - v1);
+}
+FAST_END
 
 FAST_BEGIN
 template <typename DataType = float, typename DistanceType = float>

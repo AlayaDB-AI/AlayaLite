@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 
@@ -23,7 +24,12 @@
 #include "../../space/space_concepts.hpp"
 #include "../../utils/prefetch.hpp"
 #include "../../utils/query_utils.hpp"
+#include "index/graph/graph_refiner.hpp"
 #include "job_context.hpp"
+#include "space/rabitq_space.hpp"
+#include "utils/log.hpp"
+#include "utils/rbq_utils/search_utils/buffer.hpp"
+#include "utils/rbq_utils/search_utils/hashset.hpp"
 
 #if defined(__linux__)
 #include "coro/task.hpp"
@@ -31,15 +37,42 @@
 
 namespace alaya {
 
-template <typename DistanceSpaceType,
-          typename DataType = typename DistanceSpaceType::DataTypeAlias,
+template <typename DistanceSpaceType, typename DataType = typename DistanceSpaceType::DataTypeAlias,
           typename DistanceType = typename DistanceSpaceType::DistanceTypeAlias,
           typename IDType = typename DistanceSpaceType::IDTypeAlias>
   requires Space<DistanceSpaceType, DataType, DistanceType, IDType>
 struct GraphSearchJob {
-  std::shared_ptr<DistanceSpaceType> space_ = nullptr;  ///< The is a data manager interface .
+  std::shared_ptr<DistanceSpaceType> space_ = nullptr;        ///< The is a data manager interface .
   std::shared_ptr<Graph<DataType, IDType>> graph_ = nullptr;  ///< The search graph.
   std::shared_ptr<JobContext<IDType>> job_context_;           ///< The shared job context
+
+  /**
+   * @brief Supplement results for rabitq_search if rabitq_search failed to find enough knn
+   *
+   * @param result_pool
+   * @param vis record whether current neighbor has been visited
+   * @param query raw data pointer of the query
+   */
+  void rabitq_sup_res(SearchBuffer<DistanceType> &result_pool, HashBasedBooleanSet &vis,
+                      const DataType *query) {
+    // Add unvisited neighbors of the result nodes as supplementary result nodes
+    auto data = result_pool.data();
+    for (auto record : data) {
+      auto *ptr_nb = space_->get_edges(record.id_);
+      for (uint32_t i = 0; i < RBQSpace<>::kDegreeBound; ++i) {
+        auto cur_neighbor = ptr_nb[i];
+        if (!vis.get(cur_neighbor)) {
+          vis.set(cur_neighbor);
+          result_pool.insert(
+              cur_neighbor,
+              space_->get_dist_func()(query, space_->get_data_by_id(cur_neighbor), space_->get_dim()));
+        }
+      }
+      if (result_pool.is_full()) {
+        break;
+      }
+    }
+  }
 
   explicit GraphSearchJob(std::shared_ptr<DistanceSpaceType> space,
                           std::shared_ptr<Graph<DataType, IDType>> graph,
@@ -50,9 +83,69 @@ struct GraphSearchJob {
     }
   }
 
+  void rabitq_search_solo(const DataType *query, uint32_t k, IDType *ids, uint32_t ef) {
+    static_assert(is_rbqspace_v<DistanceSpaceType>, "Only support RBQSpace instance!");
+    // init
+    size_t degree_bound = RBQSpace<>::kDegreeBound;
+    auto entry = space_->get_ep();
+    mem_prefetch_l1(space_->get_data_by_id(entry), 10);
+    auto q_computer = space_->get_query_computer(query);
+
+    // sorted by estimated distance
+    SearchBuffer<DistanceType> search_pool(ef);
+    search_pool.insert(entry, std::numeric_limits<DistanceType>::max());
+
+    // sorted by exact distance (implicit rerank)
+    SearchBuffer<DistanceType> res_pool(k);
+    auto vis = HashBasedBooleanSet(space_->get_data_num() / 10);
+
+    while (search_pool.has_next()) {
+      auto cur_node = search_pool.pop();
+      if (vis.get(cur_node)) {
+        continue;
+      }
+      vis.set(cur_node);
+
+      // calculate est_dist for centroid's neighbors in batch after loading centroid
+      q_computer.load_centroid(cur_node);
+
+      // scan cur_node's neighbors, insert them with estimated distances
+      const IDType *cand_neighbors = space_->get_edges(cur_node);
+      for (size_t i = 0; i < degree_bound; ++i) {
+        auto cand_nei = cand_neighbors[i];
+        DistanceType est_dist = q_computer(i);
+        if (search_pool.is_full(est_dist) || vis.get(cand_nei)) {
+          continue;
+        }
+        // try insert
+        search_pool.insert(cand_nei, est_dist);
+        mem_prefetch_l2(space_->get_data_by_id(search_pool.next_id()), 10);
+      }
+
+      // implicit rerank
+      res_pool.insert(cur_node, q_computer.get_exact_qr_c_dist());
+    }
+
+    if (!res_pool.is_full()) {
+      LOG_INFO("Failed to return enough knn, res_pool current size: {}", res_pool.size());
+      rabitq_sup_res(res_pool, vis, query);
+      LOG_INFO("Finished supplementing result, res_pool current size: {}", res_pool.size());
+    }
+    // return result
+    res_pool.copy_results_to(ids);
+  }
+
+  auto rabitq_search([[maybe_unused]] const DataType *query, [[maybe_unused]] uint32_t k,
+                     [[maybe_unused]] IDType *ids, [[maybe_unused]] uint32_t ef) -> coro::task<> {
+    static_assert(is_rbqspace_v<DistanceSpaceType>, "Only support RBQSpace instance!");
+
+    /// todo: to be implemented
+    fprintf(stderr, "FATAL: rabitq_search is not implemented!\n");
+    std::abort();
+  }
+
 #if defined(__linux__)
-  auto search(DataType *query, uint32_t k, IDType *ids, uint32_t ef)
-      -> coro::task<> {
+  auto search(DataType *query, uint32_t k, IDType *ids, uint32_t ef) -> coro::task<> {
     auto query_computer = space_->get_query_computer(query);
     LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
     graph_->initialize_search(pool, query_computer);
@@ -91,8 +184,8 @@ struct GraphSearchJob {
     co_return;
   }
 
-  auto search(DataType *query, uint32_t k, IDType *ids, DistanceType *distances,
-              uint32_t ef) -> coro::task<> {
+  auto search(DataType *query, uint32_t k, IDType *ids, DistanceType *distances, uint32_t ef)
+      -> coro::task<> {
     auto query_computer = space_->get_query_computer(query);
     LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
     graph_->initialize_search(pool, query_computer);
@@ -168,8 +261,7 @@ struct GraphSearchJob {
     }
   }
 
-  void search_solo(DataType *query, uint32_t k, IDType *ids,
-                   DistanceType *distances, uint32_t ef) {
+  void search_solo(DataType *query, uint32_t k, IDType *ids, DistanceType *distances, uint32_t ef) {
     auto query_computer = space_->get_query_computer(query);
     LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
     graph_->initialize_search(pool, query_computer);
@@ -205,8 +297,7 @@ struct GraphSearchJob {
     }
   }
 
-  void search_solo_updated(DataType *query, uint32_t k, IDType *ids,
-                           uint32_t ef) {
+  void search_solo_updated(DataType *query, uint32_t k, IDType *ids, uint32_t ef) {
     auto query_computer = space_->get_query_computer(query);
     LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
     graph_->initialize_search(pool, query_computer);

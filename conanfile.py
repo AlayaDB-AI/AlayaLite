@@ -24,6 +24,7 @@ class AlayaLiteConan(ConanFile):
         self.requires("pybind11/2.13.6")
         self.requires("spdlog/1.14.0")
         self.requires("fmt/10.2.1")  # depends on spdlog
+        self.requires("eigen/3.4.0")
         if self.settings.os == "Linux":
             self.requires("libcoro/0.14.1")
 

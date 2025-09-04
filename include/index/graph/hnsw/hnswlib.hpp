@@ -89,7 +89,8 @@ class HNSWImpl {
         label_op_locks_(kMaxLabelOperationLocks),
         element_levels_(max_elements) {
     max_elements_ = max_elements;
-    space_ = std::move(s);
+    // space_ = std::move(s);
+    space_ = s ;
 
     max_edge_num_ = max_edge_num;
     max_edge_num_l0_ = max_edge_num_ * 2;
@@ -245,8 +246,8 @@ class HNSWImpl {
    * @param internal_id The internal id of required node in hnsw graph.
    * @return char* The raw vector data.
    */
-  inline auto get_data_by_internal_id(InternalID internal_id) const -> char * {
-    return reinterpret_cast<char *>(space_->get_data_by_id(get_external_label(internal_id)));
+  inline auto get_data_by_internal_id(InternalID internal_id) const -> const char * {
+    return reinterpret_cast<const char *>(space_->get_data_by_id(get_external_label(internal_id)));
   }
   /**
    * @brief Selects the top M nearest neighbors from the given top candidates using a heuristic
@@ -446,7 +447,7 @@ class HNSWImpl {
         }
 
         visited_array[candidate_id] = visited_array_tag;  // Mark the candidate as visited.
-        char *curr_obj1 = (get_data_by_internal_id(candidate_id));  // Get data for the candidate.
+        auto curr_obj1 = (get_data_by_internal_id(candidate_id));  // Get data for the candidate.
 
         // Calculate the distance to the current candidate.
         DistanceType dist1 = space_->get_distance(data_label, get_external_label(candidate_id));

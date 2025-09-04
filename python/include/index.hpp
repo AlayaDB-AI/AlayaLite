@@ -271,7 +271,9 @@ class PyIndex : public BasePyIndex {
     auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
     for (uint32_t i = 0; i < query_size; i++) {
       auto cur_query = query_ptr + i * query_dim;
+
       coros.emplace_back(search_job_->search(cur_query, topk, res_pool[i].data(), ef));
+
       scheduler->schedule(coros.back().handle());
     }
     LOG_INFO("Scheduling {} tasks.", coros.size());

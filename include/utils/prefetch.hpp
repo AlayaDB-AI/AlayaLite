@@ -71,27 +71,27 @@ inline auto prefetch_l3(const void *address) -> void {
 /**
  * @brief Prefetches a block of data to L1 cache
  */
-inline auto mem_prefetch_l1(void *address, uint32_t line) -> void {
-    for (uint32_t i = 0; i < line; ++i) {
-        prefetch_l1(static_cast<char *>(address) + i * 64);
-    }
+inline auto mem_prefetch_l1(const void *address, uint32_t line) -> void {
+  for (uint32_t i = 0; i < line; ++i) {
+    prefetch_l1(static_cast<const char *>(address) + i * 64);
+  }
 }
 
 /**
  * @brief Prefetches a block of data to L2 cache
  */
-inline auto mem_prefetch_l2(void *address, uint32_t line) -> void {
-    for (uint32_t i = 0; i < line; ++i) {
-        prefetch_l2(static_cast<char *>(address) + i * 64);
-    }
+inline auto mem_prefetch_l2(const void *address, uint32_t line) -> void {
+  for (uint32_t i = 0; i < line; ++i) {
+    prefetch_l2(static_cast<const char *>(address) + i * 64);
+  }
 }
 
 /**
  * @brief Prefetches a block of data to L3 cache
  */
-inline auto mem_prefetch_l3(void *address, uint32_t line) -> void {
-    for (uint32_t i = 0; i < line; ++i) {
-        prefetch_l3(static_cast<char *>(address) + i * 64);
-    }
+inline auto mem_prefetch_l3(const void *address, uint32_t line) -> void {
+  for (uint32_t i = 0; i < line; ++i) {
+    prefetch_l3(static_cast<const char *>(address) + i * 64);
+  }
 }
 };  // namespace alaya
