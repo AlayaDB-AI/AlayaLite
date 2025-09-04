@@ -25,13 +25,15 @@ jobs       :
         accessToken: ${{ secrets.GITHUB_TOKEN }}
 
   # Automatically detect spelling errors in the code library
-  # Pure spelling checks, such as "recieve" for "receive" and "enviroment" for "environment."
+  # Pure spelling checks, such as "receive" for "receive" and "environment" for "environment."
   typo-check:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
-    - uses: crate-ci/typos@v1.23.6
+    - name: Checkout Actions Repository
+      uses: actions/checkout@v4
+    - name: Spell Check Repo
+      uses: crate-ci/typos@v1.36.1
       with:
         config: ./.typo.toml
 

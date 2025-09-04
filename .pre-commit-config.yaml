@@ -52,3 +52,13 @@ repos:
   - id: conventional-pre-commit
     stages: [commit-msg]
     args: [--strict, feat, fix, docs, style, refactor, chore, perf, test, build, ci, revert]
+
+#===========================================================================
+#                            TYPOS CHECK
+#===========================================================================
+repos:
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.36.1
+    hooks:
+      - id: typos
+        args: [-c, .typo.toml]
