@@ -3,5 +3,4 @@
 extend-exclude = []
 
 [default.extend-words]
-testt = "testt"  # keep don't change it
-typoo = "typoo"
+secon = "secon" # keep don't change it

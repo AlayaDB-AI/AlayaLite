@@ -7,7 +7,7 @@ This page introduces the Python interfaces in AlayaLite, which include two layer
 **Index**: Handles search, insert, and delete operations for indexes. Researchers and developers can modify it to enhance algorithms or mechanisms. We support ANN-Benchmark evaluation in [here](https://github.com/AlayaDB-AI/AlayaLite/blob/main/python/adapters/annbenchmark/alayalite).
 
 <p align="center">
-    <img src="https://github.com/AlayaDB-AI/AlayaLite/blob/main/.assets/user-protrait.svg?raw=true" width=800 alt="AlayaDB Logo"></a>
+    <img src="https://github.com/AlayaDB-AI/AlayaLite/blob/main/.assets/user-portrait.svg?raw=true" width=800 alt="AlayaDB Logo"></a>
 </p>
 
 In particular, collections and indexes are managed by **Client**.
