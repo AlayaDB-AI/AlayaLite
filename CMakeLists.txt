@@ -5,7 +5,7 @@ project(${project_name} LANGUAGES CXX)
 
 # Configuration options
 option(ENABLE_COVERAGE "Enable profiling test coverage" OFF)
-option(ENABLE_UNIT_TESTS "Enable unit tests" ON)
+option(ENABLE_UNIT_TESTS "Enable unit tests" OFF)
 
 # Set build type if not specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -98,7 +98,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Compilation options with platform-specific adjustments
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)  # Ensure PIC for shared libraries
 
-# check AVX512 support
+# Check AVX512 support
 include(CheckCXXSourceRuns)
 set(CMAKE_REQUIRED_FLAGS "-march=native")
 set(AVX512_RUN_CODE "
@@ -111,7 +111,6 @@ int main() {
 
 check_cxx_source_runs("${AVX512_RUN_CODE}" AVX512_CAN_RUN)
 # RaBitQ optimization
-set(CMAKE_CXX_FLAGS "-fopenmp ${CMAKE_CXX_FLAGS}")
 if (AVX512_CAN_RUN)
   message(STATUS "Can use AVX512.")
   add_compile_options(
@@ -137,7 +136,8 @@ else()
   # GCC/Clang flags
   message(STATUS "Using GCC/Clang compiler settings")
   set(CMAKE_CXX_FLAGS "-Wall -Wextra ${CMAKE_CXX_FLAGS}")  # Enable common warnings
-  set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG")
+  # set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG")
+  set(CMAKE_CXX_FLAGS_RELEASE "-O3 -ffast-math -DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 endif()
 
@@ -148,12 +148,14 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_definitions(-DPROJECT_ROOT="${CMAKE_SOURCE_DIR}")
 
 # Find dependencies installed by Conan (order matters for linking)
+find_package(OpenMP REQUIRED COMPONENTS CXX)
 find_package(concurrentqueue REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 find_package(GTest REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
+
 # Configure third-party libraries based on operating system
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_package(libcoro REQUIRED)
@@ -163,6 +165,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     concurrentqueue::concurrentqueue
     libcoro::libcoro
     Eigen3::Eigen
+    OpenMP::OpenMP_CXX
   )
 else()
   set(THIRD_PARTY_LIBS
@@ -170,9 +173,13 @@ else()
     fmt::fmt
     concurrentqueue::concurrentqueue
     Eigen3::Eigen
+    OpenMP::OpenMP_CXX
   )
 endif()
-set(GTEST_LIBS GTest::gtest GTest::gtest_main)
+
+if(ENABLE_UNIT_TESTS)
+  set(GTEST_LIBS GTest::gtest GTest::gtest_main)
+endif()
 
 # Include project header directories
 include_directories(${CMAKE_SOURCE_DIR}/include)

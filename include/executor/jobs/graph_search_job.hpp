@@ -46,6 +46,13 @@ struct GraphSearchJob {
   std::shared_ptr<Graph<DataType, IDType>> graph_ = nullptr;  ///< The search graph.
   std::shared_ptr<JobContext<IDType>> job_context_;           ///< The shared job context
 
+  /**
+   * @brief Supplement results for rabitq_search if rabitq_search failed to find enough knn
+   *
+   * @param result_pool
+   * @param vis record whether current neighbor has been visited
+   * @param query raw data pointer of the query
+   */
   void rabitq_sup_res(SearchBuffer<DistanceType> &result_pool, HashBasedBooleanSet &vis,
                       const DataType *query) {
     // Add unvisited neighbors of the result nodes as supplementary result nodes
