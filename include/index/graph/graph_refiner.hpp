@@ -1,3 +1,19 @@
+/*
+ * Copyright 2025 AlayaDB.AI
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 
 #include <omp.h>
@@ -31,8 +47,7 @@ struct GraphRefiner {
   using DataType = typename DistanceSpaceType::DataTypeAlias;
   using DistanceType = typename DistanceSpaceType::DistanceTypeAlias;
   using IDType = typename DistanceSpaceType::IDTypeAlias;
-  explicit GraphRefiner(DistanceSpaceType *space, Graph<DataType, IDType> *graph)
-      : space_(space), graph_(graph) {
+  explicit GraphRefiner(DistanceSpaceType *space, Graph<DataType, IDType> *graph) : space_(space) {
     if (space_ == nullptr) {
       fprintf(stderr, "FATAL: space_ is null!\n");
       std::abort();
@@ -58,10 +73,14 @@ struct GraphRefiner {
 
     omp_set_num_threads(static_cast<int>(num_threads_));
 
-    if (graph_ == nullptr) {
+    // load initial neighbors
+    if (graph == nullptr) {
       fprintf(stderr, "FATAL: graph_ is null!\n");
       std::abort();
+    } else {
+      init(graph);
     }
+
     refine();
   }
 
@@ -70,7 +89,6 @@ struct GraphRefiner {
   static constexpr size_t kMaxBsIter = 5;  // max iter for binary search of pruning bar
 
   DistanceSpaceType *space_;
-  Graph<DataType, IDType> *graph_;
 
   size_t ef_build_{400};                                // size of search pool for indexing
   size_t num_threads_;                                  // number of threads used for indexing
@@ -84,7 +102,6 @@ struct GraphRefiner {
   std::vector<LinearPool<DistanceType, IDType>> linear_pools_;  // list of visited hash set
 
   void refine() {
-    init();
     search_new_neighbors();
     add_reverse_edges();
     angle_based_supplement();
@@ -94,12 +111,14 @@ struct GraphRefiner {
   /**
    * @brief Randomly supplement neighbors to degree bound and synchronize with space and graph
    */
-  void init() {
+  void init(Graph<DataType, IDType> *graph) {
     LOG_INFO("Initializing graph refiner...");
+
+    space_->set_ep(graph->get_ep());
+
 #pragma omp parallel for schedule(dynamic)
     for (size_t id = 0; id < num_nodes_; ++id) {
-      init_random_supplement(id);
-      space_->update_batch_data(id, graph_->edges(id));
+      init_random_supplement(id, graph->edges(id));
     }
   }
 
@@ -246,7 +265,7 @@ struct GraphRefiner {
   }
 
   /**
-   * @brief insert new neighbors into graph and space
+   * @brief insert new neighbors into space
    *
    */
   void insert_refined_neighbors() {
@@ -256,10 +275,7 @@ struct GraphRefiner {
       if (refined_nei.size() != degree_bound_) {
         LOG_DEBUG("node_{}'s outdegree is {} ", i, refined_nei.size());
       }
-      for (int j = 0; j < degree_bound_; ++j) {
-        graph_->at(i, j) = refined_nei[j].id_;
-      }
-      space_->update_batch_data(i, graph_->edges(i));
+      space_->update_nei(i, refined_nei);
     }
   }
 
@@ -268,24 +284,26 @@ struct GraphRefiner {
    *
    * @param c centroid
    */
-  void init_random_supplement(IDType c) {
+  void init_random_supplement(IDType c, const IDType *edges) {
     std::unordered_set<IDType> ids;
     ids.reserve(degree_bound_);
-    auto edges = graph_->edges(c);
+    // load current neighbors in graph
     for (size_t k = 0; k < degree_bound_ && *(edges + k) != Graph<>::kEmptyId; k++) {
       auto nei_id = *(edges + k);
       ids.emplace(nei_id);
       new_neighbors_[c].emplace_back(nei_id, space_->get_distance(c, nei_id));
     }
 
+    // random supplement
     while (degree_bound_ - ids.size() > 0) {
       IDType rand_id = rand_integer(static_cast<IDType>(0), static_cast<IDType>(num_nodes_) - 1);
       if (rand_id != c && ids.find(rand_id) == ids.end()) {
-        *(edges + ids.size()) = rand_id;  // update graph
         ids.emplace(rand_id);
         new_neighbors_[c].emplace_back(rand_id, space_->get_distance(c, rand_id));
       }
     }
+
+    space_->update_nei(c, new_neighbors_[c]);
   }
 
   /**
@@ -424,7 +442,7 @@ struct GraphRefiner {
   void find_candidates(IDType cur_id, CandidateList &results,
                        LinearPool<DistanceType, IDType> &pool) const {
     // insert entry point to initialize search pool
-    auto entry = graph_->get_ep();
+    auto entry = space_->get_ep();
     pool.insert(entry, 1e10);
     mem_prefetch_l1(space_->get_data_by_id(entry), 10);
 
@@ -438,14 +456,14 @@ struct GraphRefiner {
       }
 
       pool.vis_.set(cur_candi);
-      
+
       q_computer.load_centroid(cur_candi);
       if (cur_candi != cur_id) {
         results.emplace_back(cur_candi, q_computer.get_exact_qr_c_dist());
       }
 
       // scan candidate's neighbors for more candidates
-      const IDType *cand_neighbors = graph_->edges(cur_candi);
+      const IDType *cand_neighbors = space_->get_edges(cur_candi);
       for (size_t i = 0; i < degree_bound_; ++i) {
         auto cand_nei = cand_neighbors[i];
         DistanceType est_dist = q_computer(i);

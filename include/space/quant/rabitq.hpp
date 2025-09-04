@@ -1,20 +1,35 @@
+/*
+ * Copyright 2025 AlayaDB.AI
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 
 #include <fmt/core.h>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
+
 #include "utils/log.hpp"
 #include "utils/rbq_utils/fastscan.hpp"
-#include "utils/rbq_utils/rotator.hpp"
 
 namespace alaya {
 template <typename DataType>
 struct RBQQuantizer {
  private:
-  uint32_t dim_{0};                               ///< dimension
-  uint32_t padded_dim_{0};                        ///< padded dimension
-  RotatorType type_{RotatorType::FhtKacRotator};  ///< rotator type
-  std::unique_ptr<Rotator<DataType>> rotator_;    ///< data rotator
+  uint32_t dim_{0};         ///< dimension
+  uint32_t padded_dim_{0};  ///< padded dimension
 
   /**
    * @brief pack 0/1 uncompacted integer data (binary_code) to compacted bytes data (compact_code)
@@ -40,7 +55,7 @@ struct RBQQuantizer {
   /**
    * @brief Calculate factors(f_add and f_scale) and quantization code for one neighbor
    *
-   * @param data Roatated neighbor data, len: padded_dim
+   * @param data Rotatated neighbor data, len: padded_dim
    * @param centroid Rotated centroid data pointer, len: padded_dim
    * @param binary_code Store uncompacted quantization code, every int is either 1 or 0
    * @param f_add One of factors
@@ -87,41 +102,25 @@ struct RBQQuantizer {
   RBQQuantizer(const RBQQuantizer &&) = delete;
   auto operator=(const RBQQuantizer &&) -> RBQQuantizer & = delete;
 
-  explicit RBQQuantizer(const uint32_t &dim, RotatorType type = RotatorType::FhtKacRotator)
-      : dim_(dim), type_(type) {
-    rotator_ = choose_rotator<DataType>(dim_, type_, round_up_to_multiple(dim_, 64));
-    padded_dim_ = rotator_->size();
-  }
-
-  auto get_padded_dim() const -> uint32_t { return padded_dim_; }
-
-  // dim -> padded dim
-  auto rotate_vec(const DataType *src, DataType *dst) const -> void { rotator_->rotate(src, dst); }
+  explicit RBQQuantizer(const uint32_t &dim, const uint32_t &padded_dim)
+      : dim_(dim), padded_dim_(padded_dim) {}
 
   // use one vertex as the centroid and quantize its neighbors
-  auto batch_quantize(const DataType *neighbors /* len: num * dim */,
-                      const DataType *centroid /* single centroid, len: dim */,
+  auto batch_quantize(const DataType *rotated_neighbors /* len: num * dim */,
+                      const DataType *rotated_centroid /* single centroid, len: dim */,
                       size_t num /* total number of the neighbors in this batch */,
                       /* The following pointers point to where the result data is stored */
                       uint8_t *bin_code, DataType *f_add, DataType *f_rescale) -> void {
-    // rotate centroid and its neighbors for later processing
-    std::vector<DataType> rotated_data((num * padded_dim_));
-    std::vector<DataType> rotated_centroid(padded_dim_);
-    for (size_t i = 0; i < num; ++i) {
-      rotator_->rotate(neighbors + (i * dim_), &rotated_data[i * padded_dim_]);
-    }
-    rotator_->rotate(centroid, rotated_centroid.data());
-
     // for compacted quantization code storage
     std::vector<uint8_t> compact_codes(num * padded_dim_ / 8);  // 1 bit/dim
 
     /// todo: parallelable?
-    for (size_t i = 0; i < num; ++i) {  // ith neighbor
-      auto nei = reinterpret_cast<DataType *>(rotated_data.data()) + (i * padded_dim_);
+    for (size_t i = 0; i < num; ++i) {                           // ith neighbor
+      auto rotated_nei = rotated_neighbors + (i * padded_dim_);  // start pointer
 
       // for uncompacted quantization code storage
       std::vector<int> binary_code(padded_dim_);
-      cal_fac_and_qc(nei, rotated_centroid.data(), binary_code.data(), f_add[i], f_rescale[i]);
+      cal_fac_and_qc(rotated_nei, rotated_centroid, binary_code.data(), f_add[i], f_rescale[i]);
 
       // the number of bits in every uint8_t
       constexpr size_t kTypeBits = 8;
@@ -140,9 +139,6 @@ struct RBQQuantizer {
   auto save(std::ofstream &writer) -> void {
     writer.write(reinterpret_cast<char *>(&dim_), sizeof(dim_));
     writer.write(reinterpret_cast<char *>(&padded_dim_), sizeof(padded_dim_));
-    writer.write(reinterpret_cast<char *>(&type_), sizeof(type_));
-
-    rotator_->save(writer);
 
     LOG_INFO("rabitq quantizer is saved.");
   }
@@ -150,10 +146,6 @@ struct RBQQuantizer {
   auto load(std::ifstream &reader) -> void {
     reader.read(reinterpret_cast<char *>(&dim_), sizeof(dim_));
     reader.read(reinterpret_cast<char *>(&padded_dim_), sizeof(padded_dim_));
-    reader.read(reinterpret_cast<char *>(&type_), sizeof(type_));
-
-    rotator_ = choose_rotator<DataType>(dim_, type_, round_up_to_multiple(dim_, 64));
-    rotator_->load(reader);
 
     LOG_INFO("rabitq quantizer is loaded.");
   }

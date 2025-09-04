@@ -196,7 +196,7 @@ struct HNSWBuilder {
     if constexpr (is_rbqspace_v<DistanceSpaceType>) {
       GraphRefiner<DistanceSpaceType> refiner(space_.get(),graph.get());
     }
-    
+
     return std::move(graph);
   }
 };

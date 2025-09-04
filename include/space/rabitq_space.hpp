@@ -1,3 +1,19 @@
+/*
+ * Copyright 2025 AlayaDB.AI
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 
 #include <sys/types.h>
@@ -10,7 +26,7 @@
 #include "space/distance/dist_l2.hpp"
 #include "space/quant/rabitq.hpp"
 #include "space/space_concepts.hpp"
-#include "storage/sequential_storage.hpp"
+#include "storage/static_storage.hpp"
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
 #include "utils/prefetch.hpp"
@@ -19,23 +35,52 @@
 #include "utils/rbq_utils/rotator.hpp"
 
 namespace alaya {
-template <typename DataType = float, typename DistanceType = float, typename IDType = uint32_t,
-          typename DataStorage = SequentialStorage<DataType, IDType>>
+template <typename DataType = float, typename DistanceType = float, typename IDType = uint32_t>
 class RBQSpace {
  private:
   MetricType metric_{MetricType::L2};  ///< Metric type
   uint32_t dim_{0};                    ///< Dimensionality of the data points
   IDType item_cnt_{0};                 ///< Number of data points (nodes)
   IDType capacity_{0};                 ///< The maximum number of data points (nodes)
+  RotatorType type_;                   ///< Rotator type
 
-  size_t nei_quant_codes_offset_{0};
+  size_t quant_codes_offset_{0};
   size_t f_add_offset_{0};
   size_t f_rescale_offset_{0};
+  size_t nei_id_offset_{0};
   size_t data_chunk_size_{0};  ///< Size of each node's data chunk
 
-  DistFuncRBQ<DataType, DistanceType> distance_calu_func_;  ///< Distance calculation function
-  DataStorage data_storage_;
-  std::unique_ptr<RBQQuantizer<DataType>> quantizer_;
+  DistFuncRBQ<DataType, DistanceType> distance_cal_func_;  ///< Distance calculation function
+
+  StaticStorage<> storage_;                            ///< Data Storage
+  std::unique_ptr<RBQQuantizer<DataType>> quantizer_;  ///< Data Quantizer
+  std::unique_ptr<Rotator<DataType>> rotator_;         ///< Data rotator
+
+  IDType ep_;  ///< search entry point
+
+  void initialize_offsets() {
+    // data layout: (for each node, degree_bound defines their final outdegree)
+    // 1. Its raw data vector
+    // 2. Its neighbors' quantization codes
+    // 3. F_add , F_rescale : please refer to
+    // https://github.com/VectorDB-NTU/RaBitQ-Library/blob/main/docs/docs/rabitq/estimator.md
+    // for detailed information
+    // 4. Its neighbors' IDs
+    size_t rvec_len = dim_ * sizeof(DataType);
+    size_t nei_quant_code_len = get_padded_dim() * kDegreeBound / 8;  // 1 b/dim code
+    size_t f_add_len = kDegreeBound * sizeof(DataType);
+    size_t f_rescale_len = kDegreeBound * sizeof(DataType);
+    size_t nei_id_len = kDegreeBound * sizeof(IDType);
+
+    // byte
+    quant_codes_offset_ = rvec_len;
+    f_add_offset_ = quant_codes_offset_ + nei_quant_code_len;
+    f_rescale_offset_ = f_add_offset_ + f_add_len;
+    nei_id_offset_ = f_rescale_offset_ + f_rescale_len;
+    data_chunk_size_ = nei_id_offset_ + nei_id_len;
+
+    set_metric_function();
+  }
 
  public:
   using DataTypeAlias = DataType;
@@ -62,10 +107,22 @@ class RBQSpace {
     throw std::runtime_error("Remove operation is not supported yet!");
   }
 
+  void set_ep(IDType ep) { ep_ = ep; }
+
+  auto get_ep() const -> IDType { return ep_; }
+
+  RBQSpace(IDType capacity, size_t dim, MetricType metric,
+           RotatorType type = RotatorType::FhtKacRotator)
+      : capacity_(capacity), dim_(dim), metric_(metric), type_(type) {
+    rotator_ = choose_rotator<DataType>(dim_, type_, round_up_to_multiple(dim_, 64));
+    quantizer_ = std::make_unique<RBQQuantizer<DataType>>(dim_, rotator_->size());
+    initialize_offsets();
+  }
+
   void set_metric_function() {
     switch (metric_) {
       case MetricType::L2:
-        distance_calu_func_ = l2_sqr_rabitq;
+        distance_cal_func_ = l2_sqr_rabitq;
         break;
       case MetricType::COS:
       case MetricType::IP:
@@ -77,52 +134,25 @@ class RBQSpace {
     }
   }
 
-  RBQSpace(IDType capacity, size_t dim, MetricType metric,
-           RotatorType type = RotatorType::FhtKacRotator)
-      : capacity_(capacity), dim_(dim), metric_(metric) {
-    quantizer_ = std::make_unique<RBQQuantizer<DataType>>(dim_, type);
-    initialize();
-    data_storage_.init(data_chunk_size_, capacity_);
-  }
-
-  void initialize() {
-    // data layout: (for each node, degree_bound defines their final outdegree)
-    // 1. its raw data vector
-    // 2. its neighbors' quantization codes
-    // 3. F_add , F_rescale : please refer to
-    // https://github.com/VectorDB-NTU/RaBitQ-Library/blob/main/docs/docs/rabitq/estimator.md
-    // for detailed information
-    size_t rvec_len = dim_ * sizeof(DataType);
-    size_t nei_quant_code_len = quantizer_->get_padded_dim() * kDegreeBound / 8;  // 1 b/dim code
-    size_t f_add_len = kDegreeBound * sizeof(DataType);
-    size_t f_rescale_len = kDegreeBound * sizeof(DataType);
-
-    // byte
-    nei_quant_codes_offset_ = rvec_len;
-    f_add_offset_ = nei_quant_codes_offset_ + nei_quant_code_len;
-    f_rescale_offset_ = f_add_offset_ + f_add_len;
-    data_chunk_size_ = f_rescale_offset_ + f_rescale_len;
-
-    set_metric_function();
-  }
-
-  /**
-   * @brief Update quantization code and related data based on neighbors' id
-   *
-   * @param c Id of the centroid
-   * @param c_edges centroid's neighbor
-   */
-  void update_batch_data(IDType c, const IDType *c_edges) {
-    // get neighbors' data
-    std::vector<DataType> neighbors;
-    neighbors.reserve(kDegreeBound * dim_);
-    for (int i = 0; i < kDegreeBound; ++i) {
-      auto nei = get_data_by_id(*(c_edges + i));
-      neighbors.insert(neighbors.end(), nei, nei + dim_);
+  void update_nei(IDType c, const std::vector<Neighbor<IDType, DistanceType>> &new_neighbors) {
+    auto nei_ptr = get_edges(c);
+    // update neighbors' IDs
+    for (size_t i = 0; i < kDegreeBound; ++i) {
+      *(nei_ptr + i) = new_neighbors[i].id_;
     }
 
-    quantizer_->batch_quantize(neighbors.data(), get_data_by_id(c), kDegreeBound, get_nei_qc_ptr(c),
-                               get_f_add_ptr(c), get_f_rescale_ptr(c));
+    // rotate data before quantization
+    std::vector<DataType> rotated_neighbors(kDegreeBound * get_padded_dim());
+    std::vector<DataType> rotated_centroid(get_padded_dim());
+    for (size_t i = 0; i < kDegreeBound; ++i) {
+      const auto *neighbor_vec = get_data_by_id(new_neighbors[i].id_);
+      this->rotator_->rotate(neighbor_vec, &rotated_neighbors[i * get_padded_dim()]);
+    }
+    this->rotator_->rotate(get_data_by_id(c), rotated_centroid.data());
+
+    // quantize data and update batch data
+    quantizer_->batch_quantize(rotated_neighbors.data(), rotated_centroid.data(), kDegreeBound,
+                               get_nei_qc_ptr(c), get_f_add_ptr(c), get_f_rescale_ptr(c));
   }
 
   void fit(DataType *data, IDType item_cnt) {
@@ -131,48 +161,66 @@ class RBQSpace {
       throw std::runtime_error("The number of data points exceeds the capacity of the space");
     }
     item_cnt_ = item_cnt;
-    for (int i = 0; i < item_cnt; i++) {
-      data_storage_.point_insert(data + (i * dim_), dim_);
+    storage_ = StaticStorage<>(std::vector<size_t>{item_cnt_, data_chunk_size_});
+
+#pragma omp parallel for schedule(dynamic)
+    for (size_t i = 0; i < item_cnt; i++) {
+      const auto *src = data + (dim_ * i);
+      auto *dst = get_data_by_id(i);
+      std::copy(src, src + dim_, dst);
     }
   }
 
   auto get_distance(IDType i, IDType j) -> DistanceType {
-    return distance_calu_func_(get_data_by_id(i), get_data_by_id(j), dim_);
+    return distance_cal_func_(get_data_by_id(i), get_data_by_id(j), dim_);
   }
 
   // get raw data vector
-  [[nodiscard]] auto get_data_by_id(IDType i) const -> const DataType * {
-    return reinterpret_cast<DataType *>(data_storage_[i]);
+  [[nodiscard]] auto get_data_by_id(IDType id) const -> const DataType * {
+    return reinterpret_cast<const DataType *>(&storage_.at(data_chunk_size_ * id));
+  }
+
+  [[nodiscard]] auto get_data_by_id(IDType id) -> DataType * {
+    return reinterpret_cast<DataType *>(&storage_.at(data_chunk_size_ * id));
   }
 
   // get neighbors' quantization codes pointer
-  [[nodiscard]] auto get_nei_qc_ptr(IDType i) const -> const uint8_t * {
-    return reinterpret_cast<const uint8_t *>(data_storage_[i]) + nei_quant_codes_offset_;
+  [[nodiscard]] auto get_nei_qc_ptr(IDType id) const -> const uint8_t * {
+    return reinterpret_cast<const uint8_t *>(
+        &storage_.at((data_chunk_size_ * id) + quant_codes_offset_));
   }
 
-  [[nodiscard]] auto get_nei_qc_ptr(IDType i) -> uint8_t * {
-    return reinterpret_cast<uint8_t *>(data_storage_[i]) + nei_quant_codes_offset_;
+  [[nodiscard]] auto get_nei_qc_ptr(IDType id) -> uint8_t * {
+    return reinterpret_cast<uint8_t *>(&storage_.at((data_chunk_size_ * id) + quant_codes_offset_));
   }
 
   // get f_add pointer
-  [[nodiscard]] auto get_f_add_ptr(IDType i) const -> const DataType * {
-    return reinterpret_cast<const DataType *>(reinterpret_cast<char *>(data_storage_[i]) +
-                                              f_add_offset_);
+  [[nodiscard]] auto get_f_add_ptr(IDType id) const -> const DataType * {
+    return reinterpret_cast<const DataType *>(
+        &storage_.at((data_chunk_size_ * id) + f_add_offset_));
   }
 
-  [[nodiscard]] auto get_f_add_ptr(IDType i) -> DataType * {
-    return reinterpret_cast<DataType *>(reinterpret_cast<char *>(data_storage_[i]) + f_add_offset_);
+  [[nodiscard]] auto get_f_add_ptr(IDType id) -> DataType * {
+    return reinterpret_cast<DataType *>(&storage_.at((data_chunk_size_ * id) + f_add_offset_));
   }
 
   // get f_rescale pointer
-  [[nodiscard]] auto get_f_rescale_ptr(IDType i) const -> const DataType * {
-    return reinterpret_cast<const DataType *>(reinterpret_cast<char *>(data_storage_[i]) +
-                                              f_rescale_offset_);
+  [[nodiscard]] auto get_f_rescale_ptr(IDType id) const -> const DataType * {
+    return reinterpret_cast<const DataType *>(
+        &storage_.at((data_chunk_size_ * id) + f_rescale_offset_));
   }
 
-  [[nodiscard]] auto get_f_rescale_ptr(IDType i) -> DataType * {
-    return reinterpret_cast<DataType *>(reinterpret_cast<char *>(data_storage_[i]) +
-                                        f_rescale_offset_);
+  [[nodiscard]] auto get_f_rescale_ptr(IDType id) -> DataType * {
+    return reinterpret_cast<DataType *>(&storage_.at((data_chunk_size_ * id) + f_rescale_offset_));
+  }
+
+  // get neighbors' IDs
+  [[nodiscard]] auto get_edges(IDType id) const -> const IDType * {
+    return reinterpret_cast<IDType *>(&storage_.at((data_chunk_size_ * id) + nei_id_offset_));
+  }
+
+  [[nodiscard]] auto get_edges(IDType id) -> IDType * {
+    return reinterpret_cast<IDType *>(&storage_.at((data_chunk_size_ * id) + nei_id_offset_));
   }
 
   /**
@@ -180,8 +228,8 @@ class RBQSpace {
    * @param id The ID of the data point to prefetch
    */
   auto prefetch_by_id(IDType id) -> void {  // for vertex
-    // nei_quant_codes_offset_ = rvec_len;
-    mem_prefetch_l1(get_data_by_id(id), nei_quant_codes_offset_ / 64);
+    // quant_codes_offset_ = rvec_len;
+    mem_prefetch_l1(get_data_by_id(id), quant_codes_offset_ / 64);
   }
 
   /**
@@ -189,19 +237,19 @@ class RBQSpace {
    * @param address The address of the data to prefetch
    */
   auto prefetch_by_address(DataType *address) -> void {  // for query
-    // nei_quant_codes_offset_ = rvec_len;
-    mem_prefetch_l1(address, nei_quant_codes_offset_ / 64);
+    // quant_codes_offset_ = rvec_len;
+    mem_prefetch_l1(address, quant_codes_offset_ / 64);
   }
 
-  auto rotate_vec(const DataType *src, DataType *dst) const { quantizer_->rotate_vec(src, dst); }
+  auto rotate_vec(const DataType *src, DataType *dst) const { rotator_->rotate(src, dst); }
 
-  auto get_padded_dim() const -> size_t { return quantizer_->get_padded_dim(); }
+  auto get_padded_dim() const -> size_t { return rotator_->size(); }
 
   auto get_capacity() const -> size_t { return capacity_; }
 
   auto get_dim() const -> uint32_t { return dim_; }
 
-  auto get_dist_func() const -> DistFuncRBQ<DataType, DistanceType> { return distance_calu_func_; }
+  auto get_dist_func() const -> DistFuncRBQ<DataType, DistanceType> { return distance_cal_func_; }
 
   auto get_data_num() const -> IDType { return item_cnt_; }
 
@@ -307,8 +355,13 @@ class RBQSpace {
     writer.write(reinterpret_cast<char *>(&dim_), sizeof(dim_));
     writer.write(reinterpret_cast<char *>(&item_cnt_), sizeof(item_cnt_));
     writer.write(reinterpret_cast<char *>(&capacity_), sizeof(capacity_));
+    writer.write(reinterpret_cast<char *>(&type_), sizeof(type_));
+    writer.write(reinterpret_cast<char *>(&ep_), sizeof(ep_));
+    // no need to save offsets, we will take care of that in loading
 
-    data_storage_.save(writer);
+    rotator_->save(writer);
+
+    storage_.save(writer);
 
     quantizer_->save(writer);
 
@@ -326,14 +379,20 @@ class RBQSpace {
     reader.read(reinterpret_cast<char *>(&dim_), sizeof(dim_));
     reader.read(reinterpret_cast<char *>(&item_cnt_), sizeof(item_cnt_));
     reader.read(reinterpret_cast<char *>(&capacity_), sizeof(capacity_));
+    reader.read(reinterpret_cast<char *>(&type_), sizeof(type_));
+    reader.read(reinterpret_cast<char *>(&ep_), sizeof(ep_));
 
-    // no need for init() after loading
-    data_storage_.load(reader);
+    rotator_ = choose_rotator<DataType>(dim_, type_, round_up_to_multiple(dim_, 64));
+    rotator_->load(reader);
+
+    this->initialize_offsets();
+
+    storage_ = StaticStorage<>(std::vector<size_t>{item_cnt_, data_chunk_size_});
+    storage_.load(reader);
 
     quantizer_ = std::make_unique<RBQQuantizer<DataType>>();
     quantizer_->load(reader);
 
-    this->initialize();
     LOG_INFO("RBQSpace is successfully loaded from {}", filename);
   }
 };

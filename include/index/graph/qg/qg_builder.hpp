@@ -1,17 +1,30 @@
+/*
+ * Copyright 2025 AlayaDB.AI
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 
 #include <cstddef>
-#include <iostream>
 #include <memory>
 #include <vector>
 
-#include "index/graph/graph.hpp"
 #include "index/graph/graph_refiner.hpp"
 #include "index/neighbor.hpp"
 #include "space/rabitq_space.hpp"
 #include "space/space_concepts.hpp"
 #include "utils/log.hpp"
-#include "utils/query_utils.hpp"
 #include "utils/rbq_utils/search_utils/buffer.hpp"
 #include "utils/rbq_utils/search_utils/hashset.hpp"
 
@@ -55,19 +68,17 @@ class QGBuilder {
       visited_list_.emplace_back(pool_capacity);
     }
 
-    final_graph_ = std::make_unique<Graph<DataType, IDType>>(space_->get_capacity(), degree_bound_);
     cal_ep();
 
     random_init();
   }
 
-  auto build_graph() -> std::unique_ptr<Graph<DataType, IDType>> {
+  void build_graph() {
     for (size_t i = 0; i < kNumIter - 1; ++i) {
       iter(false);
     }
     // we only need to supplement edges in last round
     iter(true);
-    return std::move(final_graph_);
   }
 
  private:
@@ -86,7 +97,7 @@ class QGBuilder {
   std::vector<CandidateList> pruned_neighbors_;    ///< recorded pruned neighbors
   std::vector<HashBasedBooleanSet> visited_list_;  // list of visited hash set
 
-  std::unique_ptr<Graph<DataType, IDType>> final_graph_;
+  // std::unique_ptr<Graph<DataType, IDType>> final_graph_;
   std::shared_ptr<DistanceSpaceType> space_;
 
   void iter(bool sup) {
@@ -112,10 +123,7 @@ class QGBuilder {
       if (sup && new_neighbors_[i].size() < degree_bound_) {
         LOG_ERROR("After supplement, node_{} only has {} neighbors.", i, new_neighbors_[i].size());
       }
-      for (int j = 0; j < degree_bound_; ++j) {
-        final_graph_->at(i, j) = new_neighbors_[i][j].id_;
-      }
-      space_->update_batch_data(i, final_graph_->edges(i));
+      space_->update_nei(i, new_neighbors_[i]);
     }
   }
 
@@ -140,7 +148,8 @@ class QGBuilder {
       }
 
       size_t min_size = std::min(candidates.size(), kMaxCandidatePoolSize);
-      std::partial_sort(candidates.begin(), candidates.begin() + static_cast<long>(min_size), //NOLINT
+      std::partial_sort(candidates.begin(),
+                        candidates.begin() + static_cast<long>(min_size),  // NOLINT
                         candidates.end());
       candidates.resize(min_size);
 
@@ -170,11 +179,11 @@ class QGBuilder {
         continue;
       }
       vis.set(cur_candi);
-      
+
       q_computer.load_centroid(cur_candi);
 
       // scan cur_candi's neighbors
-      auto *nei_ptr = final_graph_->edges(cur_candi);
+      auto *nei_ptr = space_->get_edges(cur_candi);
       for (size_t i = 0; i < degree_bound_; ++i) {
         auto cur_nei = nei_ptr[i];
         auto dist = q_computer(i);
@@ -345,8 +354,7 @@ class QGBuilder {
         while (new_result.size() < degree_bound_) {
           PID rand_id = rand_integer<IDType>(0, static_cast<PID>(num_nodes_) - 1);
           if (rand_id != static_cast<IDType>(i) && ids.find(rand_id) == ids.end()) {
-            new_result.emplace_back(rand_id,
-                                    space_->get_distance(rand_id, i));
+            new_result.emplace_back(rand_id, space_->get_distance(rand_id, i));
             ids.emplace(rand_id);
           }
         }
@@ -443,7 +451,8 @@ class QGBuilder {
     }
 
     // find the exact nearest neighbor of the centroid and set it as the entry point of qg.
-    std::vector<Neighbor<IDType, DistanceType>> best_entries(num_threads_,Neighbor<IDType, DistanceType>{0, std::numeric_limits<DistanceType>::max()});
+    std::vector<Neighbor<IDType, DistanceType>> best_entries(
+        num_threads_, Neighbor<IDType, DistanceType>{0, std::numeric_limits<DistanceType>::max()});
 #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < num_nodes_; ++i) {
       auto tid = omp_get_thread_num();
@@ -467,7 +476,7 @@ class QGBuilder {
     // final entry point
     ep_ = nearest_neighbor;
     LOG_INFO("final entry point in qg: {}", ep_);
-    final_graph_->eps_.push_back(ep_);
+    space_->set_ep(ep_);
   }
 
   void random_init() {
@@ -489,13 +498,8 @@ class QGBuilder {
         new_neighbors_[i].emplace_back(cur_neigh, space_->get_distance(i, cur_neigh));
       }
 
-      // update graph
-      for (int j = 0; j < degree_bound_; ++j) {
-        final_graph_->at(i, j) = new_neighbors_[i][j].id_;
-      }
-
-      // update space
-      space_->update_batch_data(i, final_graph_->edges(i));
+      // record in space
+      space_->update_nei(i, new_neighbors_[i]);
     }
   }
 };

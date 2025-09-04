@@ -591,7 +591,7 @@ struct NSGBuilder {
     for (int i = 0; i < pool.size(); i++) {
       node = pool[i].id_;
       if (!vis[node] &&
-          degrees[node] < max_nbrs_) {  // we can gurantee that node!=id since vis[id]==true
+          degrees[node] < max_nbrs_) {  // we can guarantee that node!=id since vis[id]==true
         found = true;
         break;
       }
