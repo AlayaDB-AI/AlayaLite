@@ -26,7 +26,7 @@
 #include <utility>
 #include <vector>
 #include "index/graph/graph.hpp"
-#include "index/graph/graph_refiner.hpp"
+// #include "index/graph/graph_refiner.hpp"
 #include "index/graph/knng/nndescent.hpp"
 #include "index/neighbor.hpp"
 #include "utils/log.hpp"
@@ -145,9 +145,9 @@ struct NSGBuilder {
     int num_attached = tree_grow(degrees);
 
     // graph refinement for rabitq
-    if constexpr (is_rbqspace_v<DistanceSpaceType>) {
-      GraphRefiner<DistanceSpaceType> refiner(space_.get(), final_graph_.get());
-    }
+    // if constexpr (is_rbqspace_v<DistanceSpaceType>) {
+    //   GraphRefiner<DistanceSpaceType> refiner(space_.get(), final_graph_.get());
+    // }
 
     int max_degree = 0;
     int min_degree = 1e6;

@@ -396,4 +396,13 @@ class RBQSpace {
     LOG_INFO("RBQSpace is successfully loaded from {}", filename);
   }
 };
+
+template <typename T>
+struct is_rbqspace : std::false_type {};  // NOLINT
+
+template <typename T, typename U, typename V>
+struct is_rbqspace<RBQSpace<T, U, V>> : std::true_type {};
+
+template <typename T>
+inline constexpr bool is_rbqspace_v = is_rbqspace<T>::value;  // NOLINT
 }  // namespace alaya

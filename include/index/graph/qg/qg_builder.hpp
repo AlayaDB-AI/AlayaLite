@@ -20,7 +20,6 @@
 #include <memory>
 #include <vector>
 
-#include "index/graph/graph_refiner.hpp"
 #include "index/neighbor.hpp"
 #include "space/rabitq_space.hpp"
 #include "space/space_concepts.hpp"

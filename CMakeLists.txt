@@ -98,7 +98,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Compilation options with platform-specific adjustments
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)  # Ensure PIC for shared libraries
 
-# check AVX512 support
+# Check AVX512 support
 include(CheckCXXSourceRuns)
 set(CMAKE_REQUIRED_FLAGS "-march=native")
 set(AVX512_RUN_CODE "
@@ -111,7 +111,6 @@ int main() {
 
 check_cxx_source_runs("${AVX512_RUN_CODE}" AVX512_CAN_RUN)
 # RaBitQ optimization
-set(CMAKE_CXX_FLAGS "-fopenmp ${CMAKE_CXX_FLAGS}")
 if (AVX512_CAN_RUN)
   message(STATUS "Can use AVX512.")
   add_compile_options(
@@ -123,6 +122,7 @@ if (AVX512_CAN_RUN)
       -mavx512bitalg
       -mavx512vpopcntdq
   )
+  set(CMAKE_CXX_FLAGS "-fopenmp ${CMAKE_CXX_FLAGS}")
 else()
     message(STATUS "AVX-512 not supported or cannot run.")
 endif()
@@ -137,7 +137,8 @@ else()
   # GCC/Clang flags
   message(STATUS "Using GCC/Clang compiler settings")
   set(CMAKE_CXX_FLAGS "-Wall -Wextra ${CMAKE_CXX_FLAGS}")  # Enable common warnings
-  set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG")
+  # set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG")
+  set(CMAKE_CXX_FLAGS_RELEASE "-O3 -ffast-math -DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 endif()
 
@@ -154,6 +155,7 @@ find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 find_package(GTest REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
+
 # Configure third-party libraries based on operating system
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_package(libcoro REQUIRED)
@@ -172,7 +174,10 @@ else()
     Eigen3::Eigen
   )
 endif()
-set(GTEST_LIBS GTest::gtest GTest::gtest_main)
+
+if(ENABLE_UNIT_TESTS)
+  set(GTEST_LIBS GTest::gtest GTest::gtest_main)
+endif()
 
 # Include project header directories
 include_directories(${CMAKE_SOURCE_DIR}/include)

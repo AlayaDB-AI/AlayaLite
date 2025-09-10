@@ -29,15 +29,6 @@
 #include "utils/rbq_utils/tools.hpp"
 
 namespace alaya {
-template <typename T>
-struct is_rbqspace : std::false_type {};  // NOLINT
-
-template <typename T, typename U, typename V>
-struct is_rbqspace<RBQSpace<T, U, V>> : std::true_type {};
-
-template <typename T>
-inline constexpr bool is_rbqspace_v = is_rbqspace<T>::value;  // NOLINT
-
 template <typename DistanceSpaceType>
 struct GraphRefiner {
   static_assert(is_rbqspace_v<DistanceSpaceType>,
@@ -112,7 +103,7 @@ struct GraphRefiner {
    * @brief Randomly supplement neighbors to degree bound and synchronize with space and graph
    */
   void init(Graph<DataType, IDType> *graph) {
-    LOG_INFO("Initializing graph refiner...");
+    LOG_DEBUG("Initializing graph refiner...");
 
     space_->set_ep(graph->get_ep());
 
@@ -123,7 +114,7 @@ struct GraphRefiner {
   }
 
   void search_new_neighbors() {
-    LOG_INFO("Searching for new neighbor candidates...");
+    LOG_DEBUG("Searching for new neighbor candidates...");
 #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < num_nodes_; ++i) {
       IDType cur_id = i;
@@ -153,7 +144,7 @@ struct GraphRefiner {
   }
 
   void add_reverse_edges() {
-    LOG_INFO("Adding reverse edges...");
+    LOG_DEBUG("Adding reverse edges...");
     std::vector<std::mutex> locks(num_nodes_);
     std::vector<CandidateList> reverse_buffer(num_nodes_);
 #pragma omp parallel for schedule(dynamic)
@@ -206,7 +197,7 @@ struct GraphRefiner {
    * the perfect threshold.
    */
   void angle_based_supplement() {
-    LOG_INFO("Supplementing edges...");
+    LOG_DEBUG("Supplementing edges...");
 #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < num_nodes_; ++i) {
       CandidateList &cur_neighbors = new_neighbors_[i];
@@ -261,7 +252,7 @@ struct GraphRefiner {
 
       cur_neighbors = new_result;
     }
-    LOG_INFO("Supplementing finished...");
+    LOG_DEBUG("Supplementing finished...");
   }
 
   /**

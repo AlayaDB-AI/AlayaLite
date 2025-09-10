@@ -22,12 +22,12 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "executor/jobs/graph_search_job.hpp"
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "index/graph/nsg/nsg_builder.hpp"
-#include "space/rabitq_space.hpp"
 #include "space/raw_space.hpp"
 #include "space/sq4_space.hpp"
 #include "space/sq8_space.hpp"
@@ -38,18 +38,28 @@
 namespace alaya {
 class SQTest : public ::testing::Test {
  protected:
+  // Paths
+  std::filesystem::path dir_name_ = std::filesystem::current_path() / "data" / "deep1M";
+  std::filesystem::path data_file_ = dir_name_ / "deep1M_base.fvecs";
+  std::filesystem::path query_file_ = dir_name_ / "deep1M_query.fvecs";
+  std::filesystem::path gt_file_ = dir_name_ / "deep1M_groundtruth.ivecs";
+
+  // Commands
+  const char *download_cmd_ =
+      "wget -P ./data http://www.cse.cuhk.edu.hk/systems/hash/gqr/dataset/deep1M.tar.gz";
+  const char *unzip_cmd_ = "tar -zxvf ./data/deep1M.tar.gz -C ./data";
+
   void SetUp() override {
     if (!std::filesystem::exists(dir_name_)) {
       // mkdir data
       std::filesystem::create_directories(dir_name_.parent_path());
-      int ret = std::system(
-          "wget -P ./data http://www.cse.cuhk.edu.hk/systems/hash/gqr/dataset/deep1M.tar.gz");
+      int ret = std::system(download_cmd_);
       if (ret != 0) {
-        throw std::runtime_error("Download deep1M.tar.gz failed");
+        throw std::runtime_error("Download dataset failed");
       }
-      ret = std::system("tar -zxvf ./data/deep1M.tar.gz -C ./data");
+      ret = std::system(unzip_cmd_);
       if (ret != 0) {
-        throw std::runtime_error("Unzip deep1M.tar.gz failed");
+        throw std::runtime_error("Unzip dataset failed");
       }
     }
 
@@ -63,10 +73,6 @@ class SQTest : public ::testing::Test {
   }
 
   void TearDown() override {}
-  std::filesystem::path dir_name_ = std::filesystem::current_path() / "data" / "deep1M";
-  std::filesystem::path data_file_ = dir_name_ / "deep1M_base.fvecs";
-  std::filesystem::path query_file_ = dir_name_ / "deep1M_query.fvecs";
-  std::filesystem::path gt_file_ = dir_name_ / "deep1M_groundtruth.ivecs";
 
   std::vector<float> data_;
   uint32_t points_num_;
@@ -82,6 +88,20 @@ class SQTest : public ::testing::Test {
 };
 
 using IDType = uint32_t;
+template <typename DistanceType = float>
+inline void rerank(std::vector<IDType> &src, IDType *desc, auto dist_compute, uint32_t ef,
+                   uint32_t topk) {
+  std::priority_queue<std::pair<DistanceType, IDType>, std::vector<std::pair<DistanceType, IDType>>,
+                      std::greater<>>
+      pq;
+  for (size_t i = 0; i < ef; i++) {
+    pq.push({dist_compute(src[i]), src[i]});
+  }
+  for (size_t i = 0; i < topk; i++) {
+    desc[i] = pq.top().second;
+    pq.pop();
+  }
+}
 
 TEST_F(SQTest, DISABLED_SQ4HNSWTest) {
   // *********** Indexing ***********
@@ -132,12 +152,15 @@ TEST_F(SQTest, DISABLED_SQ4HNSWTest) {
       size_t ef = efs[i];
       size_t total_correct = 0;
       float total_time = 0;
-      std::vector<IDType> results(topk);
       LOG_INFO("current ef in this round:{}", ef);
+      std::vector<IDType> res_cand(ef);
+      std::vector<IDType> results(topk);
       for (uint32_t n = 0; n < query_num_; ++n) {
+        auto q_ptr = queries_.data() + (n * query_dim_);
         timer.reset();
         // results is overwritten
-        search_job->search_solo(queries_.data() + (n * query_dim_), topk, results.data(), ef);
+        search_job->search_solo(q_ptr, ef, res_cand.data(), ef);
+        rerank(res_cand, results.data(), search_space->get_query_computer(q_ptr), ef, topk);
         total_time += timer.get_elapsed_micro();
         // recall
         for (size_t k = 0; k < topk; ++k) {
@@ -215,12 +238,15 @@ TEST_F(SQTest, DISABLED_SQ8HNSWTest) {
       size_t ef = efs[i];
       size_t total_correct = 0;
       float total_time = 0;
-      std::vector<IDType> results(topk);
       LOG_INFO("current ef in this round:{}", ef);
+      std::vector<IDType> res_cand(ef);
+      std::vector<IDType> results(topk);
       for (uint32_t n = 0; n < query_num_; ++n) {
+        auto q_ptr = queries_.data() + (n * query_dim_);
         timer.reset();
         // results is overwritten
-        search_job->search_solo(queries_.data() + (n * query_dim_), topk, results.data(), ef);
+        search_job->search_solo(q_ptr, ef, res_cand.data(), ef);
+        rerank(res_cand, results.data(), search_space->get_query_computer(q_ptr), ef, topk);
         total_time += timer.get_elapsed_micro();
         // recall
         for (size_t k = 0; k < topk; ++k) {
@@ -298,12 +324,15 @@ TEST_F(SQTest, DISABLED_SQ4NSGTest) {
       size_t ef = efs[i];
       size_t total_correct = 0;
       float total_time = 0;
-      std::vector<IDType> results(topk);
       LOG_INFO("current ef in this round:{}", ef);
+      std::vector<IDType> res_cand(ef);
+      std::vector<IDType> results(topk);
       for (uint32_t n = 0; n < query_num_; ++n) {
+        auto q_ptr = queries_.data() + (n * query_dim_);
         timer.reset();
         // results is overwritten
-        search_job->search_solo(queries_.data() + (n * query_dim_), topk, results.data(), ef);
+        search_job->search_solo(q_ptr, ef, res_cand.data(), ef);
+        rerank(res_cand, results.data(), search_space->get_query_computer(q_ptr), ef, topk);
         total_time += timer.get_elapsed_micro();
         // recall
         for (size_t k = 0; k < topk; ++k) {
@@ -385,12 +414,15 @@ TEST_F(SQTest, SQ8NSGTest) {
       size_t ef = efs[i];
       size_t total_correct = 0;
       float total_time = 0;
-      std::vector<IDType> results(topk);
       LOG_INFO("current ef in this round:{}", ef);
+      std::vector<IDType> res_cand(ef);
+      std::vector<IDType> results(topk);
       for (uint32_t n = 0; n < query_num_; ++n) {
+        auto q_ptr = queries_.data() + (n * query_dim_);
         timer.reset();
         // results is overwritten
-        search_job->search_solo(queries_.data() + (n * query_dim_), topk, results.data(), ef);
+        search_job->search_solo(q_ptr, ef, res_cand.data(), ef);
+        rerank(res_cand, results.data(), search_space->get_query_computer(q_ptr), ef, topk);
         total_time += timer.get_elapsed_micro();
         // recall
         for (size_t k = 0; k < topk; ++k) {
