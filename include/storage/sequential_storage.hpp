@@ -39,6 +39,7 @@ template <typename DataType, typename IDType>
 struct SequentialStorage {
   using data_type = DataType;
   using id_type = IDType;
+  const size_t kBitEveryByte = 8;
 
   size_t item_size_{0};
   size_t aligned_item_size_{0};
@@ -46,8 +47,12 @@ struct SequentialStorage {
   size_t pos_{0};
   size_t alignment_{0};
   DataType *data_{nullptr};
-  size_t *bitmap_{nullptr};
+  uint8_t *bitmap_{nullptr};
 
+  SequentialStorage(const SequentialStorage &) = delete;
+  auto operator=(const SequentialStorage &) -> SequentialStorage & = delete;
+
+  SequentialStorage() = default;
   ~SequentialStorage() {
     if (data_ != nullptr) {
 #ifdef _MSC_VER
@@ -65,36 +70,35 @@ struct SequentialStorage {
     }
   }
 
-  auto init(size_t item_size, size_t capacity, char fill = 0,
-            size_t alignment = 64) -> void {
+  auto init(size_t item_size, size_t capacity, char fill = 0, size_t alignment = 64) -> void {
     item_size_ = item_size;
     capacity_ = capacity;
     alignment_ = alignment;
     aligned_item_size_ = do_align(item_size_, alignment);
 #ifdef _MSC_VER
-    data_ = static_cast<DataType *>(
-        _aligned_malloc(aligned_item_size_ * capacity_, alignment));
+    data_ = static_cast<DataType *>(_aligned_malloc(aligned_item_size_ * capacity_, alignment));
 #else
-    data_ = static_cast<DataType *>(
-        std::aligned_alloc(alignment, aligned_item_size_ * capacity_));
+    data_ = static_cast<DataType *>(std::aligned_alloc(alignment, aligned_item_size_ * capacity_));
 #endif
+
     std::memset(data_, fill, aligned_item_size_ * capacity_);
-    auto bitmap_size = do_align(capacity_ / sizeof(char) + 1, alignment);
+    auto bitmap_size = do_align((capacity_ + kBitEveryByte - 1) / kBitEveryByte, alignment);
+
 #ifdef _MSC_VER
-    bitmap_ = static_cast<size_t *>(_aligned_malloc(bitmap_size, alignment));
+    bitmap_ = static_cast<uint8_t *>(_aligned_malloc(bitmap_size, alignment));
 #else
-    bitmap_ = static_cast<size_t *>(std::aligned_alloc(alignment, bitmap_size));
+    bitmap_ = static_cast<uint8_t *>(std::aligned_alloc(alignment, bitmap_size));
 #endif
     std::memset(bitmap_, 0, bitmap_size);
   }
 
   auto operator[](IDType index) const -> DataType * {
     return reinterpret_cast<DataType *>(reinterpret_cast<char *>(data_) +
-                                        index * aligned_item_size_);
+                                        (index * aligned_item_size_));
   }
 
   auto is_valid(IDType index) const -> bool {
-    return bitmap_[index / sizeof(size_t)] & (1 << (index % sizeof(size_t)));
+    return bitmap_[index / kBitEveryByte] & (1 << (index % kBitEveryByte));
   }
 
   auto insert(const DataType *data) -> IDType {
@@ -102,7 +106,7 @@ struct SequentialStorage {
       return -1;
     }
     std::memcpy(operator[](pos_), data, item_size_);
-    bitmap_[pos_ / sizeof(size_t)] |= (1 << (pos_ % sizeof(size_t)));
+    bitmap_[pos_ / kBitEveryByte] |= (1 << (pos_ % kBitEveryByte));
     return pos_++;
   }
 
@@ -110,7 +114,7 @@ struct SequentialStorage {
     if (pos_ >= capacity_) {
       return -1;
     }
-    bitmap_[pos_ / sizeof(size_t)] |= (1 << (pos_ % sizeof(size_t)));
+    bitmap_[pos_ / kBitEveryByte] |= (1 << (pos_ % kBitEveryByte));
     return pos_++;
   }
 
@@ -118,7 +122,7 @@ struct SequentialStorage {
     if (!is_valid(id)) {
       return -1;
     }
-    bitmap_[id / sizeof(size_t)] &= ~(1 << (id % sizeof(size_t)));
+    bitmap_[id / kBitEveryByte] &= ~(1 << (id % kBitEveryByte));
     return id;
   }
 
@@ -132,14 +136,13 @@ struct SequentialStorage {
 
   auto save(std::ofstream &writer) const -> void {
     writer.write(reinterpret_cast<const char *>(&item_size_), sizeof(item_size_));
-    writer.write(reinterpret_cast<const char *>(&aligned_item_size_),
-                 sizeof(aligned_item_size_));
+    writer.write(reinterpret_cast<const char *>(&aligned_item_size_), sizeof(aligned_item_size_));
     writer.write(reinterpret_cast<const char *>(&capacity_), sizeof(capacity_));
     writer.write(reinterpret_cast<const char *>(&pos_), sizeof(pos_));
     writer.write(reinterpret_cast<const char *>(&alignment_), sizeof(alignment_));
-    writer.write(reinterpret_cast<char *>(data_),
-                 aligned_item_size_ * capacity_);
-    writer.write(reinterpret_cast<char *>(bitmap_), capacity_ / sizeof(char) + 1);
+    writer.write(reinterpret_cast<char *>(data_), aligned_item_size_ * capacity_);
+    writer.write(reinterpret_cast<char *>(bitmap_),
+                 (capacity_ + kBitEveryByte - 1) / kBitEveryByte);
   }
 
   auto load(std::ifstream &reader) -> void {
@@ -158,28 +161,23 @@ struct SequentialStorage {
 #endif
     }
     reader.read(reinterpret_cast<char *>(&item_size_), sizeof(item_size_));
-    reader.read(reinterpret_cast<char *>(&aligned_item_size_),
-                sizeof(aligned_item_size_));
+    reader.read(reinterpret_cast<char *>(&aligned_item_size_), sizeof(aligned_item_size_));
     reader.read(reinterpret_cast<char *>(&capacity_), sizeof(capacity_));
     reader.read(reinterpret_cast<char *>(&pos_), sizeof(pos_));
     reader.read(reinterpret_cast<char *>(&alignment_), sizeof(alignment_));
 #ifdef _MSC_VER
-    data_ = static_cast<DataType *>(
-        _aligned_malloc(aligned_item_size_ * capacity_, alignment_));
+    data_ = static_cast<DataType *>(_aligned_malloc(aligned_item_size_ * capacity_, alignment_));
 #else
-    data_ = static_cast<DataType *>(
-        std::aligned_alloc(alignment_, aligned_item_size_ * capacity_));
+    data_ = static_cast<DataType *>(std::aligned_alloc(alignment_, aligned_item_size_ * capacity_));
 #endif
-    reader.read(reinterpret_cast<char *>(data_),
-                aligned_item_size_ * capacity_);
-    auto bitmap_size = do_align(capacity_ / sizeof(char) + 1, alignment_);
+    reader.read(reinterpret_cast<char *>(data_), aligned_item_size_ * capacity_);
+    auto bitmap_size = do_align((capacity_ + kBitEveryByte - 1) / kBitEveryByte, alignment_);
 #ifdef _MSC_VER
-    bitmap_ = static_cast<size_t *>(_aligned_malloc(bitmap_size, alignment_));
+    bitmap_ = static_cast<uint8_t *>(_aligned_malloc(bitmap_size, alignment_));
 #else
-    bitmap_ =
-        static_cast<size_t *>(std::aligned_alloc(alignment_, bitmap_size));
+    bitmap_ = static_cast<uint8_t *>(std::aligned_alloc(alignment_, bitmap_size));
 #endif
-    reader.read(reinterpret_cast<char *>(bitmap_), capacity_ / sizeof(char) + 1);
+    reader.read(reinterpret_cast<char *>(bitmap_), (capacity_ + kBitEveryByte - 1) / kBitEveryByte);
   }
 };
 

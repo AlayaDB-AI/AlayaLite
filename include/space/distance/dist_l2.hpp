@@ -21,8 +21,19 @@
 #include <iostream>
 #include <ostream>
 #include "dist_config.hpp"
+// #include "utils/rbq_utils/defines.hpp"
 
 namespace alaya {
+
+// FAST_BEGIN
+// template <typename DataType = float, typename DistanceType = float>
+// inline auto l2_sqr_rabitq(const DataType *__restrict__ x, const DataType *__restrict__ y,
+//                           size_t dim) -> DistanceType {
+//   ConstVectorMap<DataType> v0(x, dim);
+//   ConstVectorMap<DataType> v1(y, dim);
+//   return (v0 - v1).dot(v0 - v1);
+// }
+// FAST_END
 
 FAST_BEGIN
 template <typename DataType = float, typename DistanceType = float>
@@ -43,20 +54,18 @@ inline auto l2_sqr_sq4(const uint8_t *encoded_x, const uint8_t *encoded_y, size_
   DistanceType sum = 0;
 
   for (size_t i = 0; i < dim; i += 2) {
-    {
-      auto x = encoded_x[i / 2] & 0x0F;
-      auto y = encoded_y[i / 2] & 0x0F;
-      auto diff = (x - y) * (max[i] - min[i]) / 15.0F;
-      sum += diff * diff;
-    }
-    {
-      auto x = (encoded_x[i / 2] >> 4) & 0x0F;
-      auto y = (encoded_y[i / 2] >> 4) & 0x0F;
-      auto diff = (x - y) * (max[i + 1] - min[i + 1]) / 15.0F;
+    auto x_high = (encoded_x[i / 2] >> 4) & 0x0F;
+    auto y_high = (encoded_y[i / 2] >> 4) & 0x0F;
+    auto diff = (x_high - y_high) * (max[i] - min[i]) / 15.0F;
+    sum += diff * diff;
+
+    if (i + 1 != dim) {
+      auto x_low = encoded_x[i / 2] & 0x0F;
+      auto y_low = encoded_y[i / 2] & 0x0F;
+      auto diff = (x_low - y_low) * (max[i + 1] - min[i + 1]) / 15.0F;
       sum += diff * diff;
     }
   }
-
   return sum;
 }
 FAST_END

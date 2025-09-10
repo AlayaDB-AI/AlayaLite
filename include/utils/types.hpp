@@ -16,13 +16,14 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 
 using WorkerID = uint32_t;
 using CpuID = uint32_t;
 namespace alaya {
-inline auto do_align(uint32_t size, uint32_t align_num) -> uint32_t {
+inline auto do_align(size_t size, size_t align_num) -> size_t {
   // Ensure align_num is not zero (to avoid division by zero)
   if (align_num == 0) {
     throw std::invalid_argument("align_num cannot be zero");

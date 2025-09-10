@@ -40,9 +40,16 @@ inline auto ip_sqr_sq4(const uint8_t *encoded_x, const uint8_t *encoded_y, size_
   DistanceType sum = 0;
 
   for (size_t i = 0; i < dim; i += 2) {
-    auto x = (encoded_x[i] >> 4) & 0x0F;
-    auto y = encoded_y[i] & 0x0F;
-    sum += (x * (max[i] - min[i]) + min[i]) * (y * (max[i] - min[i]) + min[i]);
+    auto x_high = (encoded_x[i / 2] >> 4) & 0x0F;
+    auto y_high = (encoded_y[i / 2] >> 4) & 0x0F;
+    sum += (x_high * (max[i] - min[i]) + min[i]) * (y_high * (max[i] - min[i]) + min[i]);
+
+    if (i + 1 != dim) {
+      auto x_low = encoded_x[i / 2] & 0x0F;
+      auto y_low = encoded_y[i / 2] & 0x0F;
+      sum += (x_low * (max[i + 1] - min[i + 1]) + min[i + 1]) *
+             (y_low * (max[i + 1] - min[i + 1]) + min[i + 1]);
+    }
   }
 
   return -sum;

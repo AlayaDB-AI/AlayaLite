@@ -93,9 +93,7 @@ class DynamicBitset {
    * @param pos The position of the bit to get
    * @return true if the bit is set, false otherwise
    */
-  auto get(size_t pos) const -> bool {
-    return (data_[pos / 64] & (1ULL << (pos % 64))) != 0;
-  }
+  auto get(size_t pos) const -> bool { return (data_[pos / 64] & (1ULL << (pos % 64))) != 0; }
 
   /**
    * @brief Get the pos address object
@@ -143,9 +141,7 @@ class SparseBitset {
    * @param pos The position of the bit to get
    * @return true if the bit is set, false otherwise
    */
-  auto get(size_t pos) const -> bool {
-    return set_bits_.find(pos) != set_bits_.end();
-  }
+  auto get(size_t pos) const -> bool { return set_bits_.find(pos) != set_bits_.end(); }
 
   /**
    * @brief Reset the bit at the specified position
@@ -236,8 +232,7 @@ class HierarchicalBitset {
 // todo test this class.
 template <typename DistanceType, typename IDType>
 struct LinearPool {
-  LinearPool(IDType n, int capacity)
-      : nb_(n), capacity_(capacity), data_(capacity_ + 1), vis_(n) {}
+  LinearPool(IDType n, int capacity) : nb_(n), capacity_(capacity), data_(capacity_ + 1), vis_(n) {}
 
   auto find_bsearch(DistanceType dist) -> int {
     int l = 0;
@@ -258,8 +253,7 @@ struct LinearPool {
       return false;
     }
     int lo = find_bsearch(dist);
-    std::memmove(&data_[lo + 1], &data_[lo],
-                 (size_ - lo) * sizeof(Neighbor<DistanceType, IDType>));
+    std::memmove(&data_[lo + 1], &data_[lo], (size_ - lo) * sizeof(Neighbor<IDType, DistanceType>));
     data_[lo] = {u, dist};
     if (size_ < capacity_) {
       size_++;
@@ -279,8 +273,7 @@ struct LinearPool {
       return;
     }
     int lo = find_bsearch(dist);
-    std::memmove(&data_[lo + 1], &data_[lo],
-                 (size_ - lo) * sizeof(Neighbor<IDType, DistanceType>));
+    std::memmove(&data_[lo + 1], &data_[lo], (size_ - lo) * sizeof(Neighbor<IDType, DistanceType>));
     data_[lo] = {u, dist};
   }
 
@@ -297,6 +290,7 @@ struct LinearPool {
   }
 
   auto has_next() const -> bool { return cur_ < size_; }
+  auto next_id() const -> IDType { return get_id(data_[cur_].id_); }
   auto id(IDType i) const -> IDType { return get_id(data_[i].id_); }
   auto dist(IDType i) const -> DistanceType { return data_[i].distance_; }
   auto size() const -> size_t { return size_; }
@@ -304,13 +298,13 @@ struct LinearPool {
 
   constexpr static int kMask = 2147483647;
   auto get_id(IDType id) const -> IDType { return id & kMask; }
+  // Need to assert IDType is uint32_t instead of uint64_t
   void set_checked(IDType &id) { id |= 1 << 31; }
   auto is_checked(IDType id) -> bool { return (id >> 31 & 1) != 0; }
+  auto is_full() -> bool { return size_ == capacity_; }
 
   size_t nb_, size_ = 0, cur_ = 0, capacity_;
-  std::vector<Neighbor<IDType, DistanceType>,
-              AlignAlloc<Neighbor<IDType, DistanceType>>>
-      data_;
+  std::vector<Neighbor<IDType, DistanceType>, AlignAlloc<Neighbor<IDType, DistanceType>>> data_;
   DynamicBitset vis_;
 };
 
