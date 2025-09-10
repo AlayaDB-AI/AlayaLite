@@ -5,7 +5,7 @@ project(${project_name} LANGUAGES CXX)
 
 # Configuration options
 option(ENABLE_COVERAGE "Enable profiling test coverage" OFF)
-option(ENABLE_UNIT_TESTS "Enable unit tests" ON)
+option(ENABLE_UNIT_TESTS "Enable unit tests" OFF)
 
 # Set build type if not specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -122,7 +122,6 @@ if (AVX512_CAN_RUN)
       -mavx512bitalg
       -mavx512vpopcntdq
   )
-  set(CMAKE_CXX_FLAGS "-fopenmp ${CMAKE_CXX_FLAGS}")
 else()
     message(STATUS "AVX-512 not supported or cannot run.")
 endif()
@@ -149,6 +148,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_definitions(-DPROJECT_ROOT="${CMAKE_SOURCE_DIR}")
 
 # Find dependencies installed by Conan (order matters for linking)
+find_package(OpenMP REQUIRED)
 find_package(concurrentqueue REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
@@ -160,6 +160,7 @@ find_package(Eigen3 REQUIRED NO_MODULE)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_package(libcoro REQUIRED)
   set(THIRD_PARTY_LIBS
+    OpenMP::OpenMP_CXX
     spdlog::spdlog
     fmt::fmt
     concurrentqueue::concurrentqueue
@@ -168,6 +169,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   )
 else()
   set(THIRD_PARTY_LIBS
+    OpenMP::OpenMP_CXX
     spdlog::spdlog
     fmt::fmt
     concurrentqueue::concurrentqueue

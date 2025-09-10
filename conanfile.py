@@ -27,6 +27,8 @@ class AlayaLiteConan(ConanFile):
         self.requires("eigen/3.4.0")
         if self.settings.os == "Linux":
             self.requires("libcoro/0.14.1")
+        if self.settings.os == "Macos":
+            self.requires("libomp/18.1.8")
 
     def configure(self):
         if self.settings.os == "Linux":
