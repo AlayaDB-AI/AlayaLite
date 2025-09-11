@@ -10,7 +10,6 @@ find_package(
   REQUIRED
 )
 
-
 add_library(${python_module_name} MODULE src/pybind.cpp)
 target_include_directories(${python_module_name} PRIVATE include)
 
