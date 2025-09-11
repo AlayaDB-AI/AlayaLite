@@ -97,15 +97,47 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Compilation options with platform-specific adjustments
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)  # Ensure PIC for shared libraries
+
+# Check AVX512 support
+include(CheckCXXSourceRuns)
+set(CMAKE_REQUIRED_FLAGS "-march=native")
+set(AVX512_RUN_CODE "
+#include <immintrin.h>
+int main() {
+    __m512 a = _mm512_set1_ps(1.0f);
+    return 0;
+}
+")
+
+check_cxx_source_runs("${AVX512_RUN_CODE}" AVX512_CAN_RUN)
+# RaBitQ optimization
+if (AVX512_CAN_RUN)
+  message(STATUS "Can use AVX512.")
+  add_compile_options(
+      -mfma
+      -mavx512f
+      -mavx512dq
+      -mavx512bw
+      -mavx512vl
+      -mavx512bitalg
+      -mavx512vpopcntdq
+  )
+else()
+    message(STATUS "AVX-512 not supported or cannot run.")
+endif()
+
 if(MSVC)
   # Windows MSVC specific flags
+  message(STATUS "Using MSVC compiler settings")
   set(CMAKE_CXX_FLAGS "/EHsc /utf-8 ${CMAKE_CXX_FLAGS}")  # Exception handling and UTF-8 support
   set(CMAKE_CXX_FLAGS_RELEASE "/O2 /DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG "/Zi /Od")
 else()
   # GCC/Clang flags
+  message(STATUS "Using GCC/Clang compiler settings")
   set(CMAKE_CXX_FLAGS "-Wall -Wextra ${CMAKE_CXX_FLAGS}")  # Enable common warnings
-  set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG")
+  # set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG")
+  set(CMAKE_CXX_FLAGS_RELEASE "-O3 -ffast-math -DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 endif()
 
@@ -116,27 +148,36 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 add_definitions(-DPROJECT_ROOT="${CMAKE_SOURCE_DIR}")
 
 # Find dependencies installed by Conan (order matters for linking)
+find_package(OpenMP REQUIRED)
 find_package(concurrentqueue REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 find_package(GTest REQUIRED)
+find_package(Eigen3 REQUIRED NO_MODULE)
 
 # Configure third-party libraries based on operating system
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   find_package(libcoro REQUIRED)
   set(THIRD_PARTY_LIBS
+    OpenMP::OpenMP_CXX
     spdlog::spdlog
     fmt::fmt
     concurrentqueue::concurrentqueue
     libcoro::libcoro
+    Eigen3::Eigen
   )
 else()
   set(THIRD_PARTY_LIBS
+    OpenMP::OpenMP_CXX
     spdlog::spdlog
     fmt::fmt
     concurrentqueue::concurrentqueue
+    Eigen3::Eigen
   )
+endif()
+
+if(ENABLE_UNIT_TESTS)
   set(GTEST_LIBS GTest::gtest GTest::gtest_main)
 endif()
 
