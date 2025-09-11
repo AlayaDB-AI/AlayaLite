@@ -1,5 +1,4 @@
-# Project configuration options and validation
-# This module defines project-wide options and validates their dependencies
+# Project configuration options and validation This module defines project-wide options and validates their dependencies
 
 # Configuration options
 option(ENABLE_UNIT_TESTS "Enable unit tests" OFF)
@@ -7,20 +6,54 @@ option(ENABLE_COVERAGE "Enable test coverage analysis (requires ENABLE_UNIT_TEST
 
 # Validate option dependencies
 if(ENABLE_COVERAGE AND NOT ENABLE_UNIT_TESTS)
-  message(WARNING "ENABLE_COVERAGE requires ENABLE_UNIT_TESTS. Enabling unit tests automatically.")
-  set(ENABLE_UNIT_TESTS ON CACHE BOOL "Enable unit tests" FORCE)
+  message(WARNING "ENABLE_COVERAGE requires ENABLE_UNIT_TESTS.")
+  set(ENABLE_UNIT_TESTS
+      ON
+      CACHE BOOL "Enable unit tests" FORCE
+  )
 endif()
 
 # Set build type if not specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+  set(CMAKE_BUILD_TYPE
+      Release
+      CACHE STRING "Build type" FORCE
+  )
   message(STATUS "Build type not specified, defaulting to Release")
 endif()
 
-
-# Print configuration summary
-message(STATUS "=========PROJECT CONFIGURATION===========")
-message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
-message(STATUS "Unit tests: ${ENABLE_UNIT_TESTS}")
-message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
-message(STATUS "========================================")
+# Print configuration summary Print comprehensive project information
+# ~~~
+message(STATUS "")
+message(STATUS "+===========================================================+")
+message(STATUS "|                  ${PROJECT_NAME} Build Configuration")
+message(STATUS "+===========================================================+")
+message(STATUS "| Build Information:")
+message(STATUS "|   • Build Type      : ${CMAKE_BUILD_TYPE}")
+message(STATUS "|   • C++ Standard    : C++${CMAKE_CXX_STANDARD}")
+message(STATUS "|   • Compiler        : ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
+message(STATUS "|   • CMake Version   : ${CMAKE_VERSION}")
+message(STATUS "|")
+message(STATUS "| Compiler Flags:")
+message(STATUS "|   • Common Flags    : ${CMAKE_CXX_FLAGS}")
+message(STATUS "|   • Release Flags   : ${CMAKE_CXX_FLAGS_Release}")
+message(STATUS "|   • Debug Flags     : ${CMAKE_CXX_FLAGS_Debug}")
+message(STATUS "|")
+message(STATUS "| Directory Structure:")
+message(STATUS "|   • Source Dir      : ${PROJECT_SOURCE_DIR}")
+message(STATUS "|   • Binary Dir      : ${PROJECT_BINARY_DIR}")
+message(STATUS "|   • Runtime Output  : ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
+message(STATUS "|")
+message(STATUS "| Features:")
+message(STATUS "|   • PIC Enabled     : ${CMAKE_POSITION_INDEPENDENT_CODE}")
+message(STATUS "|   • Export Commands : ${CMAKE_EXPORT_COMPILE_COMMANDS}")
+if(MSVC)
+  message(STATUS "|   • VS Toolset      : ${CMAKE_GENERATOR_TOOLSET}")
+endif()
+message(STATUS "|")
+message(STATUS "| Project Options:")
+message(STATUS "|   • Unit Tests      : ${ENABLE_UNIT_TESTS}")
+message(STATUS "|   • Code Coverage   : ${ENABLE_COVERAGE}")
+message(STATUS "+===========================================================+")
+message(STATUS "")
+# ~~~

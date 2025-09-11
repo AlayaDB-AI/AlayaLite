@@ -1,5 +1,5 @@
-# Conan configuration and dependency management
-# This module handles Conan integration, platform-specific settings, and dependency management
+# Conan configuration and dependency management This module handles Conan integration, platform-specific settings, and
+# dependency management
 
 message(STATUS "Configuring Conan and dependencies for platform: ${CMAKE_SYSTEM_NAME}")
 
@@ -27,11 +27,17 @@ if(APPLE)
   )
 
   # Reset sysroot: Conan may set it to an incorrect value
-  set(CMAKE_OSX_SYSROOT "${MACOSX_SDK_PATH}" CACHE STRING "macOS SDK path" FORCE)
+  set(CMAKE_OSX_SYSROOT
+      "${MACOSX_SDK_PATH}"
+      CACHE STRING "macOS SDK path" FORCE
+  )
   message(STATUS "Using macOS SDK: ${CMAKE_OSX_SYSROOT}")
 
   # Architecture support: Apple Silicon (M1/M2)
-  set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "Build architecture" FORCE)
+  set(CMAKE_OSX_ARCHITECTURES
+      "arm64"
+      CACHE STRING "Build architecture" FORCE
+  )
   message(STATUS "Target architecture: ${CMAKE_OSX_ARCHITECTURES}")
 
 elseif(WIN32)
@@ -74,7 +80,7 @@ elseif(WIN32)
   include(${CONAN_TOOLCHAIN_FILE})
   message(STATUS "Included Conan toolchain: ${CONAN_TOOLCHAIN_FILE}")
 
-# Linux/Unix configuration
+  # Linux/Unix configuration
 else()
   message(STATUS "Setting up Linux/Unix Conan configuration...")
 
@@ -105,11 +111,7 @@ find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 
 # Configure common third-party libraries
-set(COMMON_THIRD_PARTY_LIBS
-  spdlog::spdlog
-  fmt::fmt
-  concurrentqueue::concurrentqueue
-)
+set(COMMON_THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue)
 
 # Add platform-specific libraries
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -121,31 +123,19 @@ endif()
 # Set final third-party libraries list
 set(THIRD_PARTY_LIBS ${COMMON_THIRD_PARTY_LIBS})
 
+message(STATUS "================= CONAN DONE ==================")
+
 # Configure testing framework
 if(ENABLE_UNIT_TESTS)
-  message(STATUS "Configuring testing framework...")
   find_package(GTest REQUIRED)
-  set(GTEST_LIBS
-    GTest::gtest
-    GTest::gtest_main
-  )
-  message(STATUS "Unit tests: ENABLED - GTest configured")
+  set(GTEST_LIBS GTest::gtest GTest::gtest_main)
+  message(STATUS "UNIT TEST    : ENABLED - GTest configured")
 else()
-  message(STATUS "Unit tests: DISABLED - Skipping GTest configuration")
+  message(STATUS "UNIT TEST    : DISABLED - Skipping GTest configuration")
 endif()
 
-if (ENABLE_COVERAGE)
-  message(STATUS "Code coverage: ENABLED - Coverage flags will be applied to tests")
+if(ENABLE_COVERAGE)
+  message(STATUS "CODECOV TEST : ENABLED - Coverage flags will be applied to tests")
 else()
-  message(STATUS "Code coverage: DISABLED")
+  message(STATUS "CODECOV TEST : DISABLED")
 endif()
-
-# Print dependency summary
-message(STATUS "=========CONAN & DEPENDENCY SUMMARY===========")
-message(STATUS "Third-party libraries: ${THIRD_PARTY_LIBS}")
-if(ENABLE_UNIT_TESTS)
-  message(STATUS "Test libraries: ${GTEST_LIBS}")
-endif()
-message(STATUS "=============================================")
-
-message(STATUS "Conan configuration and dependency management completed successfully")
