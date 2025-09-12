@@ -13,7 +13,7 @@ if(APPLE)
 
   execute_process(
     COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${PROJECT_BINARY_DIR}/generators "Macos"
-    RESULT_VARIABLE conan_result
+            ${CMAKE_BUILD_TYPE} RESULT_VARIABLE conan_result
   )
 
   # In macOS, the toolchain must be included between execute_process calls
@@ -50,6 +50,7 @@ elseif(WIN32)
   # Execute Conan with proper Windows command handling
   execute_process(
     COMMAND cmd /c "${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook_win.bat" "${CONAN_GENERATORS_DIR}" "Windows"
+            ${CMAKE_BUILD_TYPE}
     RESULT_VARIABLE conan_result
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     OUTPUT_VARIABLE conan_output
@@ -85,8 +86,8 @@ else()
   message(STATUS "Setting up Linux/Unix Conan configuration...")
 
   execute_process(
-    COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${PROJECT_BINARY_DIR}/generators
-    RESULT_VARIABLE conan_result
+    COMMAND bash ${PROJECT_SOURCE_DIR}/scripts/conan_build/conan_hook.sh ${PROJECT_BINARY_DIR}/generators "Linux"
+            ${CMAKE_BUILD_TYPE} RESULT_VARIABLE conan_result
   )
   include("${PROJECT_BINARY_DIR}/generators/conan_toolchain.cmake")
 endif()

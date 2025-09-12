@@ -32,6 +32,9 @@ target_include_directories(
 target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 message(STATUS "Main target '${PROJECT_NAME}' configured as interface library")
 
+# Enable CTest for testing framework
+include(CTest)
+
 # Include subdirectories based on configuration
 if(ENABLE_UNIT_TESTS)
   add_subdirectory(tests)

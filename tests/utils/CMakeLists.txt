@@ -8,15 +8,7 @@ set(UTILS_TEST_SRC
 
 add_executable(utils_test ${UTILS_TEST_SRC})
 
-if(ENABLE_COVERAGE)
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    target_compile_options(utils_test PRIVATE --coverage -O0 -g)
-    target_link_libraries(utils_test PRIVATE gcov ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
-  elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(utils_test PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-    target_link_options(utils_test PRIVATE -fprofile-instr-generate)
-    target_link_libraries(utils_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
-  endif()
-else()
-  target_link_libraries(utils_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
-endif()
+target_link_libraries(utils_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+
+# Add test to CTest
+add_test(NAME UtilsTest COMMAND utils_test)
