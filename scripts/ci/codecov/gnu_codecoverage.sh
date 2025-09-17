@@ -3,10 +3,6 @@
 set -e
 set -x
 
-gcc-13 --version
-gcov-13 --version
-lcov --version
-
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 ROOT_DIR="$(realpath "$SCRIPT_DIR/../../..")"
 BUILD_DIR="${ROOT_DIR}/build"
@@ -18,7 +14,7 @@ cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_UNIT_TESTS=ON -DENABLE_COVERAGE=ON -D
 make -j
 
 # run the tests
-ctest --verbose --output-on-failure -R utils_test
+ctest --verbose --output-on-failure
 lcov  --capture \
      --ignore-errors mismatch \
      --directory ${BUILD_DIR} \
@@ -28,6 +24,7 @@ lcov  --capture \
 lcov --remove ${BUILD_DIR}/coverage_all.info \
      '*/.conan2/*' \
      '*/usr/include/*' \
+     '*/tests/*' \
      --output-file ${ROOT_DIR}/coverage_c++.info
 
 # genhtml ${BUILD_DIR}/coverage.info -o ${BUILD_DIR}/coverage_html
