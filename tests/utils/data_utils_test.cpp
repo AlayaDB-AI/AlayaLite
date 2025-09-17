@@ -19,6 +19,7 @@
 #include "space/distance/dist_ip.hpp"
 
 namespace alaya {
+
 TEST(NormalizationTest, simple) {
   std::vector<float> x = {1.0F, 2.0F, 3.0F};
   std::vector<float> y = {3.0F, 4.0F, 3.0F};
@@ -31,4 +32,5 @@ TEST(NormalizationTest, simple) {
 
   EXPECT_FLOAT_EQ(actual, dist);
 }
+
 }  // namespace alaya

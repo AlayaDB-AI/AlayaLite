@@ -121,7 +121,8 @@ TEST_F(FusionGraphSearchTest, SimpleSearchTest) {
   size_t ef = 100;
   std::string index_type = "FUSION_GRAPH";
 
-  std::filesystem::path index_file = fmt::format("{}_M{}.{}", dataset_->get_dataset_name(), kM, index_type);
+  std::filesystem::path index_file =
+      fmt::format("{}_M{}.{}", dataset_->get_dataset_name(), kM, index_type);
   std::shared_ptr<alaya::RawSpace<>> space =
       std::make_shared<alaya::RawSpace<>>(points_num_, dim_, MetricType::L2);
   space->fit(data_.data(), points_num_);

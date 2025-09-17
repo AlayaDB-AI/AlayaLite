@@ -39,3 +39,4 @@ data/*
 # codecov
 .coverage
 coverage.xml
+coverage_c++.info
