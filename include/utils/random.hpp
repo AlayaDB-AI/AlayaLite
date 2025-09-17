@@ -17,9 +17,20 @@
 #pragma once
 #include <algorithm>
 #include <random>
+#include <thread>
 #include <vector>
 
 namespace alaya {
+
+// thread-safe random integer generator
+template <typename IDType>
+inline auto rand_integer(IDType min, IDType max) -> IDType {
+  static thread_local std::mt19937 generator(
+      std::random_device{}() + std::hash<std::thread::id>()(std::this_thread::get_id()));
+  std::uniform_int_distribution<IDType> distribution(min, max);
+  return distribution(generator);
+}
+
 template <typename IDType>
 inline void gen_random(std::mt19937 &rng, IDType *addr, const int size, const int n) {
   for (int i = 0; i < size; ++i) {

@@ -8,6 +8,35 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Ensure position-independent code for shared libraries
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Check AVX512 support
+include(CheckCXXSourceRuns)
+set(CMAKE_REQUIRED_FLAGS "-march=native")
+set(AVX512_RUN_CODE
+    "
+#include <immintrin.h>
+int main() {
+    __m512 a = _mm512_set1_ps(1.0f);
+    return 0;
+}
+"
+)
+check_cxx_source_runs("${AVX512_RUN_CODE}" AVX512_CAN_RUN)
+# RaBitQ optimization
+if(AVX512_CAN_RUN)
+  message(STATUS "Can use AVX512.")
+  add_compile_options(
+    -mfma
+    -mavx512f
+    -mavx512dq
+    -mavx512bw
+    -mavx512vl
+    -mavx512bitalg
+    -mavx512vpopcntdq
+  )
+else()
+  message(STATUS "AVX-512 not supported or cannot run.")
+endif()
+
 # Platform-specific compiler flags
 if(MSVC)
   # Windows MSVC specific flags

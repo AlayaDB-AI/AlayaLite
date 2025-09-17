@@ -71,4 +71,23 @@ auto calc_recall(std::vector<IDType> &res, std::vector<IDType> &gt, uint32_t top
   return static_cast<float>(cnt) / res.size();
 }
 
+template <typename T>
+auto horizontal_avg(const std::vector<std::vector<T>> &data) -> std::vector<T> {
+  size_t rows = data.size();
+  size_t cols = data[0].size();
+
+  std::vector<T> avg(cols, 0);
+  for (auto &row : data) {
+    for (size_t j = 0; j < cols; ++j) {
+      avg[j] += row[j];
+    }
+  }
+
+  for (size_t j = 0; j < cols; ++j) {
+    avg[j] /= rows;
+  }
+
+  return avg;
+}
+
 }  // namespace alaya
