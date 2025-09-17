@@ -3,6 +3,10 @@ codecov :
   notify:
     require_ci_to_pass: yes
 
+ignore  :
+- tests
+- '*/tests/*'
+
 coverage:
   precision: 2
   round: down
@@ -10,7 +14,11 @@ coverage:
 
   status:
     project: yes
-    patch: yes
+    patch:
+      default:
+        target: 90%
+        threshold: 5%
+
     changes: no
 
 parsers :

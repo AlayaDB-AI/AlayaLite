@@ -27,4 +27,6 @@ lcov --remove ${BUILD_DIR}/coverage_all.info \
      '*/tests/*' \
      --output-file ${ROOT_DIR}/coverage_c++.info
 
+rm -rf ${BUILD_DIR}/coverage_all.info
+
 # genhtml ${BUILD_DIR}/coverage.info -o ${BUILD_DIR}/coverage_html

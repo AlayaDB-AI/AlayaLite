@@ -1,6 +1,11 @@
 ---
 name       : alayalite cache
-description: ''
+description: Cache Conan data with build type support
+inputs     :
+  build-type:
+    description: CMAKE_BUILD_TYPE (Debug, Release, etc.)
+    required: false
+    default: Release
 runs       :
   using: composite
   steps:
@@ -8,14 +13,7 @@ runs       :
     uses: actions/cache@v4
     with:
       path: ~/.conan2
-      key: conan-${{ runner.os }}-${{ hashFiles('conanfile.*') }}
+      key: conan-${{ runner.os }}-${{ inputs.build-type }}-${{ hashFiles('**/conanfile.py') }}
       restore-keys: |
+        conan-${{ runner.os }}-${{ inputs.build-type }}-
         conan-${{ runner.os }}-
-
-  - name: Cache uv packages
-    uses: actions/cache@v4
-    with:
-      path: ~/.cache/uv
-      key: uv-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
-      restore-keys: |
-        uv-${{ runner.os }}-
