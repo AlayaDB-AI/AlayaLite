@@ -106,13 +106,21 @@ message(STATUS "Conan platform configuration completed successfully")
 message(STATUS "Configuring project dependencies...")
 
 # Find common dependencies installed by Conan (order matters for linking)
+find_package(OpenMP REQUIRED)
 find_package(concurrentqueue REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
+find_package(Eigen3 REQUIRED NO_MODULE)
 
 # Configure common third-party libraries
-set(COMMON_THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue)
+set(COMMON_THIRD_PARTY_LIBS
+    OpenMP::OpenMP_CXX
+    spdlog::spdlog
+    fmt::fmt
+    concurrentqueue::concurrentqueue
+    Eigen3::Eigen
+)
 
 # Add platform-specific libraries
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
