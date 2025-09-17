@@ -1,8 +1,5 @@
-set(STORAGE_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/sequential_storage_test.cpp)
-
-add_executable(storage_test ${STORAGE_TEST_SRC})
+add_executable(storage_test ${CMAKE_CURRENT_SOURCE_DIR}/sequential_storage_test.cpp)
 
 target_link_libraries(storage_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 
-# Add test to CTest
-add_test(NAME StorageTest COMMAND storage_test)
+add_test(NAME storage_test_sequential_storage COMMAND $<TARGET_FILE:storage_test>)

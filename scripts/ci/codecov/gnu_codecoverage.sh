@@ -4,18 +4,25 @@ set -e
 set -x
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 ROOT_DIR="$(realpath "$SCRIPT_DIR/../../..")"
+BUILD_DIR="${ROOT_DIR}/build"
 
-# now only test UtilsTest
-cd ${ROOT_DIR}/build
+# rebuild the project
+rm -rf ${BUILD_DIR} && mkdir -p ${BUILD_DIR} && cd ${BUILD_DIR}
+cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_UNIT_TESTS=ON -DENABLE_COVERAGE=ON
+make -j
 
-ctest -R UtilsTest --verbose --output-on-failure
-lcov -c -d ${ROOT_DIR}/build -o ${ROOT_DIR}/build/coverage_all.info
-lcov --remove ${ROOT_DIR}/build/coverage_all.info \
+# run the tests
+ctest --verbose --output-on-failure -R utils_test
+lcov  --capture \
+     --directory ${BUILD_DIR} \
+     --output-file ${BUILD_DIR}/coverage_all.info \
+
+lcov --remove ${BUILD_DIR}/coverage_all.info \
      '*/.conan2/*' \
      '*/gtest*' \
      '*/fmt*' \
      '*/usr/include/*' \
      '*/usr/local/include/*' \
-     -o ${ROOT_DIR}/build/coverage.info
+     --output-file ${ROOT_DIR}/coverage_c++.info
 
-genhtml ${ROOT_DIR}/build/coverage.info -o ${ROOT_DIR}/build/coverage_html
+# genhtml ${BUILD_DIR}/coverage.info -o ${BUILD_DIR}/coverage_html

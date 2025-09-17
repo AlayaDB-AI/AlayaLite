@@ -26,7 +26,7 @@
 #include "executor/jobs/graph_search_job.hpp"
 #include "index/graph/graph.hpp"
 #include "space/raw_space.hpp"
-#include "utils/io_utils.hpp"
+#include "utils/dataset_utils.hpp"
 #include "utils/timer.hpp"
 
 namespace alaya {
@@ -34,6 +34,7 @@ class NSGTest : public ::testing::Test {
  protected:
   // NOLINTBEGIN
   void SetUp() {
+    // TODO: Abstracted into a rand test data class for easy reuse
     // NOLINTEND
     max_node_ = 1000;
     dim_ = 1024;
@@ -77,32 +78,30 @@ TEST_F(NSGTest, BuildGraphTest) {
 class NSGSearchTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    alaya::load_fvecs(data_file_.c_str(), data_, points_num_, dim_);
+    std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
+    dataset_ = std::make_unique<SIFTTestData>(data_dir.string());
+    dataset_->ensure_dataset();
 
-    alaya::load_fvecs(query_file_.c_str(), queries_, query_num_, query_dim_);
-    assert(dim_ == query_dim_);
+    data_ = dataset_->get_data();
+    queries_ = dataset_->get_queries();
+    answers_ = dataset_->get_answers();
 
-    alaya::load_ivecs(gt_file_.c_str(), answers_, ans_num_, gt_col_);
-    assert(ans_num_ == query_num_);
+    points_num_ = dataset_->get_data_num();
+    query_num_ = dataset_->get_query_num();
+
+    dim_ = dataset_->get_dim();
+    gt_col_ = dataset_->get_ans_dim();
   }
 
   void TearDown() override {}
 
-  std::filesystem::path dir_name_ = std::filesystem::current_path() / "siftsmall";
-  std::filesystem::path data_file_ = dir_name_ / "siftsmall_base.fvecs";
-  std::filesystem::path query_file_ = dir_name_ / "siftsmall_query.fvecs";
-  std::filesystem::path gt_file_ = dir_name_ / "siftsmall_groundtruth.ivecs";
-
+  std::unique_ptr<TestDatasetBase> dataset_;
   std::vector<float> data_;
-  uint32_t points_num_;
-  uint32_t dim_;
-
   std::vector<float> queries_;
-  uint32_t query_num_;
-  uint32_t query_dim_;
-
   std::vector<uint32_t> answers_;
-  uint32_t ans_num_;
+  uint32_t dim_;
+  uint32_t points_num_;
+  uint32_t query_num_;
   uint32_t gt_col_;
 };
 
@@ -112,7 +111,7 @@ TEST_F(NSGSearchTest, SimpleSearchTest) {
   size_t ef = 10;
   std::string index_type = "NSG";
 
-  std::filesystem::path index_file = fmt::format("{}_M{}.{}", dir_name_.string(), kM, index_type);
+  std::filesystem::path index_file = fmt::format("{}_M{}.{}", dataset_->get_dataset_name(), kM, index_type);
   std::shared_ptr<alaya::RawSpace<>> space =
       std::make_shared<alaya::RawSpace<>>(points_num_, dim_, MetricType::L2);
   space->fit(data_.data(), points_num_);
@@ -150,7 +149,7 @@ TEST_F(NSGSearchTest, SimpleSearchTest) {
   auto search_knn = [&](int i) {
     for (; i < query_num_; i += kSearchThreadNum) {
       std::vector<uint32_t> ids(topk);
-      auto cur_query = queries_.data() + i * query_dim_;
+      auto cur_query = queries_.data() + i * dim_;
       task_generator->search_solo(cur_query, topk, ids.data(), ef);
 
       auto id_set = std::set(ids.begin(), ids.end());

@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <memory>
 #include <string_view>
+#include <thread>
 
 #include "index/graph/graph.hpp"
 #include "index/graph/hnsw/hnsw_builder.hpp"
@@ -31,6 +32,7 @@ class HNSWTest : public ::testing::Test {
  protected:
   // NOLINTBEGIN
   void SetUp() {
+    // TODO: Abstracted into a rand test data class for easy reuse
     // NOLINTEND
     max_node_ = 100;
     dim_ = 1024;
@@ -57,6 +59,7 @@ class HNSWTest : public ::testing::Test {
     }
   }
 
+  uint32_t max_thread_num_ = std::thread::hardware_concurrency();
   uint32_t max_node_;               ///< The number of vector data.
   uint32_t dim_;                    ///< The dim of vector data.
   std::string_view metric_ = "L2";  /// The metric type for building graph.
@@ -67,7 +70,7 @@ class HNSWTest : public ::testing::Test {
 };
 
 TEST_F(HNSWTest, BuildGraphTest) {
-  auto built_graph = hnsw_->build_graph();
+  auto built_graph = hnsw_->build_graph(max_thread_num_);
   built_graph->save(filename_);
 
   auto graph = std::make_unique<Graph<uint32_t>>(max_node_, hnsw_->max_nbrs_underlay_);
@@ -91,7 +94,7 @@ TEST_F(HNSWTest, BuildGraphTest) {
 }
 
 TEST_F(HNSWTest, MultipleThreadBuildGraphTest) {
-  auto hnsw_graph = hnsw_->build_graph(96);
+  auto hnsw_graph = hnsw_->build_graph(max_thread_num_);
   hnsw_graph->save(filename_);
 
   auto graph = std::make_unique<Graph<uint32_t>>(max_node_, hnsw_->max_nbrs_underlay_);

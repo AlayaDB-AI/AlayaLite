@@ -33,6 +33,7 @@
 #include "space/distance/dist_l2.hpp"
 #include "space/raw_space.hpp"
 #include "space/sq4_space.hpp"
+#include "utils/dataset_utils.hpp"
 #include "utils/evaluate.hpp"
 #include "utils/io_utils.hpp"
 #include "utils/log.hpp"
@@ -43,36 +44,30 @@ namespace alaya {
 class UpdateTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    if (!std::filesystem::exists(dir_name_)) {
-      throw std::invalid_argument("The dataset is not exist.");
-    }
+    std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
+    dataset_ = std::make_unique<SIFTTestData>(data_dir.string());
+    dataset_->ensure_dataset();
 
-    alaya::load_fvecs(data_file_, data_, points_num_, dim_);
+    data_ = dataset_->get_data();
+    queries_ = dataset_->get_queries();
+    answers_ = dataset_->get_answers();
 
-    alaya::load_fvecs(query_file_, queries_, query_num_, query_dim_);
-    assert(dim_ == query_dim_);
+    points_num_ = dataset_->get_data_num();
+    query_num_ = dataset_->get_query_num();
 
-    alaya::load_ivecs(gt_file_, answers_, ans_num_, gt_col_);
-    assert(ans_num_ == query_num_);
+    dim_ = dataset_->get_dim();
+    gt_col_ = dataset_->get_ans_dim();
   }
 
   void TearDown() override {}
 
-  std::filesystem::path dir_name_ = std::filesystem::current_path() / "siftsmall";
-  std::filesystem::path data_file_ = dir_name_ / "siftsmall_base.fvecs";
-  std::filesystem::path query_file_ = dir_name_ / "siftsmall_query.fvecs";
-  std::filesystem::path gt_file_ = dir_name_ / "siftsmall_groundtruth.ivecs";
-
+  std::unique_ptr<TestDatasetBase> dataset_;
   std::vector<float> data_;
-  uint32_t points_num_;
-  uint32_t dim_;
-
   std::vector<float> queries_;
-  uint32_t query_num_;
-  uint32_t query_dim_;
-
   std::vector<uint32_t> answers_;
-  uint32_t ans_num_;
+  uint32_t dim_;
+  uint32_t points_num_;
+  uint32_t query_num_;
   uint32_t gt_col_;
 
   std::unordered_set<uint32_t> point_set_;  ///< The set of points that has been inserted.
@@ -106,7 +101,7 @@ TEST_F(UpdateTest, HalfInsertTest) {
   auto search_job = std::make_shared<alaya::GraphSearchJob<alaya::RawSpace<>>>(space, hnsw_graph);
   std::vector<uint32_t> ids(query_num_ * topk);
   for (int i = 0; i < query_num_; i++) {
-    auto cur_query = queries_.data() + i * query_dim_;
+    auto cur_query = queries_.data() + i * dim_;
     search_job->search_solo(cur_query, topk, ids.data() + i * topk, 30);
   }
 
@@ -121,7 +116,7 @@ TEST_F(UpdateTest, HalfInsertTest) {
   }
 
   for (uint32_t i = 0; i < query_num_; i++) {
-    auto cur_query = queries_.data() + i * query_dim_;
+    auto cur_query = queries_.data() + i * dim_;
     search_job->search_solo(cur_query, topk, ids.data() + i * topk, 50);
   }
 
@@ -133,7 +128,7 @@ TEST_F(UpdateTest, HalfInsertTest) {
     update_job->remove(i);
   }
   for (uint32_t i = 0; i < query_num_; i++) {
-    auto cur_query = queries_.data() + i * query_dim_;
+    auto cur_query = queries_.data() + i * dim_;
     search_job->search_solo_updated(cur_query, topk, ids.data() + i * topk, 50);
   }
   auto recall_after_delete = calc_recall(ids, full_gt, topk);

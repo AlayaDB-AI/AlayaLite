@@ -105,14 +105,20 @@ jobs       :
       uses: astral-sh/setup-uv@v5
 
     - name: Install dependencies
-      run: pip install pytest pytest-cov
+      run: pip install pytest pytest-cov && apt-get install -y lcov gcovr
 
-    - name: Run tests
+    - name: Run python code coverage
       run: uv run pytest --cov --cov-branch --cov-report=xml
+
+    - name: Run c++ code coverage
+      run: bash scripts/ci/codecov/gnu_codecoverage.sh
 
     - name: Upload results to Codecov
       uses: codecov/codecov-action@v5
       with:
+        files: |
+          coverage.xml
+          coverage_c++.info
         token: ${{ secrets.CODECOV_TOKEN }}
 
   cpp-lint-check:

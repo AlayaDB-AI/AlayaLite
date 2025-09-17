@@ -1,14 +1,17 @@
-set(INDEX_TEST_SRC
-    ${CMAKE_CURRENT_SOURCE_DIR}/fusion_graph_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/graph_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/hnsw_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/nndescent_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/nsg_test.cpp
-)
+add_executable(fusion_graph_test ${CMAKE_CURRENT_SOURCE_DIR}/fusion_graph_test.cpp)
+add_executable(graph_test ${CMAKE_CURRENT_SOURCE_DIR}/graph_test.cpp)
+add_executable(hnsw_test ${CMAKE_CURRENT_SOURCE_DIR}/hnsw_test.cpp)
+add_executable(nndescent_test ${CMAKE_CURRENT_SOURCE_DIR}/nndescent_test.cpp)
+add_executable(nsg_test ${CMAKE_CURRENT_SOURCE_DIR}/nsg_test.cpp)
 
-add_executable(index_test ${INDEX_TEST_SRC})
+target_link_libraries(fusion_graph_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(graph_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(hnsw_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(nndescent_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(nsg_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 
-target_link_libraries(index_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
-
-# Add test to CTest
-add_test(NAME IndexTest COMMAND index_test)
+add_test(NAME index_test_fusion_graph COMMAND $<TARGET_FILE:fusion_graph_test>)
+add_test(NAME index_test_graph COMMAND $<TARGET_FILE:graph_test>)
+add_test(NAME index_test_hnsw COMMAND $<TARGET_FILE:hnsw_test>)
+add_test(NAME index_test_nndescent COMMAND $<TARGET_FILE:nndescent_test>)
+add_test(NAME index_test_nsg COMMAND $<TARGET_FILE:nsg_test>)

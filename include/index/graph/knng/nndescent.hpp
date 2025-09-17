@@ -251,6 +251,7 @@ struct NndescentImpl {
   void join() {
     auto t1 = Timer();
 
+    // TODO: Use the thread_num parameter, not the hardware_concurrency
     unsigned int num_cores = std::thread::hardware_concurrency();
     ThreadPool thread_pool(num_cores);
 
@@ -291,6 +292,7 @@ struct NndescentImpl {
   void update() {
     auto t1 = Timer();
 
+    // TODO: Use the thread_num parameter, not the hardware_concurrency
     unsigned int num_cores = std::thread::hardware_concurrency();
     ThreadPool thread_pool(num_cores);
 
@@ -422,6 +424,7 @@ struct NndescentImpl {
   void gen_eval_gt(const std::vector<IDType> &eval_set, std::vector<std::vector<IDType>> &eval_gt) {
     auto t1 = Timer();
 
+    // TODO: Use the thread_num parameter, not the hardware_concurrency
     unsigned int num_cores = std::thread::hardware_concurrency();
     ThreadPool thread_pool(num_cores);
     auto per_num_cores = (eval_set.size() + num_cores - 1) / num_cores;

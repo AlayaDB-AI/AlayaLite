@@ -1,17 +1,26 @@
-set(EXECUTOR_TEST_SRC
-    ${CMAKE_CURRENT_SOURCE_DIR}/coro_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/search_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/update_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mutex_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/scheduler_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/task_queue_test.cpp
-    # ${CMAKE_CURRENT_SOURCE_DIR}/task_promise_base_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/worker_test.cpp
-)
+# Create individual test executables
+add_executable(coro_test ${CMAKE_CURRENT_SOURCE_DIR}/coro_test.cpp)
+add_executable(search_test ${CMAKE_CURRENT_SOURCE_DIR}/search_test.cpp)
+add_executable(update_test ${CMAKE_CURRENT_SOURCE_DIR}/update_test.cpp)
+add_executable(mutex_test ${CMAKE_CURRENT_SOURCE_DIR}/mutex_test.cpp)
+add_executable(scheduler_test ${CMAKE_CURRENT_SOURCE_DIR}/scheduler_test.cpp)
+add_executable(task_queue_test ${CMAKE_CURRENT_SOURCE_DIR}/task_queue_test.cpp)
+add_executable(worker_test ${CMAKE_CURRENT_SOURCE_DIR}/worker_test.cpp)
 
-add_executable(executor_test ${EXECUTOR_TEST_SRC})
+# Link libraries for each test
+target_link_libraries(coro_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(search_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(update_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(mutex_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(scheduler_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(task_queue_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(worker_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 
-target_link_libraries(executor_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
-
-# Add test to CTest
-add_test(NAME ExecutorTest COMMAND executor_test)
+# Generator expressions ensure cross-platform compatibility.
+add_test(NAME executor_test_coro COMMAND $<TARGET_FILE:coro_test>)
+add_test(NAME executor_test_search COMMAND $<TARGET_FILE:search_test>)
+add_test(NAME executor_test_update COMMAND $<TARGET_FILE:update_test>)
+add_test(NAME executor_test_mutex COMMAND $<TARGET_FILE:mutex_test>)
+add_test(NAME executor_test_scheduler COMMAND $<TARGET_FILE:scheduler_test>)
+add_test(NAME executor_test_task_queue COMMAND $<TARGET_FILE:task_queue_test>)
+add_test(NAME executor_test_worker COMMAND $<TARGET_FILE:worker_test>)
