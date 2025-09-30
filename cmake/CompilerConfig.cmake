@@ -9,21 +9,19 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Check AVX512 support
-include(CheckCXXSourceRuns)
-set(CMAKE_REQUIRED_FLAGS "-march=native")
-set(AVX512_RUN_CODE
-    "
-#include <immintrin.h>
-int main() {
-    __m512 a = _mm512_set1_ps(1.0f);
-    return 0;
-}
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_FLAGS "-mavx512f")
+check_cxx_source_compiles(
+  "
+    #include <immintrin.h>
+    int main() { __m512 a = _mm512_set1_ps(1.0f); return 0; }
 "
+  AVX512F_SUPPORTED
 )
-check_cxx_source_runs("${AVX512_RUN_CODE}" AVX512_CAN_RUN)
+
 # RaBitQ optimization
-if(AVX512_CAN_RUN)
-  message(STATUS "Can use AVX512.")
+if(AVX512F_SUPPORTED)
+  message(STATUS "AVX-512F supported, enabling optimizations")
   add_compile_options(
     -mfma
     -mavx512f
@@ -42,6 +40,7 @@ if(MSVC)
   # Windows MSVC specific flags
   message(STATUS "Configuring for MSVC compiler")
   # Exception handling and UTF-8 support
+  set(CMAKE_CXX_FLAGS "/openmp ${CMAKE_CXX_FLAGS}") # OpenMP support
   set(CMAKE_CXX_FLAGS "/EHsc /utf-8 ${CMAKE_CXX_FLAGS}")
   set(CMAKE_CXX_FLAGS_RELEASE "/O2 /DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG "/Zi /Od")
@@ -55,6 +54,7 @@ if(MSVC)
 else()
   # GCC/Clang flags
   message(STATUS "Configuring for GCC/Clang compiler")
+  set(CMAKE_CXX_FLAGS "-fopenmp ${CMAKE_CXX_FLAGS}") # OpenMP support
   set(CMAKE_CXX_FLAGS "-Wall -Wextra ${CMAKE_CXX_FLAGS}") # Enable common
   set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")

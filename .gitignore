@@ -40,3 +40,8 @@ data/*
 .coverage
 coverage.xml
 coverage_c++.info
+
+# perf
+perf.data
+perf.data.old
+flamegraph.svg

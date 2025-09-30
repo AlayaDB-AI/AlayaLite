@@ -17,6 +17,7 @@
 #pragma once
 
 #include <ctime>
+#include <stdexcept>
 #include <type_traits>
 
 // NOLINTBEGIN
@@ -37,6 +38,9 @@ inline size_t ceil_log2(size_t x) {
 
 template <typename T>
 constexpr T ceil_round_up(T x, T divisor) {
+  if (divisor <= 0) {
+    throw std::invalid_argument("Invalid divisor! Divisor input should be greater than 0.");
+  }
   static_assert(std::is_integral_v<T>, "T must be an integral type");
   return (x / divisor) + static_cast<T>((x % divisor) != 0);
 }

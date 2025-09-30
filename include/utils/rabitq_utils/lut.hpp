@@ -35,24 +35,25 @@ inline void data_range(const T *__restrict__ vec0, size_t dim, T &lo, T &hi) {
 
 template <typename T>
 inline void scalar_quantize_normal(
-    T *__restrict__ result, const float *__restrict__ vec0, size_t dim, float lo,
-    float delta) {  // normal implementation when AVX512F is not available
-  float one_over_delta = 1.0F / delta;
+    T *__restrict__ result, const T *__restrict__ vec0, size_t dim, T lo,
+    T delta) {  // normal implementation when AVX512F is not available
+  T one_over_delta = 1.0F / delta;
 
   // vec0:lut_float, result:lut_
-  ConstRowMajorArrayMap<float> v0(vec0, 1, static_cast<long>(dim));  // NOLINT
+  ConstRowMajorArrayMap<T> v0(vec0, 1, static_cast<long>(dim));  // NOLINT
   RowMajorArrayMap<T> res(result, 1, dim);
 
   // round to nearest integer, then cast to integer
   res = ((v0 - lo) * one_over_delta).round().template cast<T>();
 }
 
-inline void scalar_quantize_optimized(uint8_t *__restrict__ result, const float *__restrict__ vec0,
-                                      size_t dim, float lo, float delta) {
+template <typename T>
+inline void scalar_quantize_optimized(uint8_t *__restrict__ result, const T *__restrict__ vec0,
+                                      size_t dim, T lo, T delta) {
 #if defined(__AVX512F__)
   size_t mul16 = dim - (dim & 0b1111);
   size_t i = 0;
-  float one_over_delta = 1 / delta;
+  T one_over_delta = 1 / delta;
   auto lo512 = _mm512_set1_ps(lo);
   auto od512 = _mm512_set1_ps(one_over_delta);
   for (; i < mul16; i += 16) {
@@ -71,9 +72,9 @@ inline void scalar_quantize_optimized(uint8_t *__restrict__ result, const float 
 
 template <typename T>
 class Lut {
-  // split [vl_lut_f,vr_lut_f] into 2^(kNumBits) parts and use the boundaries to represent the lookup results
+  // split [vl_lut_f,vr_lut_f] into 2^(kNumBits) parts and use the boundaries to represent the
+  // lookup results
   static constexpr size_t kNumBits = 8;
-  static_assert(std::is_floating_point_v<T>, "T must be an floating type in Lut");
 
  private:
   size_t table_length_ = 0;
@@ -85,8 +86,12 @@ class Lut {
   explicit Lut() = default;
   explicit Lut(const T *rotated_query, size_t padded_dim)
       : table_length_(padded_dim << 2), lut_(table_length_) {
+    if constexpr (!std::is_floating_point_v<T>) {
+      throw std::invalid_argument("Data type must be a floating point type!");
+    }
+
     // quantize float lut
-    std::vector<float> lut_float(
+    std::vector<T> lut_float(
         table_length_);  // padded_dim/4 batch * 16 combination/batch => length = padded_dim*4
     fastscan::pack_lut(padded_dim, rotated_query, lut_float.data());
     T vl_lut_f;  // min val of lut_float
@@ -94,13 +99,13 @@ class Lut {
     data_range(lut_float.data(), table_length_, vl_lut_f, vr_lut_f);
 
     delta_ = (vr_lut_f - vl_lut_f) / ((1 << kNumBits) - 1);
-    // Here, 'the inner product (float) of every 4 dimensions from <x_b, P^(-1)·qr>' is quantized into a
-    // knumBits-bit integer nth_segment. And it can be recovered to the nearest quantization boundary using:
-    // vl_lut_f + nth_segment * delta
+    // Here, 'the inner product (float) of every 4 dimensions from <x_b, P^(-1)·qr>' is quantized
+    // into a knumBits-bit integer nth_segment. And it can be recovered to the nearest quantization
+    // boundary using: vl_lut_f + nth_segment * delta
     scalar_quantize_optimized(lut_.data(), lut_float.data(), table_length_, vl_lut_f, delta_);
 
     size_t num_table = table_length_ / 16;  // = padded_dim/4, the number of nth_segment
-    sum_vl_lut_f_ = vl_lut_f * static_cast<float>(num_table);
+    sum_vl_lut_f_ = vl_lut_f * static_cast<T>(num_table);
     // for quick calculation for <x_b,P^(-1)·qr>, get nth_segment via LUT lookup and return :
     // sum_vl_lut_f_ + sum(nth_segment) * delta_
   }

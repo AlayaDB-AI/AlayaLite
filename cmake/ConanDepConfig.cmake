@@ -106,21 +106,30 @@ message(STATUS "Conan platform configuration completed successfully")
 message(STATUS "Configuring project dependencies...")
 
 # Find common dependencies installed by Conan (order matters for linking)
-find_package(OpenMP REQUIRED)
 find_package(concurrentqueue REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(fmt REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
 
+# OpenMP: only try to find if Conan provided it (i.e., libomp is used) Otherwise, rely on compiler flags and system
+# linker (GCC on Linux)
+if(EXISTS "${CMAKE_CURRENT_BINARY_DIR}/OpenMPConfig.cmake" OR EXISTS "${CMAKE_PREFIX_PATH}/OpenMPConfig.cmake")
+  find_package(OpenMP REQUIRED)
+  set(OPENMP_TARGET OpenMP::OpenMP_CXX)
+else()
+  # Fallback: assume OpenMP is available via compiler flags (e.g., GCC on Linux) No explicit target; linking handled
+  # implicitly
+  set(OPENMP_TARGET "")
+  message(STATUS "OpenMP: Using compiler-provided OpenMP (no CMake target)")
+endif()
+
 # Configure common third-party libraries
-set(COMMON_THIRD_PARTY_LIBS
-    OpenMP::OpenMP_CXX
-    spdlog::spdlog
-    fmt::fmt
-    concurrentqueue::concurrentqueue
-    Eigen3::Eigen
-)
+set(COMMON_THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue Eigen3::Eigen)
+# Add OpenMP target only if available
+if(OPENMP_TARGET)
+  list(APPEND COMMON_THIRD_PARTY_LIBS ${OPENMP_TARGET})
+endif()
 
 # Add platform-specific libraries
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

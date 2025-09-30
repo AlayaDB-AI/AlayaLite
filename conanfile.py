@@ -14,7 +14,6 @@ class AlayaLiteConan(ConanFile):
 
         tc.variables["CONAN_USER_MARCH_FLAGS"] = self._get_march_flags()
         tc.generate()
-
         cmake = CMakeDeps(self)
         cmake.generate()
 
@@ -25,10 +24,20 @@ class AlayaLiteConan(ConanFile):
         self.requires("spdlog/1.14.0")
         self.requires("fmt/10.2.1")  # depends on spdlog
         self.requires("eigen/3.4.0")
+
+        # OpenMP support
         if self.settings.os == "Linux":
+            if self.settings.compiler == "gcc":
+                # GCC uses built-in libgomp; no Conan package needed
+                pass
+            else:
+                # Clang on Linux needs libomp
+                self.requires("libomp/18.1.8")
             self.requires("libcoro/0.14.1")
-        if self.settings.os == "Macos":
+        elif self.settings.os == "Macos":
+            # Apple Clang needs libomp
             self.requires("libomp/18.1.8")
+        # Windows (MSVC): OpenMP built-in, no extra lib
 
     def configure(self):
         if self.settings.os == "Linux":

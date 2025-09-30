@@ -61,8 +61,7 @@ inline size_t padding_requirement(size_t dim, RotatorType type) {
   if (type == RotatorType::FhtKacRotator) {
     return round_up_to_multiple_of<size_t>(dim, 64);
   }
-  std::cerr << "Invalid rotator type in padding_requirement()\n" << std::flush;
-  exit(1);
+  throw std::invalid_argument("Invalid rotator type in padding_requirement()\n");
 }
 
 template <typename T>
@@ -109,12 +108,12 @@ class MatrixRotator : public Rotator<T> {
 
   void load(std::ifstream &input) override {
     input.read(reinterpret_cast<char *>(rand_mat_.data()),
-               static_cast<long>(sizeof(float) * this->dim_ * this->padded_dim_));
+               static_cast<long>(sizeof(T) * this->dim_ * this->padded_dim_));
   }
 
   void save(std::ofstream &output) const override {
     output.write(reinterpret_cast<const char *>(rand_mat_.data()),
-                 (sizeof(float) * this->dim_ * this->padded_dim_));
+                 (sizeof(T) * this->dim_ * this->padded_dim_));
   }
 
   void rotate(const T *vec, T *rotated_vec) const override {
@@ -182,9 +181,8 @@ class FhtKacRotator : public Rotator<float> {
  public:
   explicit FhtKacRotator(size_t dim, size_t padded_dim)
       : Rotator<float>(dim, padded_dim), flip_(4 * padded_dim / kByteLen) {
-    std::random_device rd;  // Seed
+    std::random_device rd;   // Seed
     std::mt19937 gen(rd());  // Mersenne Twister RNG
-    // std::mt19937 gen(123456);
 
     // Uniform distribution in the range [0, 255]
     std::uniform_int_distribution<int> dist(0, 255);
@@ -193,12 +191,6 @@ class FhtKacRotator : public Rotator<float> {
     for (auto &i : flip_) {
       i = static_cast<uint8_t>(dist(gen));
     }
-
-    // std::cerr << "print first few uint8_t of rand_mt: ";
-    // for (int i = 0; i < 10; ++i) {
-    //   std::cerr << static_cast<int>(flip_[i]) << " ";
-    // }
-    // std::cerr << "\n";
 
     // TODO(lib): is it portable?
     size_t bottom_log_dim = floor_log2(dim);
@@ -225,8 +217,7 @@ class FhtKacRotator : public Rotator<float> {
         this->fht_float_ = helper_float_11;
         break;
       default:
-        std::cerr << "dimension of vector is too big\n";
-        exit(1);
+        throw std::invalid_argument("dimension of vector is too big or too small\n");
     }
   }
 
@@ -334,26 +325,29 @@ std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
   }
 
   if (padded_dim != rotator_impl::padding_requirement(padded_dim, type)) {
-    std::cerr << "Invalid padded dim for the given rotator type\n" << std::flush;
-    exit(1);
-  }
-
-  if (type == RotatorType::FhtKacRotator) {
-    if (!std::is_same_v<T, float>) {
-      std::cerr << "FhtKacRotator is only for float type currently\n";
-      exit(1);
-    }
-    std::cerr << "FhtKacRotator is selected\n";
-    return std::make_unique<rotator_impl::FhtKacRotator>(dim, padded_dim);
+    throw std::invalid_argument("Invalid padded dim for the given rotator type");
   }
 
   if (type == RotatorType::MatrixRotator) {
-    std::cerr << "MatrixRotator is selected\n";
-    return std::make_unique<rotator_impl::MatrixRotator<T>>(dim, padded_dim);
+    if constexpr (std::is_floating_point_v<T>) {
+      std::cerr << "MatrixRotator is selected\n";
+      return std::make_unique<rotator_impl::MatrixRotator<T>>(dim, padded_dim);
+    } else {
+      throw std::invalid_argument(
+          "MatrixRotator only supports floating-point types (i.e., float, double)!");
+    }
   }
 
-  std::cerr << "Invalid rotator type in choose_rotator()\n";
-  exit(1);
+  if (type == RotatorType::FhtKacRotator) {
+    if constexpr (std::is_same_v<T, float>) {
+      std::cerr << "FhtKacRotator is selected\n";
+      return std::make_unique<rotator_impl::FhtKacRotator>(dim, padded_dim);
+    } else {
+      throw std::invalid_argument("FhtKacRotator only supports float type!");
+    }
+  }
+
+  throw std::invalid_argument("Invalid rotator type in choose_rotator()\n");
 }
 // NOLINTEND
 }  // namespace alaya

@@ -24,7 +24,6 @@
 #include "utils/rabitq_utils/defines.hpp"
 
 namespace alaya {
-
 FAST_BEGIN
 template <typename DataType = float, typename DistanceType = float>
 inline auto l2_sqr_rabitq(const DataType *__restrict__ x, const DataType *__restrict__ y,
