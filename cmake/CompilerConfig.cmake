@@ -9,30 +9,35 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # Check AVX512 support
-include(CheckCXXSourceCompiles)
-set(CMAKE_REQUIRED_FLAGS "-mavx512f")
-check_cxx_source_compiles(
-  "
-    #include <immintrin.h>
-    int main() { __m512 a = _mm512_set1_ps(1.0f); return 0; }
-"
-  AVX512F_SUPPORTED
-)
+if(NOT DEFINED ENV{CI})
 
-# RaBitQ optimization
-if(AVX512F_SUPPORTED)
-  message(STATUS "AVX-512F supported, enabling optimizations")
-  add_compile_options(
-    -mfma
-    -mavx512f
-    -mavx512dq
-    -mavx512bw
-    -mavx512vl
-    -mavx512bitalg
-    -mavx512vpopcntdq
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_FLAGS "-mavx512f -mavx512dq -mavx512bw -mavx512vl")
+  check_cxx_source_compiles(
+    "
+  #include <immintrin.h>
+  int main() {
+    __m512 a = _mm512_set1_ps(1.0f);
+    __m512i b = _mm512_abs_epi32(_mm512_set1_epi32(-1));
+    __m512i c = _mm512_abs_epi8(_mm512_set1_epi8(-1));
+    __m256i d = _mm256_abs_epi32(_mm256_set1_epi32(-1));
+    return 0;
+  }
+"
+    AVX512_FULL_OK
   )
-else()
-  message(STATUS "AVX-512 not supported or cannot run.")
+
+  if(AVX512_FULL_OK)
+    add_compile_options(
+      -mavx512f
+      -mavx512dq
+      -mavx512bw
+      -mavx512vl
+      -mfma
+    )
+    message(STATUS "Enabled full AVX-512")
+  endif()
+
 endif()
 
 # Platform-specific compiler flags
