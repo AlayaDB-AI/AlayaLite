@@ -28,6 +28,7 @@ dev = [
     "pytest-cov",
     "pytest-asyncio",
     "ruff",
+    "fastapi",
     "uvicorn[standard]",
     "pydantic",
     "httpx",
