@@ -8,6 +8,7 @@ __all__ = [
     "QueryCollectionRequest",
     "DeleteByIdRequest",
     "DeleteByFilterRequest",
+    "SaveCollectionRequest",
 ]
 
 
@@ -45,3 +46,7 @@ class DeleteByIdRequest(BaseModel):
 class DeleteByFilterRequest(BaseModel):
     collection_name: str
     filter: dict
+
+
+class SaveCollectionRequest(BaseModel):
+    collection_name: str

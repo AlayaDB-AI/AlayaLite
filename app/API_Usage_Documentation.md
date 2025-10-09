@@ -1,18 +1,22 @@
 # AlayaLite 向量数据库 API 使用文档
 
 ## 基本信息
+````markdown
+# AlayaLite Vector Database API Usage Documentation
 
-- **基础路径**：`/api/v1/collection/`
-- **接口风格**：RESTful，全部为 POST 请求
-- **数据格式**：请求和响应均为 JSON
+## Overview
+
+- **Base path**: `/api/v1/collection/`
+- **Style**: RESTful (all endpoints use POST)
+- **Data format**: JSON for both requests and responses
 
 ---
 
-## 1. 创建集合
+## 1. Create Collection
 
-- **接口**：`/api/v1/collection/create`
-- **方法**：POST
-- **请求参数**：
+- **Endpoint**: `/api/v1/collection/create`
+- **Method**: POST
+- **Request body**:
 
 ```json
 {
@@ -20,7 +24,7 @@
 }
 ```
 
-- **返回示例**：
+- **Example response**:
 
 ```json
 "Collection test created successfully"
@@ -28,13 +32,13 @@
 
 ---
 
-## 2. 列出所有集合
+## 2. List Collections
 
-- **接口**：`/api/v1/collection/list`
-- **方法**：POST
-- **请求参数**：无
+- **Endpoint**: `/api/v1/collection/list`
+- **Method**: POST
+- **Request body**: none
 
-- **返回示例**：
+- **Example response**:
 
 ```json
 ["test", "my_collection"]
@@ -42,11 +46,11 @@
 
 ---
 
-## 3. 删除集合
+## 3. Delete Collection
 
-- **接口**：`/api/v1/collection/delete`
-- **方法**：POST
-- **请求参数**：
+- **Endpoint**: `/api/v1/collection/delete`
+- **Method**: POST
+- **Request body**:
 
 ```json
 {
@@ -54,7 +58,7 @@
 }
 ```
 
-- **返回示例**：
+- **Example response**:
 
 ```json
 "Collection test deleted successfully"
@@ -62,13 +66,13 @@
 
 ---
 
-## 4. 重置所有集合
+## 4. Reset Collections
 
-- **接口**：`/api/v1/collection/reset`
-- **方法**：POST
-- **请求参数**：无
+- **Endpoint**: `/api/v1/collection/reset`
+- **Method**: POST
+- **Request body**: none
 
-- **返回示例**：
+- **Example response**:
 
 ```json
 "Collection reset successfully"
@@ -76,11 +80,11 @@
 
 ---
 
-## 5. 插入数据
+## 5. Insert Items
 
-- **接口**：`/api/v1/collection/insert`
-- **方法**：POST
-- **请求参数**：
+- **Endpoint**: `/api/v1/collection/insert`
+- **Method**: POST
+- **Request body**:
 
 ```json
 {
@@ -92,7 +96,7 @@
 }
 ```
 
-- **返回示例**：
+- **Example response**:
 
 ```json
 "Successfully inserted 2 items into collection test"
@@ -100,11 +104,11 @@
 
 ---
 
-## 6. 查询向量
+## 6. Query Vectors
 
-- **接口**：`/api/v1/collection/query`
-- **方法**：POST
-- **请求参数**：
+- **Endpoint**: `/api/v1/collection/query`
+- **Method**: POST
+- **Request body**:
 
 ```json
 {
@@ -116,7 +120,7 @@
 }
 ```
 
-- **返回示例**：
+- **Example response**:
 
 ```json
 [
@@ -132,11 +136,11 @@
 
 ---
 
-## 7. Upsert（插入或更新）
+## 7. Upsert (Insert or Update)
 
-- **接口**：`/api/v1/collection/upsert`
-- **方法**：POST
-- **请求参数**：
+- **Endpoint**: `/api/v1/collection/upsert`
+- **Method**: POST
+- **Request body**:
 
 ```json
 {
@@ -147,7 +151,7 @@
 }
 ```
 
-- **返回示例**：
+- **Example response**:
 
 ```json
 "Successfully upserted 1 items into collection test"
@@ -155,11 +159,11 @@
 
 ---
 
-## 8. 按ID删除
+## 8. Delete by ID
 
-- **接口**：`/api/v1/collection/delete_by_id`
-- **方法**：POST
-- **请求参数**：
+- **Endpoint**: `/api/v1/collection/delete_by_id`
+- **Method**: POST
+- **Request body**:
 
 ```json
 {
@@ -168,7 +172,7 @@
 }
 ```
 
-- **返回示例**：
+- **Example response**:
 
 ```json
 "Successfully deleted 2 items from collection test"
@@ -176,11 +180,11 @@
 
 ---
 
-## 9. 按条件删除
+## 9. Delete by Filter
 
-- **接口**：`/api/v1/collection/delete_by_filter`
-- **方法**：POST
-- **请求参数**：
+- **Endpoint**: `/api/v1/collection/delete_by_filter`
+- **Method**: POST
+- **Request body**:
 
 ```json
 {
@@ -189,7 +193,7 @@
 }
 ```
 
-- **返回示例**：
+- **Example response**:
 
 ```json
 "Successfully deleted 1 items from collection test"
@@ -197,13 +201,35 @@
 
 ---
 
-## 备注
+## 10. Save Collection
 
-- 所有接口均为 POST 方法，参数通过 JSON 传递。
-- 向量（vector）请用一维数组（如 `[0.1, 0.2, 0.3]`）表示。
-- `items` 字段为列表，每个元素为 `[id, document, vector, metadata]` 结构。
-- 查询接口返回的 `score` 字段为相似度分数，数值越大越相似。
+- **Endpoint**: `/api/v1/collection/save`
+- **Method**: POST
+- **Request body**:
+
+```json
+{
+  "collection_name": "test"
+}
+```
+
+- **Example response**:
+
+```json
+"Collection test saved successfully"
+```
 
 ---
 
-如需进一步帮助或有特殊需求，请补充说明！ 
+## Notes
+
+- All endpoints use POST and accept parameters as JSON in the request body.
+- Vectors should be represented as a one-dimensional array, e.g. `[0.1, 0.2, 0.3]`.
+- The `items` field is a list where each element has the structure `[id, document, vector, metadata]`.
+- The `score` field in query results is a similarity score — higher means more similar.
+
+---
+
+If you need further assistance or have special requirements, please provide more details.
+
+````

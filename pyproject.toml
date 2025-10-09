@@ -10,7 +10,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "alayalite"
-version = "0.1.1a1"
+version = "0.1.0a1"
 authors = [{ name = "AlayaDB.AI", email = "dev@alayadb.ai" }]
 
 description = "AlayaLite Python extension module"
@@ -22,8 +22,17 @@ dependencies = ["pandas>=1.3.3"]
 [project.urls]
 "Homepage" = "https://github.com/AlayaDB-AI/AlayaLite"
 
-[tool.uv]
-dev-dependencies = ["pytest", "pytest-cov", "ruff"]
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-asyncio",
+    "ruff",
+    "uvicorn[standard]",
+    "pydantic",
+    "httpx",
+]
+
 
 # ----------------- build whl begin ------------------
 [tool.scikit-build]

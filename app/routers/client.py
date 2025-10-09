@@ -1,3 +1,4 @@
+import os
 import sys
 
 from alayalite import Client
@@ -10,11 +11,23 @@ from app.models.collection import (
     DeleteCollectionRequest,
     InsertCollectionRequest,
     QueryCollectionRequest,
+    SaveCollectionRequest,
     UpsertCollectionRequest,
 )
 
 router = APIRouter()
-client = Client()
+
+# Storage directory can be configured via the ALAYALITE_DATA_DIR environment variable.
+# When running in Docker you can bind-mount a host directory to this path (default: pwd).
+storage_dir = os.environ.get("ALAYALITE_DATA_DIR", os.path.abspath("./data"))
+if storage_dir:
+    # Ensure the directory exists for the client to read/write
+    try:
+        os.makedirs(storage_dir, exist_ok=True)
+    except Exception as e:
+        print(f"Warning: failed to create storage dir {storage_dir}: {e}", file=sys.stderr)
+
+client = Client(url=storage_dir)
 
 
 @router.post(path="/collection/create", tags=["collection"])
@@ -122,6 +135,16 @@ async def delete_by_filter(request: DeleteByFilterRequest):
             raise Exception(f"Collection {request.collection_name} does not exist")
         collection.delete_by_filter(request.filter)
         return f"Successfully deleted {len(request.filter)} items from collection {request.collection_name}"
+    except Exception as e:
+        print(e, file=sys.stderr)
+        raise e
+
+
+@router.post(path="/collection/save", tags=["collection"])
+async def save_collection(request: SaveCollectionRequest):
+    try:
+        client.save_collection(request.collection_name)
+        return f"Collection {request.collection_name} saved successfully"
     except Exception as e:
         print(e, file=sys.stderr)
         raise e
