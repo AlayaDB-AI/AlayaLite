@@ -58,12 +58,27 @@ async def test_insert_collection(fresh_client: TestClient):
             (2, "Document 2", np.array([0.4, 0.5, 0.6]).tolist(), {"category": "B"}),
         ],
     }
+
+    # Inserting into a non-existent collection should return 404
     response = client.post("/api/v1/collection/insert", json=insert_payload)
     assert response.status_code == 404
+
+    # create collection and insert
     response = client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert response.status_code == 200
     response = client.post("/api/v1/collection/insert", json=insert_payload)
     assert response.status_code == 200
+
+    # if the items not have same length, should return 422
+    bad_insert_payload = {
+        "collection_name": "test",
+        "items": [
+            (1, "Document 1", np.array([0.1, 0.2, 0.3]).tolist()),  # Missing metadata
+            (2, "Document 2", np.array([0.4, 0.5, 0.6]).tolist(), {"category": "B"}),
+        ],
+    }
+    response = client.post("/api/v1/collection/insert", json=bad_insert_payload)
+    assert response.status_code == 422
 
     query_payload = {
         "collection_name": "test",
@@ -109,6 +124,21 @@ async def test_upsert_collection(fresh_client: TestClient):
         ],
     }
     response = client.post("/api/v1/collection/upsert", json=upsert_payload)
+
+    # upsert into a non-existent collection should return 404
+    upsert_payload = {
+        "collection_name": "nope",
+        "items": [
+            (
+                1,
+                "New Document 1",
+                np.array([0.1, 0.2, 0.3]).tolist(),
+                {"category": "A"},
+            ),
+        ],
+    }
+    response = client.post("/api/v1/collection/upsert", json=upsert_payload)
+    assert response.status_code == 404
 
     query_payload = {
         "collection_name": "test",
