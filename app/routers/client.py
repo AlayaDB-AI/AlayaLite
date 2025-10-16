@@ -12,6 +12,7 @@ from app.models.collection import (
     DeleteCollectionRequest,
     InsertCollectionRequest,
     QueryCollectionRequest,
+    ResetCollectionRequest,
     SaveCollectionRequest,
     UpsertCollectionRequest,
 )
@@ -52,7 +53,7 @@ async def list_collections():
 @router.post(path="/collection/delete", tags=["collection"])
 async def delete_collection(request: DeleteCollectionRequest):
     try:
-        client.delete_collection(request.collection_name)
+        client.delete_collection(request.collection_name, request.delete_on_disk)
         return f"Collection {request.collection_name} deleted successfully"
     except Exception as e:
         print(e, file=sys.stderr)
@@ -61,8 +62,8 @@ async def delete_collection(request: DeleteCollectionRequest):
 
 
 @router.post(path="/collection/reset", tags=["collection"])
-async def reset_collection():
-    client.reset()
+async def reset_collection(request: ResetCollectionRequest):
+    client.reset(request.delete_on_dist)
     return "Collection reset successfully"
 
 

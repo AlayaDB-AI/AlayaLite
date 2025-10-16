@@ -3,6 +3,7 @@ from pydantic import BaseModel
 __all__ = [
     "CreateCollectionRequest",
     "DeleteCollectionRequest",
+    "ResetCollectionRequest",
     "InsertCollectionRequest",
     "UpsertCollectionRequest",
     "QueryCollectionRequest",
@@ -18,6 +19,11 @@ class CreateCollectionRequest(BaseModel):
 
 class DeleteCollectionRequest(BaseModel):
     collection_name: str
+    delete_on_disk: bool = False
+
+
+class ResetCollectionRequest(BaseModel):
+    delete_on_dist: bool = False
 
 
 class InsertCollectionRequest(BaseModel):

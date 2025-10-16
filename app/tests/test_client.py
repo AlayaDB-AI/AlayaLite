@@ -1,9 +1,24 @@
+import importlib
 import os
 import shutil
+import sys
 
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+
+
+def reload_client():
+    # Simulate restart: force reload of app modules and create a new TestClient
+    for name in list(sys.modules.keys()):
+        if name.startswith("app.") or name == "app":
+            del sys.modules[name]
+
+    app_module = importlib.import_module("app.main")
+    test_app = app_module.app
+    tc = TestClient(test_app)
+
+    return tc
 
 
 @pytest.mark.asyncio
@@ -36,10 +51,45 @@ async def test_reset_collection(fresh_client: TestClient):
     assert response.status_code == 200
 
     # reset collection
-    response = client.post("/api/v1/collection/reset")
+    response = client.post("/api/v1/collection/reset", json={"delete_on_dist": False})
     assert response.status_code == 200
 
     response = client.post("/api/v1/collection/list")
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_reset_persistence_collection():
+    tc = reload_client()
+    collection_name_list = ["a", "b", "c", "d", "e"]
+    for collection_name in collection_name_list:
+        response = tc.post("/api/v1/collection/create", json={"collection_name": collection_name})
+        assert response.status_code == 200
+
+        response = tc.post(
+            "/api/v1/collection/insert",
+            json={
+                "collection_name": collection_name,
+                "items": [
+                    (1, "Document 1", np.array([0.1, 0.2, 0.3]).tolist(), {"category": "A"}),
+                ],
+            },
+        )
+
+        response = tc.post("/api/v1/collection/save", json={"collection_name": collection_name})
+        assert response.status_code == 200
+
+    response = tc.post("/api/v1/collection/list")
+    assert response.status_code == 200
+    assert set(response.json()) == set(collection_name_list)
+
+    # reset collection
+    response = tc.post("/api/v1/collection/reset", json={"delete_on_dist": True})
+    assert response.status_code == 200
+
+    tc2 = reload_client()
+    response = tc2.post("/api/v1/collection/list")
     assert response.status_code == 200
     assert response.json() == []
 
@@ -200,18 +250,7 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
     storage_dir = str(tmp_path)
     monkeypatch.setenv("ALAYALITE_DATA_DIR", storage_dir)
 
-    # Ensure we import a fresh app that will initialize Client with storage_dir
-    import importlib
-    import sys
-
-    # Remove any previously loaded app.* modules so import picks up the env var
-    for name in list(sys.modules.keys()):
-        if name.startswith("app.") or name == "app":
-            del sys.modules[name]
-
-    app_module = importlib.import_module("app.main")
-    test_app = app_module.app
-    tc = TestClient(test_app)
+    tc = reload_client()
 
     # create collection and insert an item
     resp = tc.post("/api/v1/collection/create", json={"collection_name": "restart_coll"})
@@ -246,15 +285,7 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
     assert os.path.isdir(coll_path)
     assert os.path.isfile(os.path.join(coll_path, "schema.json"))
 
-    # Simulate restart: force reload of app modules and create a new TestClient
-    for name in list(sys.modules.keys()):
-        if name.startswith("app.") or name == "app":
-            del sys.modules[name]
-
-    app_module2 = importlib.import_module("app.main")
-    test_app2 = app_module2.app
-    tc2 = TestClient(test_app2)
-
+    tc2 = reload_client()
     # list collections should include our saved collection
     resp = tc2.post("/api/v1/collection/list")
     assert resp.status_code == 200
@@ -263,6 +294,21 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
     tc2_ans = tc2.post("/api/v1/collection/query", json=query_payload)
     assert tc2_ans.status_code == 200
     assert tc1_ans.json() == tc2_ans.json()
+
+    # delete on disk
+    resp = tc2.post("/api/v1/collection/delete", json={"collection_name": "restart_coll", "delete_on_disk": True})
+    assert resp.status_code == 200
+
+    # list collections should include our saved collection
+    resp = tc2.post("/api/v1/collection/list")
+    assert resp.status_code == 200
+    assert "restart_coll" not in resp.json()
+
+    tc3 = reload_client()
+    # list collections should include our saved collection
+    resp = tc3.post("/api/v1/collection/list")
+    assert resp.status_code == 200
+    assert "restart_coll" not in resp.json()
 
     # cleanup
     try:

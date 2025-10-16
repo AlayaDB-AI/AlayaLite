@@ -227,12 +227,23 @@ class Client:
             index_url = os.path.join(self.__url, index_name)
             if os.path.exists(index_url):
                 shutil.rmtree(index_url)
+                # TODO: change all print to log
                 print(f"Index '{index_name}' is deleted from disk")
 
-    def reset(self):
+    def reset(self, delete_on_dist: bool = False):
         """
-        Reset the client by clearing all in-memory collections and indices.
+        Reset the client
         """
+        if delete_on_dist:
+            if self.__url is None:
+                raise RuntimeError("Client is not initialized with a url for disk operations")
+
+            for collection_name in self.__collection_map:
+                index_url = os.path.join(self.__url, collection_name)
+                if os.path.exists(index_url):
+                    shutil.rmtree(index_url)
+                    # logger.info(f'rm {index_url}')
+
         self.__collection_map = {}
         self.__index_map = {}
 
