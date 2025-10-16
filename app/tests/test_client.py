@@ -98,7 +98,8 @@ async def test_reset_persistence_collection():
 async def test_insert_collection(fresh_client: TestClient):
     client = fresh_client
     # insert collection
-    client.post("/api/v1/collection/reset")
+    response = client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
+    assert response.status_code == 200
 
     # insert items
     insert_payload = {
@@ -146,7 +147,8 @@ async def test_insert_collection(fresh_client: TestClient):
 async def test_upsert_collection(fresh_client: TestClient):
     client = fresh_client
     # insert collection
-    client.post("/api/v1/collection/reset")
+    response = client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
+    assert response.status_code == 200
     response = client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert response.status_code == 200
 
@@ -206,7 +208,8 @@ async def test_upsert_collection(fresh_client: TestClient):
 async def test_query_collection(fresh_client: TestClient):
     client = fresh_client
     # insert collection
-    client.post("/api/v1/collection/reset")
+    response = client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
+    assert response.status_code == 200
     response = client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert response.status_code == 200
 
@@ -349,7 +352,8 @@ async def test_operations_on_nonexistent_collection(fresh_client: TestClient):
 @pytest.mark.asyncio
 async def test_delete_by_id_and_filter(fresh_client: TestClient):
     client = fresh_client
-    client.post("/api/v1/collection/reset")
+    response = client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
+    assert response.status_code == 200
     resp = client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert resp.status_code == 200
 

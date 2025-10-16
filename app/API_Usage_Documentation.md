@@ -55,6 +55,7 @@
 ```json
 {
   "collection_name": "test"
+  "delete_on_disk": true
 }
 ```
 
@@ -70,7 +71,13 @@
 
 - **Endpoint**: `/api/v1/collection/reset`
 - **Method**: POST
-- **Request body**: none
+- **Request body**:
+
+```json
+{
+  "delete_on_disk": true
+}
+```
 
 - **Example response**:
 
