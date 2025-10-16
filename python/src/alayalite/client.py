@@ -230,11 +230,11 @@ class Client:
                 # TODO: change all print to log
                 print(f"Index '{index_name}' is deleted from disk")
 
-    def reset(self, delete_on_dist: bool = False):
+    def reset(self, delete_on_disk: bool = False):
         """
         Reset the client
         """
-        if delete_on_dist:
+        if delete_on_disk:
             if self.__url is None:
                 raise RuntimeError("Client is not initialized with a url for disk operations")
 

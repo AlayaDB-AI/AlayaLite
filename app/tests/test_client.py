@@ -51,7 +51,7 @@ async def test_reset_collection(fresh_client: TestClient):
     assert response.status_code == 200
 
     # reset collection
-    response = client.post("/api/v1/collection/reset", json={"delete_on_dist": False})
+    response = client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
     assert response.status_code == 200
 
     response = client.post("/api/v1/collection/list")
@@ -85,7 +85,7 @@ async def test_reset_persistence_collection():
     assert set(response.json()) == set(collection_name_list)
 
     # reset collection
-    response = tc.post("/api/v1/collection/reset", json={"delete_on_dist": True})
+    response = tc.post("/api/v1/collection/reset", json={"delete_on_disk": True})
     assert response.status_code == 200
 
     tc2 = reload_client()

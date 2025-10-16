@@ -63,7 +63,7 @@ async def delete_collection(request: DeleteCollectionRequest):
 
 @router.post(path="/collection/reset", tags=["collection"])
 async def reset_collection(request: ResetCollectionRequest):
-    client.reset(request.delete_on_dist)
+    client.reset(request.delete_on_disk)
     return "Collection reset successfully"
 
 

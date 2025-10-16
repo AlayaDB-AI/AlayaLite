@@ -23,7 +23,7 @@ class DeleteCollectionRequest(BaseModel):
 
 
 class ResetCollectionRequest(BaseModel):
-    delete_on_dist: bool = False
+    delete_on_disk: bool = False
 
 
 class InsertCollectionRequest(BaseModel):
