@@ -54,7 +54,7 @@
 
 ```json
 {
-  "collection_name": "test"
+  "collection_name": "test",
   "delete_on_disk": true
 }
 ```
