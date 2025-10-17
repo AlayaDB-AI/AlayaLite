@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <filesystem>
@@ -48,7 +47,10 @@ class TestDatasetBase {
     alaya::load_fvecs(query_file_, queries_, query_num_, query_dim);
     alaya::load_ivecs(gt_file_, answers_, ans_num_, ans_dim_);
     if (data_dim != query_dim || query_num_ != ans_num_) {
-      LOG_CRITICAL("The dimension of data, query and ground truth is not the same. data_dim: {}, query_dim: {}, query_num: {}, ans_num: {}", data_dim, query_dim, query_num_, ans_num_);
+      LOG_CRITICAL(
+          "The dimension of data, query and ground truth is not the same. data_dim: {}, query_dim: "
+          "{}, query_num: {}, ans_num: {}",
+          data_dim, query_dim, query_num_, ans_num_);
       exit(-1);
     }
     dim_ = data_dim;
@@ -70,7 +72,6 @@ class TestDatasetBase {
   uint32_t get_ans_num() const noexcept { return ans_num_; }
   uint32_t get_dim() const noexcept { return dim_; }
   uint32_t get_ans_dim() const noexcept { return ans_dim_; }
-
 
  protected:
   virtual std::string get_download_command() const = 0;
@@ -113,6 +114,27 @@ class SIFTTestData : public TestDatasetBase {
   std::string get_extract_command() const override {
     return "tar -zxvf " + dataset_dir_.string() + "/data.tar.gz" + " --strip-components=1 -C " +
            dataset_dir_.string();
+  }
+};
+
+class DEEP1MTestData : public TestDatasetBase {
+ public:
+  DEEP1MTestData(std::string data_dir) {
+    dataset_name_ = "deep1M";
+    dataset_dir_ = std::filesystem::path(data_dir) / dataset_name_;
+    data_file_ = dataset_dir_ / "deep1M_base.fvecs";
+    query_file_ = dataset_dir_ / "deep1M_query.fvecs";
+    gt_file_ = dataset_dir_ / "deep1M_groundtruth.ivecs";
+  }
+
+ private:
+  std::string get_download_command() const override {
+    return "wget -P " + dataset_dir_.string() +
+           " http://www.cse.cuhk.edu.hk/systems/hash/gqr/dataset/deep1M.tar.gz";
+  }
+
+  std::string get_extract_command() const override {
+    return "tar -zxvf " + dataset_dir_.string() + "/deep1M.tar.gz" + " --strip-components=1 -C " + dataset_dir_.string();
   }
 };
 
