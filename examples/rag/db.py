@@ -41,7 +41,7 @@ def insert_text(
     embeddings = embedder(chunks, embed_model_path)
     print(f"Embedding {len(chunks)} chunks into vectors")
 
-    if not embeddings:
+    if embeddings is None:
         print("Fail to embed chunks. Not to insert")
         return False
 
