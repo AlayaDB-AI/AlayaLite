@@ -1,7 +1,7 @@
 # Project configuration options and validation This module defines project-wide options and validates their dependencies
 
 # Configuration options
-option(ENABLE_UNIT_TESTS "Enable unit tests" OFF)
+option(ENABLE_UNIT_TESTS "Enable unit tests" ON)
 option(ENABLE_COVERAGE "Enable test coverage analysis (requires ENABLE_UNIT_TESTS)" OFF)
 
 # Validate option dependencies

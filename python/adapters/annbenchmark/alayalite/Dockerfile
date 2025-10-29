@@ -7,6 +7,6 @@ RUN apt install -y python3.11 && \
       pip3 install -r requirements.txt
 
 COPY ./ann_benchmarks/algorithms/alayalite/libstdc++.so.6 /usr/lib/x86_64-linux-gnu/
-COPY ./ann_benchmarks/algorithms/alayalite/alayalite-0.1.0-cp311-cp311-linux_x86_64.whl /home/app/
-RUN pip3 install /home/app/alayalite-0.1.0-cp311-cp311-linux_x86_64.whl
+COPY ./ann_benchmarks/algorithms/alayalite/alayalite-0.1.1a1-cp311-cp311-linux_x86_64.whl /home/app/
+RUN pip3 install /home/app/alayalite-0.1.1a1-cp311-cp311-linux_x86_64.whl
 RUN python3 -c 'import alayalite'

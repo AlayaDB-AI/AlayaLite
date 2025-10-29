@@ -62,6 +62,7 @@ PYBIND11_MODULE(_alayalitepy, m) {
       .value("NONE", alaya::QuantizationType::NONE)
       .value("SQ8", alaya::QuantizationType::SQ8)
       .value("SQ4", alaya::QuantizationType::SQ4)
+      .value("RABITQ", alaya::QuantizationType::RABITQ)
       .export_values();
 
   py::class_<alaya::IndexParams>(m, "IndexParams")

@@ -25,7 +25,6 @@
 #include <vector>
 
 #include "executor/jobs/graph_search_job.hpp"
-#include "gtest/gtest.h"
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "index/graph/nsg/nsg_builder.hpp"
 #include "index/graph/qg/qg_builder.hpp"

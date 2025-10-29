@@ -43,7 +43,9 @@
 #include "index/graph/graph.hpp"
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "index/graph/nsg/nsg_builder.hpp"
+#include "index/graph/qg/qg_builder.hpp"
 #include "params.hpp"
+#include "space/rabitq_space.hpp"
 #include "space/raw_space.hpp"
 #include "space/sq4_space.hpp"
 #include "space/sq8_space.hpp"
@@ -54,7 +56,7 @@
 namespace py = pybind11;
 
 namespace alaya {
-
+// NOLINTBEGIN
 template <typename T>
 auto get_topk_array(const std::vector<std::vector<T>> &res_pool, size_t topk) -> py::array_t<T> {
   size_t query_size = res_pool.size();
@@ -114,10 +116,13 @@ class PyIndex : public BasePyIndex {
     std::string_view data_path_view{data_path};
     std::string_view quant_path_view{quant_path};
 
-    graph_index_->save(index_path_view);
-    if (!data_path.empty()) {
-      build_space_->save(data_path_view);
+    if constexpr (!is_rabitq_space_v<SearchSpaceType>) {
+      graph_index_->save(index_path_view);
+      if (!data_path.empty()) {
+        build_space_->save(data_path_view);
+      }
     }
+
     if (!quant_path.empty()) {
       search_space_->save(quant_path_view);
     }
@@ -130,30 +135,39 @@ class PyIndex : public BasePyIndex {
     std::string_view data_path_view{data_path};
     std::string_view quant_path_view{quant_path};
 
-    graph_index_ = std::make_shared<Graph<DataType, IDType>>();
-    graph_index_->load(index_path_view);
-
-    if (!data_path.empty()) {
-      build_space_ = std::make_shared<BuildSpaceType>();
-      build_space_->load(data_path_view);
-      build_space_->set_metric_function();
-    }
-
-    if constexpr (std::is_same<BuildSpaceType, SearchSpaceType>::value) {
-      search_space_ = build_space_;
-    } else {
+    if constexpr (is_rabitq_space_v<SearchSpaceType>) {
       search_space_ = std::make_shared<SearchSpaceType>();
       search_space_->load(quant_path_view);
-      search_space_->set_metric_function();
+      data_size_ = search_space_->get_data_size();
+      data_dim_ = search_space_->get_dim();
+      search_job_ = std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(
+          search_space_, nullptr);
+    } else {
+      graph_index_ = std::make_shared<Graph<DataType, IDType>>();
+      graph_index_->load(index_path_view);
+
+      if (!data_path.empty()) {
+        build_space_ = std::make_shared<BuildSpaceType>();
+        build_space_->load(data_path_view);
+        build_space_->set_metric_function();
+      }
+
+      if constexpr (std::is_same<BuildSpaceType, SearchSpaceType>::value) {
+        search_space_ = build_space_;
+      } else {
+        search_space_ = std::make_shared<SearchSpaceType>();
+        search_space_->load(quant_path_view);
+        search_space_->set_metric_function();
+      }
+
+      data_size_ = build_space_->data_size_;
+      data_dim_ = build_space_->dim_;
+
+      job_context_ = std::make_shared<JobContext<IDType>>();
+      search_job_ = std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(
+          search_space_, graph_index_, job_context_);
+      update_job_ = std::make_shared<GraphUpdateJob<SearchSpaceType>>(search_job_);
     }
-
-    data_size_ = build_space_->data_size_;
-    data_dim_ = build_space_->dim_;
-
-    job_context_ = std::make_shared<JobContext<IDType>>();
-    search_job_ = std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(
-        search_space_, graph_index_, job_context_);
-    update_job_ = std::make_shared<GraphUpdateJob<SearchSpaceType>>(search_job_);
     LOG_INFO("creator task generator success");
   }
 
@@ -168,31 +182,42 @@ class PyIndex : public BasePyIndex {
     data_dim_ = vectors.shape(1);
     vectors_ = static_cast<DataType *>(vectors.request().ptr);
 
-    build_space_ = std::make_shared<BuildSpaceType>(params_.capacity_, data_dim_, params_.metric_);
-    build_space_->fit(vectors_, data_size_);
-    if constexpr (std::is_same<BuildSpaceType, SearchSpaceType>::value) {
-      search_space_ = build_space_;
-    } else {
+    if constexpr (is_rabitq_space_v<SearchSpaceType>) {
       search_space_ =
           std::make_shared<SearchSpaceType>(params_.capacity_, data_dim_, params_.metric_);
       search_space_->fit(vectors_, data_size_);
+      auto graph_builder = std::make_shared<QGBuilder<SearchSpaceType>>(search_space_);
+      graph_builder->build_graph();
+      search_job_ =
+          std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(search_space_, nullptr);
+    } else {
+      build_space_ =
+          std::make_shared<BuildSpaceType>(params_.capacity_, data_dim_, params_.metric_);
+      build_space_->fit(vectors_, data_size_);
+      if constexpr (std::is_same<BuildSpaceType, SearchSpaceType>::value) {
+        search_space_ = build_space_;
+      } else {
+        search_space_ =
+            std::make_shared<SearchSpaceType>(params_.capacity_, data_dim_, params_.metric_);
+        search_space_->fit(vectors_, data_size_);
+      }
+
+      auto build_start = std::chrono::steady_clock::now();
+      auto graph_builder = std::make_shared<HNSWBuilder<BuildSpaceType>>(
+          build_space_, params_.max_nbrs_, ef_construction);
+      graph_index_ = graph_builder->build_graph(num_threads);
+
+      LOG_INFO(
+          "The time of building hnsw is {}s.",
+          static_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - build_start)
+              .count());
+
+      job_context_ = std::make_shared<JobContext<IDType>>();
+
+      search_job_ = std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(
+          search_space_, graph_index_, job_context_);
+      update_job_ = std::make_shared<GraphUpdateJob<SearchSpaceType>>(search_job_);
     }
-
-    auto build_start = std::chrono::steady_clock::now();
-    auto graph_builder = std::make_shared<HNSWBuilder<BuildSpaceType>>(
-        build_space_, params_.max_nbrs_, ef_construction);
-    graph_index_ = graph_builder->build_graph(num_threads);
-
-    LOG_INFO(
-        "The time of building hnsw is {}s.",
-        static_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - build_start)
-            .count());
-
-    job_context_ = std::make_shared<JobContext<IDType>>();
-
-    search_job_ = std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(
-        search_space_, graph_index_, job_context_);
-    update_job_ = std::make_shared<GraphUpdateJob<SearchSpaceType>>(search_job_);
     LOG_INFO("Create task generator successfully!");
   }
 
@@ -208,12 +233,17 @@ class PyIndex : public BasePyIndex {
 
     std::vector<IDType> res_pool(ef);
 
-    search_job_->search_solo(query_ptr, topk, res_pool.data(), ef);
+    if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+      search_job_->rabitq_search_solo(query_ptr, topk, res_pool.data(), ef);
+    } else {
+      search_job_->search_solo(query_ptr, topk, res_pool.data(), ef);
+    }
 
     auto ret = py::array_t<IDType>(static_cast<size_t>(topk));
     auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
 
-    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value ||
+                  is_rabitq_space_v<SearchSpaceType>) {
       std::copy(res_pool.begin(), res_pool.begin() + topk, ret_ptr);
     } else {
       rerank(res_pool, ret_ptr, build_space_->get_query_computer(query_ptr), ef, topk);
@@ -271,7 +301,13 @@ class PyIndex : public BasePyIndex {
     auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
     for (uint32_t i = 0; i < query_size; i++) {
       auto cur_query = query_ptr + i * query_dim;
-      coros.emplace_back(search_job_->search(cur_query, topk, res_pool[i].data(), ef));
+
+      if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+        coros.emplace_back(search_job_->rabitq_search(cur_query, topk, res_pool[i].data(), ef));
+      } else {
+        coros.emplace_back(search_job_->search(cur_query, topk, res_pool[i].data(), ef));
+      }
+
       scheduler->schedule(coros.back().handle());
     }
     LOG_INFO("Scheduling {} tasks.", coros.size());
@@ -282,7 +318,8 @@ class PyIndex : public BasePyIndex {
 
     auto ret = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
     auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
-    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value ||
+                  is_rabitq_space_v<SearchSpaceType>) {
       for (size_t i = 0; i < query_size; i++) {
         std::copy(res_pool[i].begin(), res_pool[i].begin() + topk, ret_ptr + i * topk);
       }
@@ -299,9 +336,15 @@ class PyIndex : public BasePyIndex {
     for (size_t i = 0; i < query_size; i++) {
       std::vector<IDType> res_pool(ef);
       auto cur_query = query_ptr + i * query_dim;
-      search_job_->search_solo(cur_query, topk, res_pool.data(), ef);
 
-      if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+      if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+        search_job_->rabitq_search_solo(cur_query, topk, res_pool.data(), ef);
+      } else {
+        search_job_->search_solo(cur_query, topk, res_pool.data(), ef);
+      }
+
+      if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value ||
+                    is_rabitq_space_v<SearchSpaceType>) {
         std::copy(res_pool.begin(), res_pool.begin() + topk, ret_ptr + i * topk);
       } else {
         rerank(res_pool, ret_ptr + i * topk, build_space_->get_query_computer(query_ptr), ef, topk);
@@ -496,5 +539,5 @@ class PyIndexInterface {
   IndexParams params_;
   std::shared_ptr<BasePyIndex> index_;
 };
-
+// NOLINTEND
 }  // namespace alaya

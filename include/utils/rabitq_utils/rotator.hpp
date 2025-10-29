@@ -29,6 +29,7 @@
 #include "defines.hpp"
 #include "fht_avx.hpp"
 #include "roundup.hpp"
+#include "utils/log.hpp"
 
 namespace alaya {
 // NOLINTBEGIN
@@ -322,8 +323,7 @@ std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
   if (padded_dim == 0) {
     padded_dim = rotator_impl::padding_requirement(dim, type);
     if (padded_dim != dim) {
-      std::cerr << "vectors are padded to " << padded_dim
-                << " dimensions for aligned computation\n";
+      LOG_DEBUG("vectors are padded to {} dimensions for aligned computation\n",padded_dim);
     }
   }
 
@@ -333,7 +333,7 @@ std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
 
   if (type == RotatorType::MatrixRotator) {
     if constexpr (std::is_floating_point_v<T>) {
-      std::cerr << "MatrixRotator is selected\n";
+      LOG_DEBUG("MatrixRotator is selected\n");
       return std::make_unique<rotator_impl::MatrixRotator<T>>(dim, padded_dim);
     } else {
       throw std::invalid_argument(
@@ -343,7 +343,7 @@ std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
 
   if (type == RotatorType::FhtKacRotator) {
     if constexpr (std::is_same_v<T, float>) {
-      std::cerr << "FhtKacRotator is selected\n";
+      LOG_DEBUG("FhtKacRotator is selected\n");
       return std::make_unique<rotator_impl::FhtKacRotator>(dim, padded_dim);
     } else {
       throw std::invalid_argument("FhtKacRotator only supports float type!");
