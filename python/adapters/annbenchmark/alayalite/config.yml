@@ -6,16 +6,16 @@ float:
     disabled: false
     docker_tag: ann-benchmarks-alayalite
     module: ann_benchmarks.algorithms.alayalite
-    name: alayalite
+    name: alayalite-rabitq
     run_groups:
       alayalite:
-        #### index_type HNSW FLAT
+        #### QG && RABITQ
         args:
           M: 32
           R: [32, 48, 64, 96]
-          L: 200
-          index_type: HNSW
-          quantization_type: NONE
+          L: 200 # only applicable for HNSW
+          index_type: NONE
+          quantization_type: RABITQ
           fit_threads: 96 # only batch search
           search_threads: 96 # only batch search
         query_args: [[10, 20, 40, 60, 80, 120, 200, 400, 600, 800]]

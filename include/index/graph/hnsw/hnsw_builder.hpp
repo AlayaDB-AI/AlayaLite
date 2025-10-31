@@ -28,6 +28,7 @@
 #include "../graph.hpp"
 #include "hnswlib.hpp"
 #include "space/raw_space.hpp"
+// #include "index/graph/graph_refiner.hpp"
 
 namespace alaya {
 /**
@@ -189,6 +190,13 @@ struct HNSWBuilder {
     thread_pool.wait_until_all_tasks_completed(vec_num);
 
     graph->overlay_graph_ = std::move(overlay_graph);
+    LOG_INFO("Finish overlay_graph fitting");
+
+    // graph refinement for rabitq
+    // if constexpr (is_rabitq_space_v<DistanceSpaceType>) {
+    //   GraphRefiner<DistanceSpaceType> refiner(space_.get(),graph.get());
+    // }
+
     return std::move(graph);
   }
 };

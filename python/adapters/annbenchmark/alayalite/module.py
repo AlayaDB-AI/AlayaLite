@@ -13,41 +13,47 @@
 # limitations under the License.
 
 import os
-from dataclasses import dataclass, field
 
 import numpy as np
-from alayalite import Client, IndexParams
+from alayalite import Client, Index
 
 from ..base.module import BaseANN
 
 
 class AlayaLite(BaseANN):
     def __init__(self, metric, param):
-        self.params = AlayaParams(metric=metric, **param)
-        self.client = Client()
+        self.index_save_dir = "/home/app/results/alaya_indices"
+        self.client = Client(self.index_save_dir)
         self.index = None
         self.ef = None
-        print(self.params)
+        self.save_index_name = "rabitq_index_rabitq_test"
+
+        self.index_type = param["index_type"]
+        self.metric = metric
+        self.quantization_type = param["quantization_type"]
+        self.fit_threads = param["fit_threads"]
+        self.search_threads = param["search_threads"]
+        self.R = param["R"]
+        self.L = param["L"]
+        self.M = param["M"]
 
         print("alaya init done")
 
     def fit(self, X: np.array) -> None:
-        self.index = self.client.create_index(
-            params=IndexParams(
-                index_type=self.params.index_type,
-                quantization_type=self.params.quantization_type,
-                metric=self.params.metric,
-                capacity=X.shape[0],  # auto expand capacity
+        if os.path.exists(os.path.join(self.index_save_dir, self.save_index_name)):
+            self.index = Index.load(self.index_save_dir, self.save_index_name)
+            print("load index from cache")
+        else:
+            X = X.astype(np.float32)
+            self.index = self.client.create_index(
+                name=self.save_index_name,
+                metric=self.metric,
+                quantization_type=self.quantization_type,
+                capacity=X.shape[0],
             )
-        )
-
-        self.index.fit(
-            vectors=X,
-            M=self.params.M,
-            R=self.params.R,
-            L=self.params.L,
-            num_threads=self.params.fit_threads,
-        )
+            self.index.fit(vectors=X, num_threads=self.fit_threads)
+            self.client.save_index(self.save_index_name)
+            print("save index to cache")
 
     def set_query_arguments(self, ef):
         self.ef = int(ef)
@@ -60,7 +66,7 @@ class AlayaLite(BaseANN):
         self.res = self.index.search(query=self.q, topk=self.n, ef_search=self.ef)
 
     def batch_query(self, X: np.array, n: int) -> None:
-        self.res = self.index.batch_search(queries=X, topk=n, ef_search=self.ef, num_threads=self.params.search_threads)
+        self.res = self.index.batch_search(queries=X, topk=n, ef_search=self.ef)
 
     def get_prepared_query_results(self):
         return self.res
@@ -70,29 +76,3 @@ class AlayaLite(BaseANN):
 
     def __str__(self) -> str:
         return "AlayaDB_Lite"
-
-
-@dataclass
-class AlayaParams:
-    M: int
-    R: int
-    L: int
-    index_type: str
-    metric: str
-    capacity: np.uint32 = field(default=100000)
-    quantization_type: str = field(default="none")
-    fit_threads: int = field(default=os.cpu_count())
-    search_threads: int = field(default=os.cpu_count())
-    index_save_dir: str = field(default="/home/app/results/alaya_indices")
-
-    def __post_init__(self):
-        self.M = int(self.M)
-        self.R = int(self.R)
-        self.L = int(self.L)
-        self.index_type = str(self.index_type)
-        self.metric = str(self.metric)
-        self.capacity = np.uint32(self.capacity)
-        self.quantization_type = str(self.quantization_type)
-        self.fit_threads = int(self.fit_threads)
-        self.search_threads = int(self.search_threads)
-        self.index_save_dir = str(self.index_save_dir)

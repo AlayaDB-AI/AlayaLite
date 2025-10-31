@@ -120,20 +120,23 @@ namespace py = pybind11;
     }                                                                                          \
   } while (0);
 
-#define DISPATCH_SEARCH_SPACE_TYPE(...)                                 \
-  do {                                                                  \
-    if (params_.quantization_type_ == QuantizationType::NONE) {         \
-      using SearchSpaceType = RawSpace<DataType, DistanceType, IDType>; \
-      __VA_ARGS__                                                       \
-    } else if (params_.quantization_type_ == QuantizationType::SQ8) {   \
-      using SearchSpaceType = SQ8Space<DataType, DistanceType, IDType>; \
-      __VA_ARGS__                                                       \
-    } else if (params_.quantization_type_ == QuantizationType::SQ4) {   \
-      using SearchSpaceType = SQ4Space<DataType, DistanceType, IDType>; \
-      __VA_ARGS__                                                       \
-    } else {                                                            \
-      throw std::runtime_error("Unsupported quantization type");        \
-    }                                                                   \
+#define DISPATCH_SEARCH_SPACE_TYPE(...)                                  \
+  do {                                                                   \
+    if (params_.quantization_type_ == QuantizationType::NONE) {          \
+      using SearchSpaceType = RawSpace<DataType, DistanceType, IDType>;  \
+      __VA_ARGS__                                                        \
+    } else if (params_.quantization_type_ == QuantizationType::SQ8) {    \
+      using SearchSpaceType = SQ8Space<DataType, DistanceType, IDType>;  \
+      __VA_ARGS__                                                        \
+    } else if (params_.quantization_type_ == QuantizationType::SQ4) {    \
+      using SearchSpaceType = SQ4Space<DataType, DistanceType, IDType>;  \
+      __VA_ARGS__                                                        \
+    } else if (params_.quantization_type_ == QuantizationType::RABITQ) { \
+      using SearchSpaceType = RaBitQSpace<DataType, DistanceType, IDType>;  \
+      __VA_ARGS__                                                        \
+    } else {                                                             \
+      throw std::runtime_error("Unsupported quantization type");         \
+    }                                                                    \
   } while (0);
 
 #define CAST_INDEX(INDEX, ...)                                                             \

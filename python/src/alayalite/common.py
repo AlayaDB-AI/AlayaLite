@@ -40,7 +40,7 @@ VectorDType: TypeAlias = Union[
 """ Type alias for one of {`numpy.float32`, `numpy.int8`, `numpy.uint8`} """
 DistanceMetric: TypeAlias = Literal["euclidean", "l2", "ip", "cosine", "cos"]
 """ Type alias for one of {"euclidean", "l2", "ip", "cosine", "cos"} """
-QuantizationType: TypeAlias = Literal[None, "none", "sq8", "sq4"]
+QuantizationType: TypeAlias = Literal[None, "none", "sq8", "sq4", "rabitq"]
 """ Type alias for one of {None, "none", "sq8", "sq4"} """
 IndexType: TypeAlias = Literal["hnsw", "nsg", "fusion"]
 """ Type alias for one of {"hnsw", "nsg" ,"fusion"} """
@@ -53,7 +53,7 @@ _VALID_IDTYPES = [np.uint64, np.uint32]
 _VALID_DTYPES = [np.float32, np.int8, np.uint8, np.float64, np.int32, np.uint32]
 _VALID_METRIC_TYPES = ["euclidean", "l2", "ip", "cosine", "cos"]
 _VALID_INDEX_TYPES = ["hnsw", "nsg", "fusion"]
-_VALID_SQ_TYPES = [None, "none", "sq8", "sq4"]
+_VALID_SQ_TYPES = [None, "none", "sq8", "sq4", "rabitq"]
 
 __all__ = [
     "VectorDType",
@@ -128,6 +128,8 @@ def valid_quantization_type(quantization_type: str) -> _QuantizationType:
         return _QuantizationType.SQ8
     elif quantization_type.lower() == "sq4":
         return _QuantizationType.SQ4
+    elif quantization_type.lower() == "rabitq":
+        return _QuantizationType.RABITQ
 
 
 def assert_valid_index_type(index: str) -> None:
