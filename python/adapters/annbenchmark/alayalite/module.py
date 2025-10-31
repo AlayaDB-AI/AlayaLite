@@ -1,53 +1,46 @@
-# Copyright 2025 AlayaDB.AI
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 import os
-from dataclasses import dataclass, field
 
 import numpy as np
-from alayalite import Client, IndexParams
+from alayalite import Client, Index
 
 from ..base.module import BaseANN
 
 
 class AlayaLite(BaseANN):
-    def __init__(self, metric, param):
-        self.params = AlayaParams(metric=metric, **param)
-        self.client = Client()
+    def __init__(self, metric, dim, method_param):
+        self.index_save_dir = "alaya_indices"
+        self.client = Client(self.index_save_dir)
         self.index = None
         self.ef = None
-        print(self.params)
+        self.dim = dim
+        self.metric = metric
 
+        self.index_type = method_param["index_type"]
+        self.quantization_type = method_param["quantization_type"]
+        self.fit_threads = method_param["fit_threads"]
+        self.search_threads = method_param["search_threads"]
+        self.R = method_param["R"]
+        self.L = method_param["L"]
+        self.M = method_param["M"]
+
+        self.save_index_name = f"alayalite_index_it_{self.index_type}_qt_{self.quantization_type}_dim_{self.dim}_metric_{self.metric}_M{self.M}.idx"
         print("alaya init done")
 
     def fit(self, X: np.array) -> None:
-        self.index = self.client.create_index(
-            params=IndexParams(
-                index_type=self.params.index_type,
-                quantization_type=self.params.quantization_type,
-                metric=self.params.metric,
-                capacity=X.shape[0],  # auto expand capacity
+        if os.path.exists(os.path.join(self.index_save_dir, self.save_index_name)):
+            self.index = Index.load(self.index_save_dir, self.save_index_name)
+            print("load index from cache")
+        else:
+            X = X.astype(np.float32)
+            self.index = self.client.create_index(
+                name=self.save_index_name,
+                metric=self.metric,
+                quantization_type=self.quantization_type,
+                capacity=X.shape[0],
             )
-        )
-
-        self.index.fit(
-            vectors=X,
-            M=self.params.M,
-            R=self.params.R,
-            L=self.params.L,
-            num_threads=self.params.fit_threads,
-        )
+            self.index.fit(vectors=X, num_threads=self.fit_threads)
+            self.client.save_index(self.save_index_name)
+            print("save index to cache")
 
     def set_query_arguments(self, ef):
         self.ef = int(ef)
@@ -60,7 +53,7 @@ class AlayaLite(BaseANN):
         self.res = self.index.search(query=self.q, topk=self.n, ef_search=self.ef)
 
     def batch_query(self, X: np.array, n: int) -> None:
-        self.res = self.index.batch_search(queries=X, topk=n, ef_search=self.ef, num_threads=self.params.search_threads)
+        self.res = self.index.batch_search(queries=X, topk=n, ef_search=self.ef)
 
     def get_prepared_query_results(self):
         return self.res
@@ -69,30 +62,4 @@ class AlayaLite(BaseANN):
         return self.res
 
     def __str__(self) -> str:
-        return "AlayaDB_Lite"
-
-
-@dataclass
-class AlayaParams:
-    M: int
-    R: int
-    L: int
-    index_type: str
-    metric: str
-    capacity: np.uint32 = field(default=100000)
-    quantization_type: str = field(default="none")
-    fit_threads: int = field(default=os.cpu_count())
-    search_threads: int = field(default=os.cpu_count())
-    index_save_dir: str = field(default="/home/app/results/alaya_indices")
-
-    def __post_init__(self):
-        self.M = int(self.M)
-        self.R = int(self.R)
-        self.L = int(self.L)
-        self.index_type = str(self.index_type)
-        self.metric = str(self.metric)
-        self.capacity = np.uint32(self.capacity)
-        self.quantization_type = str(self.quantization_type)
-        self.fit_threads = int(self.fit_threads)
-        self.search_threads = int(self.search_threads)
-        self.index_save_dir = str(self.index_save_dir)
+        return "AlayaLite"
