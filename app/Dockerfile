@@ -9,10 +9,10 @@ RUN pip install --upgrade pip --index-url https://mirrors.sustech.edu.cn/pypi/we
     pip install --no-cache-dir -r /app/requirements.txt
 
 RUN python -c "import urllib.request; \
-        url = 'https://github.com/AlayaDB-AI/AlayaLite/releases/download/v0.1.0a2/alayalite-0.1.0a2-cp312-cp312-linux_x86_64.whl'; \
+        url = 'https://github.com/AlayaDB-AI/AlayaLite/releases/download/v0.1.0a2/alayalite-0.1.0a3-cp312-cp312-linux_x86_64.whl'; \
         filename = url.split('/')[-1]; \
         urllib.request.urlretrieve(url, filename)" && \
-    pip install alayalite-0.1.0a2-cp312-cp312-linux_x86_64.whl
+    pip install alayalite-0.1.0a3-cp312-cp312-linux_x86_64.whl
 
 EXPOSE 8000
 
