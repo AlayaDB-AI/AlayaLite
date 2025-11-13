@@ -14,6 +14,7 @@ from app.models.collection import (
     QueryCollectionRequest,
     ResetCollectionRequest,
     SaveCollectionRequest,
+    SetMetricRequest,
     UpsertCollectionRequest,
 )
 
@@ -42,6 +43,18 @@ async def create_collection(request: CreateCollectionRequest):
         msg = str(e)
         code = status.HTTP_409_CONFLICT if "already exists" in msg else status.HTTP_400_BAD_REQUEST
         return JSONResponse(status_code=code, content={"error": msg})
+
+
+@router.post(path="/collection/set_metric", tags=["collection"])
+async def set_metric(request: SetMetricRequest):
+    collection = client.get_collection(request.collection_name)
+    if collection is None:
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"error": f"Collection {request.collection_name} does not exist"},
+        )
+    collection.set_metric(request.metric)
+    return f"Metric for collection {request.collection_name} set to {request.metric}"
 
 
 @router.post(path="/collection/list", tags=["collection"])

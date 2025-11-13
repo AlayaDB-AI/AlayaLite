@@ -35,13 +35,14 @@ class Collection:
     @brief Collection class to manage a collection of documents and their embeddings.
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, metric: str = "l2"):
         """
         Initializes the collection.
 
         Args:
             name (str): The name of the collection.
         """
+        self.__metric = metric
         self.__name = name
         self.__dataframe = pd.DataFrame(columns=["id", "document", "metadata"])
         self.__index_py = None
@@ -107,7 +108,7 @@ class Collection:
 
         if self.__index_py is None:
             _, _, first_embedding, _ = items[0]
-            params = IndexParams(data_type=np.array(first_embedding).dtype, metric="l2")
+            params = IndexParams(data_type=np.array(first_embedding).dtype, metric=self.__metric)
             self.__index_py = Index(self.__name, params)
             all_embeddings = np.array([item[2] for item in items], dtype=params.data_type)
             self.__index_py.fit(all_embeddings, ef_construction=100, num_threads=1)
@@ -270,3 +271,13 @@ class Collection:
 
         instance.__index_py = Index.load(url, name)
         return instance
+
+    def set_metric(self, metric: str):
+        """
+        Sets the metric for the collection's index.
+        """
+
+        if self.__index_py is not None:
+            raise RuntimeError("Cannot change metric after index is created")
+
+        self.__metric = metric

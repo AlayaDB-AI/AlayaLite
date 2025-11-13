@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 
 __all__ = [
+    "SetMetricRequest",
     "CreateCollectionRequest",
     "DeleteCollectionRequest",
     "ResetCollectionRequest",
@@ -15,6 +16,11 @@ __all__ = [
 
 class CreateCollectionRequest(BaseModel):
     collection_name: str
+
+
+class SetMetricRequest(BaseModel):
+    collection_name: str
+    metric: str
 
 
 class DeleteCollectionRequest(BaseModel):

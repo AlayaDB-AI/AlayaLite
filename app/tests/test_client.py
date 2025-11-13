@@ -402,3 +402,62 @@ def test_root_endpoint(fresh_client: TestClient):
         json={"collection_name": "test", "filter": {"category": "A"}},
     )
     assert resp.status_code == 200
+
+
+def test_cosine_metric_setting(fresh_client: TestClient):
+    client = fresh_client
+    # create collection with cosine metric
+    resp = client.post("/api/v1/collection/create", json={"collection_name": "cosine_coll"})
+    assert resp.status_code == 200
+
+    # set metric to cosine
+    resp = client.post("/api/v1/collection/set_metric", json={"collection_name": "cosine_coll", "metric": "cosine"})
+    assert resp.status_code == 200
+
+    query_vector = np.array([1.0, 0.0, 0.0]).tolist()
+    insert_vector_0 = np.array([-1.0, 0.0, 0.0]).tolist()
+    insert_vector_1 = np.array([0.0, 1.0, 0.0]).tolist()
+    insert_vector_2 = np.array([1.0, 0.0, 0.0]).tolist()
+
+    # insert items
+    insert_payload = {
+        "collection_name": "cosine_coll",
+        "items": [
+            (1, "Document 1", insert_vector_0, {"category": "A"}),
+            (2, "Document 2", insert_vector_1, {"category": "B"}),
+            (3, "Document 3", insert_vector_2, {"category": "C"}),
+        ],
+    }
+    resp = client.post("/api/v1/collection/insert", json=insert_payload)
+    assert resp.status_code == 200
+
+    # query
+    query_payload = {
+        "collection_name": "cosine_coll",
+        "query_vector": [query_vector],
+        "limit": 3,
+        "ef_search": 10,
+        "num_threads": 1,
+    }
+    resp = client.post("/api/v1/collection/query", json=query_payload)
+    assert resp.status_code == 200
+    ret = resp.json()
+    print(ret)
+
+    eps = 1e-5
+
+    def get_cosine_similarity_map(vec1, vec2):
+        vec1 = np.array(vec1)
+        vec2 = np.array(vec2)
+        return -1 * (np.dot(vec1, vec2) / (np.linalg.norm(vec1) * np.linalg.norm(vec2)))
+
+    top1_cos = get_cosine_similarity_map(query_vector, insert_vector_2)  # Direction is the same.
+    top2_cos = get_cosine_similarity_map(query_vector, insert_vector_1)  # Orthogonal vectors.
+    top3_cos = get_cosine_similarity_map(query_vector, insert_vector_0)  # Opposite direction.
+
+    assert abs(ret["distance"][0][0] - top1_cos) < eps
+    assert ret["id"][0][0] == 3
+    assert abs(ret["distance"][0][1] - top2_cos) < eps
+    assert ret["id"][0][1] == 2
+    assert abs(ret["distance"][0][2] - top3_cos) < eps
+    assert ret["id"][0][2] == 1
