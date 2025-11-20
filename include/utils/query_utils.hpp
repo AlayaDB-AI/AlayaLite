@@ -16,12 +16,14 @@
 
 #pragma once
 
+#include <sys/types.h>
 #include <cstddef>
 #include <cstdint>
 #include <unordered_set>
 #include <vector>
 #include "../index/neighbor.hpp"
 #include "memory.hpp"
+#include "rabitq_utils/search_utils/allocator.hpp"
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -67,7 +69,9 @@ inline int count_trailing_zeros(uint64_t x) {
  */
 class DynamicBitset {
  private:
-  std::vector<uint64_t> data_;
+  std::vector<uint64_t, AlignedAllocator<uint64_t>> data_;
+  // std::vector<uint64_t> data_;
+  // std::vector<uint64_t, AlignAlloc<uint64_t>> data_;
   size_t size_;
 
  public:
@@ -77,7 +81,8 @@ class DynamicBitset {
    * @param num_bits The number of bits in the bitset
    */
   explicit DynamicBitset(size_t num_bits) : size_(num_bits) {
-    data_.resize((num_bits + 63) / 64, 0);
+    // data_.resize((num_bits + 63) / 64, 0);
+    data_ = std::vector<uint64_t, AlignedAllocator<uint64_t>>((num_bits + 63) / 64,0);
   }
 
   /**
@@ -85,7 +90,7 @@ class DynamicBitset {
    *
    * @param pos The position of the bit to set
    */
-  void set(size_t pos) { data_[pos / 64] |= (1ULL << (pos % 64)); }
+  void set(size_t pos) noexcept { data_[pos >> 6] |= (1ULL << (pos & 63)); }
 
   /**
    * @brief Get the value of the bit at the specified position
@@ -93,7 +98,9 @@ class DynamicBitset {
    * @param pos The position of the bit to get
    * @return true if the bit is set, false otherwise
    */
-  auto get(size_t pos) const -> bool { return (data_[pos / 64] & (1ULL << (pos % 64))) != 0; }
+  [[nodiscard]] auto get(size_t pos) const -> bool {
+    return (data_[pos >> 6] >> (pos & 63)) & 1ULL;  // NOLINT
+  }
 
   /**
    * @brief Get the pos address object
