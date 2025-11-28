@@ -53,8 +53,8 @@
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
-#define FAST_BEGIN                                                               \
-  _Pragma("GCC push_options")                                                  \
+#define FAST_BEGIN            \
+  _Pragma("GCC push_options") \
       _Pragma("GCC optimize (\"unroll-loops,associative-math,no-signed-zeros\")")
 #define FAST_END _Pragma("GCC pop_options")
 #else
