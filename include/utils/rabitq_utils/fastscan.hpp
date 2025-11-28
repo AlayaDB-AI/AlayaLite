@@ -208,9 +208,6 @@ inline void accumulate(const uint8_t *__restrict__ codes, const uint8_t *__restr
   __m256i dis1 = _mm256_add_epi16(_mm256_permute2f128_si256(accu2, accu3, 0x21),
                                   _mm256_blend_epi32(accu2, accu3, 0xF0));
   _mm256_storeu_si256((__m256i *)&result[16], dis1);
-#else
-  std::cerr << "no avx simd supported!\n";
-  exit(1);
 #endif
 }
 // NOLINTEND

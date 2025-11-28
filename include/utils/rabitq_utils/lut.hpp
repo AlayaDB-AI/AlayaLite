@@ -35,16 +35,16 @@ inline void data_range(const T *__restrict__ vec0, size_t dim, T &lo, T &hi) {
 
 template <typename T>
 inline void scalar_quantize_normal(
-    T *__restrict__ result, const T *__restrict__ vec0, size_t dim, T lo,
+    uint8_t *__restrict__ result, const T *__restrict__ vec0, size_t dim, T lo,
     T delta) {  // normal implementation when AVX512F is not available
   T one_over_delta = 1.0F / delta;
 
   // vec0:lut_float, result:lut_
   ConstRowMajorArrayMap<T> v0(vec0, 1, static_cast<long>(dim));  // NOLINT
-  RowMajorArrayMap<T> res(result, 1, dim);
+  RowMajorArrayMap<uint8_t> res(result, 1, dim);
 
   // round to nearest integer, then cast to integer
-  res = ((v0 - lo) * one_over_delta).round().template cast<T>();
+  res = ((v0 - lo) * one_over_delta).round().template cast<uint8_t>();
 }
 
 template <typename T>

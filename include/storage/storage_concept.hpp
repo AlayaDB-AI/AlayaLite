@@ -24,7 +24,7 @@ namespace alaya {
 struct StorageContent {};
 
 template <typename T>
-concept DataStorage = requires(T t, T::id_type i, T::data_type *data) {
+concept DataStorage = requires(T t, typename T::id_type i, typename T::data_type *data) {
   { t[i] } -> std::same_as<typename T::data_type *>;
   { t.is_valid(i) } -> std::same_as<bool>;
   { t.insert(data) } -> std::same_as<typename T::id_type>;

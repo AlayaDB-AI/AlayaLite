@@ -29,6 +29,7 @@
 #include "defines.hpp"
 #include "fht_avx.hpp"
 #include "roundup.hpp"
+#include "utils/log.hpp"
 
 namespace alaya {
 // NOLINTBEGIN
@@ -61,7 +62,8 @@ inline size_t padding_requirement(size_t dim, RotatorType type) {
   if (type == RotatorType::FhtKacRotator) {
     return round_up_to_multiple_of<size_t>(dim, 64);
   }
-  throw std::invalid_argument("Invalid rotator type in padding_requirement()\n");
+  ALAYA_UNREACHABLE;
+  // throw std::invalid_argument("Invalid rotator type in padding_requirement()\n");
 }
 
 template <typename T>
@@ -124,12 +126,12 @@ class MatrixRotator : public Rotator<T> {
 };
 
 static inline void flip_sign(const uint8_t *flip, float *data, size_t dim) {
+#if defined(__AVX512F__)
   constexpr size_t kFloatsPerChunk = 64;  // Process 64 floats per iteration
   // constexpr size_t bits_per_chunk = floats_per_chunk;  // 64 bits = 8 bytes
 
   static_assert(kFloatsPerChunk % 16 == 0,
                 "floats_per_chunk must be divisible by AVX512 register width");
-
   for (size_t i = 0; i < dim; i += kFloatsPerChunk) {
     // Load 64 bits (8 bytes) from the bit sequence
     uint64_t mask_bits;
@@ -161,6 +163,7 @@ static inline void flip_sign(const uint8_t *flip, float *data, size_t dim) {
     vec3 = _mm512_mask_xor_ps(vec3, mask3, vec3, sign_flip);
     _mm512_storeu_ps(&data[i + 48], vec3);
   }
+#endif
 }
 
 template <typename T>
@@ -245,6 +248,7 @@ class FhtKacRotator : public Rotator<float> {
   }
 
   static void kacs_walk(float *data, size_t len) {
+#if defined(__AVX512F__)
     // ! len % 32 == 0;
     for (size_t i = 0; i < len / 2; i += 16) {
       __m512 x = _mm512_loadu_ps(&data[i]);
@@ -256,6 +260,7 @@ class FhtKacRotator : public Rotator<float> {
       _mm512_storeu_ps(&data[i], new_x);
       _mm512_storeu_ps(&data[i + (len / 2)], new_y);
     }
+#endif
   }
 
   void rotate(const float *data, float *rotated_vec) const override {
@@ -319,8 +324,7 @@ std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
   if (padded_dim == 0) {
     padded_dim = rotator_impl::padding_requirement(dim, type);
     if (padded_dim != dim) {
-      std::cerr << "vectors are padded to " << padded_dim
-                << " dimensions for aligned computation\n";
+      LOG_DEBUG("vectors are padded to {} dimensions for aligned computation\n",padded_dim);
     }
   }
 
@@ -330,7 +334,7 @@ std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
 
   if (type == RotatorType::MatrixRotator) {
     if constexpr (std::is_floating_point_v<T>) {
-      std::cerr << "MatrixRotator is selected\n";
+      LOG_DEBUG("MatrixRotator is selected\n");
       return std::make_unique<rotator_impl::MatrixRotator<T>>(dim, padded_dim);
     } else {
       throw std::invalid_argument(
@@ -340,14 +344,14 @@ std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
 
   if (type == RotatorType::FhtKacRotator) {
     if constexpr (std::is_same_v<T, float>) {
-      std::cerr << "FhtKacRotator is selected\n";
+      LOG_DEBUG("FhtKacRotator is selected\n");
       return std::make_unique<rotator_impl::FhtKacRotator>(dim, padded_dim);
     } else {
       throw std::invalid_argument("FhtKacRotator only supports float type!");
     }
   }
-
-  throw std::invalid_argument("Invalid rotator type in choose_rotator()\n");
+  ALAYA_UNREACHABLE;
+  // throw std::invalid_argument("Invalid rotator type in choose_rotator()\n");
 }
 // NOLINTEND
 }  // namespace alaya

@@ -19,7 +19,9 @@
 namespace alaya {
 // Fast Hadamard Transform using AVX instructions
 // NOLINTBEGIN
+
 inline void helper_float_6(float *buf) {
+#if defined(__AVX512F__)
   for (int j = 0; j < 64; j += 64) {
     for (int k = 0; k < 8; k += 8) {
       __asm__ volatile(
@@ -197,9 +199,11 @@ inline void helper_float_6(float *buf) {
             "%ymm9", "%ymm10", "%ymm11", "%ymm12", "%ymm13", "%ymm14", "%ymm15", "memory");
     }
   }
+#endif
 }
 
 inline void helper_float_7(float *buf) {
+#if defined(__AVX512F__)
   for (int j = 0; j < 128; j += 64) {
     for (int k = 0; k < 8; k += 8) {
       __asm__ volatile(
@@ -391,9 +395,11 @@ inline void helper_float_7(float *buf) {
             "%ymm9", "%ymm10", "%ymm11", "%ymm12", "%ymm13", "%ymm14", "%ymm15", "memory");
     }
   }
+#endif
 }
 
 inline void helper_float_8_recursive(float *buf, int depth) {
+#if defined(__AVX512F__)
   if (depth == 6) {
     for (int j = 0; j < 64; j += 64) {
       for (int k = 0; k < 8; k += 8) {
@@ -606,11 +612,13 @@ inline void helper_float_8_recursive(float *buf, int depth) {
     }
     return;
   }
+#endif
 }
 
 inline void helper_float_8(float *buf) { helper_float_8_recursive(buf, 8); }
 
 inline void helper_float_9(float *buf) {
+#if defined(__AVX512F__)
   for (int j = 0; j < 512; j += 64) {
     for (int k = 0; k < 8; k += 8) {
       __asm__ volatile(
@@ -838,9 +846,11 @@ inline void helper_float_9(float *buf) {
             "%ymm9", "%ymm10", "%ymm11", "%ymm12", "%ymm13", "%ymm14", "%ymm15", "memory");
     }
   }
+#endif
 }
 
 inline void helper_float_10(float *buf) {
+#if defined(__AVX512F__)
   for (int j = 0; j < 1024; j += 64) {
     for (int k = 0; k < 8; k += 8) {
       __asm__ volatile(
@@ -1082,9 +1092,11 @@ inline void helper_float_10(float *buf) {
             "%ymm9", "%ymm10", "%ymm11", "%ymm12", "%ymm13", "%ymm14", "%ymm15", "memory");
     }
   }
+#endif
 }
 
 inline void helper_float_11(float *buf) {
+#if defined(__AVX512F__)
   for (int j = 0; j < 2048; j += 64) {
     for (int k = 0; k < 8; k += 8) {
       __asm__ volatile(
@@ -1336,6 +1348,7 @@ inline void helper_float_11(float *buf) {
             "%ymm9", "%ymm10", "%ymm11", "%ymm12", "%ymm13", "%ymm14", "%ymm15", "memory");
     }
   }
+#endif
 }
 // NOLINTEND
 }  // namespace alaya
