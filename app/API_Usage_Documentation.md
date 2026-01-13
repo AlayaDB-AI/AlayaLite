@@ -1,7 +1,3 @@
-# AlayaLite 向量数据库 API 使用文档
-
-## 基本信息
-````markdown
 # AlayaLite Vector Database API Usage Documentation
 
 ## Overview
@@ -227,16 +223,3 @@
 ```
 
 ---
-
-## Notes
-
-- All endpoints use POST and accept parameters as JSON in the request body.
-- Vectors should be represented as a one-dimensional array, e.g. `[0.1, 0.2, 0.3]`.
-- The `items` field is a list where each element has the structure `[id, document, vector, metadata]`.
-- The `score` field in query results is a similarity score — higher means more similar.
-
----
-
-If you need further assistance or have special requirements, please provide more details.
-
-````
