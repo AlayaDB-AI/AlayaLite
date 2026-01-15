@@ -35,7 +35,7 @@ namespace alaya {
  * @param x The 64-bit integer. Assumed to be non-zero.
  * @return The number of trailing zero bits.
  */
-inline int count_trailing_zeros(uint64_t x) {
+inline auto count_trailing_zeros(uint64_t x) -> int {
 #if defined(_MSC_VER)
   unsigned long index;
   _BitScanForward64(&index, x);
@@ -203,7 +203,7 @@ class HierarchicalBitset {
   auto get(size_t pos) const -> bool {
     size_t block = pos / kBitsPerBlock;
     size_t offset = pos % kBitsPerBlock;
-    return (data_[block * 8 + offset / 64] & (1ULL << (offset % 64))) != 0;
+    return (data_[(block * 8) + (offset / 64)] & (1ULL << (offset % 64))) != 0;
   }
 
   /**
@@ -216,9 +216,9 @@ class HierarchicalBitset {
       if (summary_[i] == 0) {
         continue;
       }
-      size_t block = i * kSummaryBlockSize + count_trailing_zeros(summary_[i]);
+      size_t block = (i * kSummaryBlockSize) + count_trailing_zeros(summary_[i]);
       for (size_t j = 0; j < 8; ++j) {
-        if (data_[block * 8 + j] == 0) {
+        if (data_[(block * 8) + j] == 0) {
           continue;
         }
         return static_cast<int>((block * kBitsPerBlock) + (j * 64) +
@@ -258,10 +258,10 @@ struct LinearPool {
     if (size_ < capacity_) {
       size_++;
     }
-    if (lo < cur_) {
+    if (static_cast<size_t>(lo) < cur_) {
       cur_ = lo;
     }
-    for (int i = 0; i < size_; i++) {
+    for (size_t i = 0; i < size_; i++) {
       // LOG_INFO("i {} ,dist is {}", data_[i].id_, data_[i].distance_);
     }
     // LOG_INFO("cur is {} , size {}", cur_, size_);

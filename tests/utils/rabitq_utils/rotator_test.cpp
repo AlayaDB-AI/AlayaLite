@@ -147,7 +147,7 @@ TEST_F(RotatorTest, MatrixRotator_Orthogonality) {
 
   // Reconstruct Q by rotating basis vectors
   Eigen::MatrixXf Q(n, n);
-  for (int i = 0; i < n; ++i) {
+  for (size_t i = 0; i < n; ++i) {
     Eigen::VectorXf e = Eigen::VectorXf::Zero(n);
     e(i) = 1.0f;
     Eigen::VectorXf col(n);

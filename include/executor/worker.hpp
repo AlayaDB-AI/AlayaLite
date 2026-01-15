@@ -183,12 +183,13 @@ class Worker : public std::enable_shared_from_this<Worker> {
 
   std::thread thread_;  ///< The thread associated with the worker.
 
+  TaskQueue *task_queue_;  ///< Pointer to the task queue. All workers share the same task queue.
+
+  uint32_t local_task_cnt_;  ////< The count of local tasks assigned to the worker.
+
   std::vector<std::coroutine_handle<>>
       local_tasks_;          ///< The mini-batch of tasks assigned to the worker. Each task is
                              ///< represented by a coroutine handle.
-  uint32_t local_task_cnt_;  ////< The count of local tasks assigned to the worker.
-
-  TaskQueue *task_queue_;  ///< Pointer to the task queue. All workers share the same task queue.
 
   std::atomic<size_t> *total_task_cnt_;  ///< Pointer to an atomic variable that tracks the
                                          ///< total number of tasks across all workers.

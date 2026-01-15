@@ -88,14 +88,14 @@ class SharedLock {
   // degrade an exclusive lock to a shared lock
   void degrade_lock() {
     int expected = -1;
-    bool ret = state_.compare_exchange_weak(expected, 1);
+    [[maybe_unused]] bool ret = state_.compare_exchange_weak(expected, 1);
     assert(ret);
   }
 
   // upgrade a shared lock to an exclusive lock
   void upgrade_lock() {
     int expected = 1;
-    bool ret = state_.compare_exchange_weak(expected, -1);
+    [[maybe_unused]] bool ret = state_.compare_exchange_weak(expected, -1);
     assert(ret);
   }
 

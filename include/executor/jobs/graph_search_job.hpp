@@ -227,10 +227,10 @@ struct GraphSearchJob {
       mem_prefetch_l1(graph_->edges(u), graph_->max_nbrs_ * sizeof(IDType) / 64);
       co_await std::suspend_always{};
 
-      for (int i = 0; i < graph_->max_nbrs_; ++i) {
-        int v = graph_->at(u, i);
+      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
+        auto v = graph_->at(u, i);
 
-        if (v == -1) {
+        if (v == static_cast<IDType>(-1)) {
           break;
         }
 
@@ -267,10 +267,10 @@ struct GraphSearchJob {
       mem_prefetch_l1(graph_->edges(u), graph_->max_nbrs_ * sizeof(IDType) / 64);
       co_await std::suspend_always{};
 
-      for (int i = 0; i < graph_->max_nbrs_; ++i) {
-        int v = graph_->at(u, i);
+      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
+        auto v = graph_->at(u, i);
 
-        if (v == -1) {
+        if (v == static_cast<IDType>(-1)) {
           break;
         }
 
@@ -302,10 +302,10 @@ struct GraphSearchJob {
 
     while (pool.has_next()) {
       auto u = pool.pop();
-      for (int i = 0; i < graph_->max_nbrs_; ++i) {
-        int v = graph_->at(u, i);
+      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
+        auto v = graph_->at(u, i);
 
-        if (v == -1) {
+        if (v == static_cast<IDType>(-1)) {
           break;
         }
 
@@ -317,7 +317,7 @@ struct GraphSearchJob {
         auto jump_prefetch = i + 3;
         if (jump_prefetch < graph_->max_nbrs_) {
           auto prefetch_id = graph_->at(u, jump_prefetch);
-          if (prefetch_id != -1) {
+          if (prefetch_id != static_cast<IDType>(-1)) {
             space_->prefetch_by_id(prefetch_id);
           }
         }
@@ -337,10 +337,10 @@ struct GraphSearchJob {
 
     while (pool.has_next()) {
       auto u = pool.pop();
-      for (int i = 0; i < graph_->max_nbrs_; ++i) {
-        int v = graph_->at(u, i);
+      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
+        auto v = graph_->at(u, i);
 
-        if (v == -1) {
+        if (v == static_cast<IDType>(-1)) {
           break;
         }
 
@@ -352,7 +352,7 @@ struct GraphSearchJob {
         auto jump_prefetch = i + 3;
         if (jump_prefetch < graph_->max_nbrs_) {
           auto prefetch_id = graph_->at(u, jump_prefetch);
-          if (prefetch_id != -1) {
+          if (prefetch_id != static_cast<IDType>(-1)) {
             space_->prefetch_by_id(prefetch_id);
           }
         }
@@ -384,10 +384,10 @@ struct GraphSearchJob {
         }
         continue;
       }
-      for (int i = 0; i < graph_->max_nbrs_; ++i) {
-        int v = graph_->at(u, i);
+      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
+        auto v = graph_->at(u, i);
 
-        if (v == -1) {
+        if (v == static_cast<IDType>(-1)) {
           break;
         }
 
@@ -399,7 +399,7 @@ struct GraphSearchJob {
         auto jump_prefetch = i + 3;
         if (jump_prefetch < graph_->max_nbrs_) {
           auto prefetch_id = graph_->at(u, jump_prefetch);
-          if (prefetch_id != -1) {
+          if (prefetch_id != static_cast<IDType>(-1)) {
             space_->prefetch_by_id(prefetch_id);
           }
         }

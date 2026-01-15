@@ -57,16 +57,16 @@ class RawSpace {
   using DataTypeAlias = DataType;
   using IDTypeAlias = IDType;
   using DistanceTypeAlias = DistanceType;
+  IDType capacity_{0};        ///< The maximum number of data points (nodes)
+  uint32_t dim_{0};           ///< Dimensionality of the data points
   MetricType metric_{MetricType::L2};  ///< Metric type
 
   DistFunc<DistDataType, DistanceType>
       distance_calu_func_;    ///< Distance calculation function
   uint32_t data_size_{0};     ///< Size of each data point in bytes
-  uint32_t dim_{0};           ///< Dimensionality of the data points
   IDType item_cnt_{0};        ///< Number of data points (nodes), can be either
                               ///< available or deleted
   IDType delete_cnt_{0};      ///< Number of deleted data points
-  IDType capacity_{0};        ///< The maximum number of data points (nodes)
   DataStorage data_storage_;  ///< Data storage
 
  public:

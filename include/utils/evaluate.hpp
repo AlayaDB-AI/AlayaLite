@@ -36,7 +36,6 @@ auto find_exact_gt(const std::vector<DataType> &queries, const std::vector<DataT
     return {};
   }
   auto query_num = queries.size() / dim;
-  auto data_num = data_view.size() / dim;
 
   std::vector<IDType> res(topk * query_num, 0);
   for (IDType i = 0; i < query_num; i++) {

@@ -446,7 +446,7 @@ class HNSWImpl {
         }
 
         visited_array[candidate_id] = visited_array_tag;  // Mark the candidate as visited.
-        char *curr_obj1 = (get_data_by_internal_id(candidate_id));  // Get data for the candidate.
+        [[maybe_unused]] char *curr_obj1 = (get_data_by_internal_id(candidate_id));  // Get data for the candidate.
 
         // Calculate the distance to the current candidate.
         DistanceType dist1 = space_->get_distance(data_label, get_external_label(candidate_id));
@@ -680,7 +680,7 @@ class HNSWImpl {
       memset(link_lists_[internal_id], 0, size_links_per_element_ * cur_level + 1);
     }
 
-    if (curr_node != -1) {
+    if (curr_node != static_cast<InternalID>(-1)) {
       if (cur_level < maxlevel_copy) {
         DistanceType curdist = space_->get_distance(label, get_external_label(curr_node));
         for (int level = maxlevel_copy; level > cur_level; level--) {
@@ -693,7 +693,7 @@ class HNSWImpl {
             LinkListSizeType size = get_list_count(data);
 
             auto *datal = static_cast<InternalID *>(reinterpret_cast<LinkListSizeType *>(data) + 1);
-            for (int i = 0; i < size; i++) {
+            for (LinkListSizeType i = 0; i < size; i++) {
               InternalID cand = datal[i];
               DistanceType d = space_->get_distance(label, get_external_label(cand));
               if (d < curdist) {

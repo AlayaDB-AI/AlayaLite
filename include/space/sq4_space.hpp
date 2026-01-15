@@ -54,8 +54,7 @@ namespace alaya {
  * @tparam DistanceType The data type for storing distances, with the default being float.
  * @tparam IDType The data type for storing IDs, with the default being uint32_t.
  */
-template <typename DataType = float, typename DistanceType = float,
-          typename IDType = uint32_t,
+template <typename DataType = float, typename DistanceType = float, typename IDType = uint32_t,
           typename DataStorage = SequentialStorage<uint8_t, IDType>>
 class SQ4Space {
  public:
@@ -63,8 +62,7 @@ class SQ4Space {
   using IDTypeAlias = IDType;
   using DistanceTypeAlias = DistanceType;
 
-  using DistDataType =
-      DataType;  ///< Type alias for the data type used in distance calculations
+  using DistDataType = DataType;  ///< Type alias for the data type used in distance calculations
 
   /**
    * @brief Construct an empty SQ4Space object without parameter for loading.
@@ -117,8 +115,7 @@ class SQ4Space {
    */
   void fit(DataType *data, IDType item_cnt) {
     if (item_cnt > capacity_) {
-      throw std::runtime_error(
-          "The number of data points exceeds the capacity of the space");
+      throw std::runtime_error("The number of data points exceeds the capacity of the space");
     }
     item_cnt_ = item_cnt;
 
@@ -134,9 +131,7 @@ class SQ4Space {
    * @param id The ID of the data point
    * @return Pointer to the data for the given ID
    */
-  auto get_data_by_id(IDType id) const -> uint8_t * {
-    return data_storage_[id];
-  }
+  auto get_data_by_id(IDType id) const -> uint8_t * { return data_storage_[id]; }
 
   /**
    * @brief Calculate the distance between two data points
@@ -145,8 +140,8 @@ class SQ4Space {
    * @return The calculated distance
    */
   auto get_distance(IDType i, IDType j) -> DistanceType {
-    return distance_calu_func_(get_data_by_id(i), get_data_by_id(j), dim_,
-                               quantizer_.get_min(), quantizer_.get_max());
+    return distance_calu_func_(get_data_by_id(i), get_data_by_id(j), dim_, quantizer_.get_min(),
+                               quantizer_.get_max());
   }
 
   /**
@@ -165,9 +160,7 @@ class SQ4Space {
    * @brief Get the distance calculation function
    * @return The distance calculation function
    */
-  auto get_dist_func() -> DistFuncSQ<DataType, DistanceType> {
-    return distance_calu_func_;
-  }
+  auto get_dist_func() -> DistFuncSQ<DataType, DistanceType> { return distance_calu_func_; }
 
   /**
    * @brief Get the dimensionality of the data points
@@ -190,8 +183,8 @@ class SQ4Space {
    */
   auto insert(DataType *data) -> IDType {
     auto id = data_storage_.reserve();
-    if (id == -1) {
-      return -1;
+    if (id == static_cast<IDType>(-1)) {
+      return static_cast<IDType>(-1);
     }
     item_cnt_++;
     quantizer_.encode(data, data_storage_[id]);
@@ -282,8 +275,7 @@ class SQ4Space {
 #else
       query_ = static_cast<uint8_t *>(std::aligned_alloc(64, aligned_size));
 #endif
-      std::memcpy(query_, distance_space_.get_data_by_id(id),
-                  distance_space_.get_data_size());
+      std::memcpy(query_, distance_space_.get_data_by_id(id), distance_space_.get_data_size());
     }
 
     /**
@@ -305,8 +297,7 @@ class SQ4Space {
     auto operator()(IDType u) const -> DistanceType {
       return distance_space_.distance_calu_func_(
           query_, distance_space_.get_data_by_id(u), distance_space_.get_dim(),
-          distance_space_.get_quantizer().get_min(),
-          distance_space_.get_quantizer().get_max());
+          distance_space_.get_quantizer().get_min(), distance_space_.get_quantizer().get_max());
     }
   };
 
@@ -314,35 +305,28 @@ class SQ4Space {
    * @brief Prefetch data into cache by ID to optimize memory access
    * @param id The ID of the data point to prefetch
    */
-  inline auto prefetch_by_id(IDType id) -> void {
-    mem_prefetch_l1(get_data_by_id(id), data_size_ / 64);
-  }
+  auto prefetch_by_id(IDType id) -> void { mem_prefetch_l1(get_data_by_id(id), data_size_ / 64); }
 
   /**
    * @brief Prefetch data into cache by address to optimize memory access
    * @param address The address of the data to prefetch
    */
-  inline auto prefetch_by_address(DataType *address) -> void {
-    mem_prefetch_l1(address, data_size_ / 64);
-  }
+  auto prefetch_by_address(DataType *address) -> void { mem_prefetch_l1(address, data_size_ / 64); }
 
-  auto get_query_computer(const DataType *query) {
-    return QueryComputer(*this, query);
-  }
+  auto get_query_computer(const DataType *query) { return QueryComputer(*this, query); }
 
   auto get_query_computer(const IDType id) { return QueryComputer(*this, id); }
 
  private:
+  IDType capacity_{0};                 ///< The maximum number of data points (nodes)
+  uint32_t dim_{0};                    ///< Dimensionality of the data points
   MetricType metric_{MetricType::L2};  ///< Metric type
 
-  DistFuncSQ<DataType, DistanceType>
-      distance_calu_func_;      ///< Distance calculation function
-  uint32_t data_size_{0};       ///< Size of each data point in bytes
-  uint32_t dim_{0};             ///< Dimensionality of the data points
-  IDType item_cnt_{0};          ///< Number of data points (nodes)
-  IDType delete_cnt_{0};        ///< Number of deleted data points (nodes)
-  IDType capacity_{0};          ///< The maximum number of data points (nodes)
-  DataStorage data_storage_;    ///< Data storage for encoded data
+  DistFuncSQ<DataType, DistanceType> distance_calu_func_;  ///< Distance calculation function
+  uint32_t data_size_{0};                                  ///< Size of each data point in bytes
+  IDType item_cnt_{0};                                     ///< Number of data points (nodes)
+  IDType delete_cnt_{0};              ///< Number of deleted data points (nodes)
+  DataStorage data_storage_;          ///< Data storage for encoded data
   SQ4Quantizer<DataType> quantizer_;  ///< The quantizer used to quantize the data
 };
 }  // namespace alaya

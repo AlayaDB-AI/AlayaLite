@@ -40,8 +40,8 @@ class HNSWTest : public ::testing::Test {
 
     // Init the vector data.
     srand(time(nullptr));
-    for (int i = 0; i < max_node_; ++i) {
-      for (int j = 0; j < dim_; ++j) {
+    for (uint32_t i = 0; i < max_node_; ++i) {
+      for (uint32_t j = 0; j < dim_; ++j) {
         data_[i * dim_ + j] = rand() % max_node_;
       }
     }
@@ -77,16 +77,16 @@ TEST_F(HNSWTest, BuildGraphTest) {
   graph->load(filename_);
 
   // Test the upper layer graph.
-  for (int i = 0; i < graph->max_nodes_; ++i) {
-    for (int j = 0; j < graph->max_nbrs_; ++j) {
+  for (uint32_t i = 0; i < graph->max_nodes_; ++i) {
+    for (uint32_t j = 0; j < graph->max_nbrs_; ++j) {
       EXPECT_EQ(graph->at(i, j), built_graph->at(i, j));
     }
   }
   // Test the over layer graph.
-  for (int i = 0; i < graph->max_nodes_; ++i) {
+  for (uint32_t i = 0; i < graph->max_nodes_; ++i) {
     int level = graph->overlay_graph_->levels_[i];
     for (int j = 1; j <= level; ++j) {
-      for (int k = 0; k < graph->max_nbrs_; ++k) {
+      for (uint32_t k = 0; k < graph->max_nbrs_; ++k) {
         EXPECT_EQ(graph->overlay_graph_->at(j, i, k), built_graph->overlay_graph_->at(j, i, k));
       }
     }
@@ -101,17 +101,17 @@ TEST_F(HNSWTest, MultipleThreadBuildGraphTest) {
   graph->load(filename_);
 
   // Test the upper layer graph.
-  for (int i = 0; i < graph->max_nodes_; ++i) {
-    for (int j = 0; j < graph->max_nbrs_; ++j) {
+  for (uint32_t i = 0; i < graph->max_nodes_; ++i) {
+    for (uint32_t j = 0; j < graph->max_nbrs_; ++j) {
       EXPECT_EQ(graph->at(i, j), hnsw_graph->at(i, j));
     }
   }
   // Test the over layer graph.
-  for (int i = 0; i < graph->max_nodes_; ++i) {
+  for (uint32_t i = 0; i < graph->max_nodes_; ++i) {
     int level = graph->overlay_graph_->levels_[i];
 
     for (int j = 1; j <= level; ++j) {
-      for (int k = 0; k < graph->max_nbrs_; ++k) {
+      for (uint32_t k = 0; k < graph->max_nbrs_; ++k) {
         EXPECT_EQ(graph->overlay_graph_->at(j, i, k), hnsw_graph->overlay_graph_->at(j, i, k));
       }
     }

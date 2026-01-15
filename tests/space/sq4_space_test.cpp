@@ -127,7 +127,7 @@ TEST_F(SQ4SpaceTest, PrefetchByAddress) {
 
 TEST_F(SQ4SpaceTest, HandleInvalidInsert) {
   float data[4] = {1.0, 2.0, 3.0, 4.0};
-  for (int i = 0; i < capacity_; ++i) {
+  for (uint32_t i = 0; i < capacity_; ++i) {
     space_->insert(data);
   }
   uint32_t id = space_->insert(data);

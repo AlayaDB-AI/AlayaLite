@@ -40,11 +40,11 @@ namespace alaya {
 template <typename DataType = float, typename DistanceType = float, typename IDType = uint32_t>
 class RaBitQSpace {
  private:
-  MetricType metric_{MetricType::L2};  ///< Metric type
-  uint32_t dim_{0};                    ///< Dimensionality of the data points
-  IDType item_cnt_{0};                 ///< Number of data points (nodes)
   IDType capacity_{0};                 ///< The maximum number of data points (nodes)
+  uint32_t dim_{0};                    ///< Dimensionality of the data points
+  MetricType metric_{MetricType::L2};  ///< Metric type
   RotatorType type_;                   ///< Rotator type
+  IDType item_cnt_{0};                 ///< Number of data points (nodes)
 
   size_t quant_codes_offset_{0};
   size_t f_add_offset_{0};
@@ -284,8 +284,8 @@ class RaBitQSpace {
     DataType g_add_ = 0;
     DataType g_k1xsumq_ = 0;
 
-    std::vector<DataType> est_dists_;
     std::vector<uint16_t> accu_res_;
+    std::vector<DataType> est_dists_;
 
     void batch_est_dist() {
       size_t padded_dim = distance_space_.get_padded_dim();
@@ -307,8 +307,8 @@ class RaBitQSpace {
       RowMajorArrayMap<DistDataType> est_dist_arr(est_ptr, 1, fastscan::kBatchSize);
       est_dist_arr =
           f_add_arr + g_add_ +
-          f_rescale_arr * (lookup_table_.delta() * (n_th_segment_arr.template cast<DataType>()) +
-                           lookup_table_.sum_vl() + g_k1xsumq_);
+          (f_rescale_arr * (lookup_table_.delta() * (n_th_segment_arr.template cast<DataType>()) +
+                           lookup_table_.sum_vl() + g_k1xsumq_));
     }
 
    public:

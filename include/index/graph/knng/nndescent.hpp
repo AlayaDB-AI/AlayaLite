@@ -78,7 +78,7 @@ struct NndescentImpl {
         return;
       }
 
-      for (int i = 0; i < candidate_pool_.size(); i++) {
+      for (size_t i = 0; i < candidate_pool_.size(); i++) {
         if (candidate_pool_[i].id_ == id) {
           return;
         }
@@ -147,7 +147,7 @@ struct NndescentImpl {
     // copy the graph
     for (IDType i = 0; i < vector_num_; ++i) {
       std::sort(graph_[i].candidate_pool_.begin(), graph_[i].candidate_pool_.end());
-      for (int j = 0; j < max_nbrs_; j++) {
+      for (uint32_t j = 0; j < max_nbrs_; j++) {
         final_graph->at(i, j) = graph_[i].candidate_pool_[j].id_;
       }
     }
@@ -173,11 +173,11 @@ struct NndescentImpl {
 
     unsigned int num_cores = std::thread::hardware_concurrency();
     {
-      std::mt19937 rng(random_seed_ * 7741 + num_cores);
+      std::mt19937 rng((random_seed_ * 7741) + num_cores);
       ThreadPool pool(num_cores);
 
       IDType per_core_num = (vector_num_ + num_cores - 1) / num_cores;
-      for (int thread_id = 0; thread_id < num_cores; thread_id++) {
+      for (unsigned int thread_id = 0; thread_id < num_cores; thread_id++) {
         pool.enqueue([thread_id, &rng, per_core_num, this]() {
           IDType start = thread_id * per_core_num;
           IDType end = std::min((thread_id + 1) * per_core_num, vector_num_);
@@ -186,7 +186,7 @@ struct NndescentImpl {
             std::vector<IDType> tmp(selected_sample_num_);
             gen_random(rng, tmp.data(), selected_sample_num_, vector_num_);
 
-            for (int j = 0; j < selected_sample_num_; j++) {
+            for (uint32_t j = 0; j < selected_sample_num_; j++) {
               IDType id = tmp[j];
               if (id == start) {
                 continue;
@@ -232,7 +232,7 @@ struct NndescentImpl {
     gen_eval_gt(eval_points, eval_gt);
 
     auto t1 = Timer();
-    for (int iter = 1; iter <= iterations_; ++iter) {
+    for (uint32_t iter = 1; iter <= iterations_; ++iter) {
       join();
       update();
 
@@ -256,7 +256,7 @@ struct NndescentImpl {
     ThreadPool thread_pool(num_cores);
 
     IDType per_num_cores = (vector_num_ + num_cores - 1) / num_cores;
-    for (int i = 0; i < num_cores; i++) {
+    for (unsigned int i = 0; i < num_cores; i++) {
       thread_pool.enqueue([this, i, per_num_cores]() {
         IDType start = i * per_num_cores;
         IDType end = std::min((i + 1) * per_num_cores, vector_num_);
@@ -297,7 +297,7 @@ struct NndescentImpl {
     ThreadPool thread_pool(num_cores);
 
     IDType per_num_cores = (vector_num_ + num_cores - 1) / num_cores;
-    for (int i = 0; i < num_cores; i++) {
+    for (unsigned int i = 0; i < num_cores; i++) {
       thread_pool.enqueue([i, this, per_num_cores]() {
         for (IDType j = i * per_num_cores; j < (i + 1) * per_num_cores && j < vector_num_; j++) {
           std::vector<IDType>().swap(graph_[j].nn_new_);
@@ -309,7 +309,7 @@ struct NndescentImpl {
 
     thread_pool.reset_task();
 
-    for (int i = 0; i < num_cores; i++) {
+    for (unsigned int i = 0; i < num_cores; i++) {
       thread_pool.enqueue([i, this, per_num_cores]() {
         for (IDType j = i * per_num_cores; j < (i + 1) * per_num_cores && j < vector_num_; j++) {
           auto &nn = graph_[j];
@@ -323,9 +323,9 @@ struct NndescentImpl {
           auto maxl = std::min(nn.max_edge_ + selected_sample_num_,
                                static_cast<uint32_t>(nn.candidate_pool_.size()));
           int c = 0;
-          int l = 0;
+          uint32_t l = 0;
 
-          while ((l < maxl) && (c < selected_sample_num_)) {
+          while ((l < maxl) && (c < static_cast<int>(selected_sample_num_))) {
             if (nn.candidate_pool_[l].flag_) {
               ++c;
             }
@@ -343,14 +343,14 @@ struct NndescentImpl {
 
       thread_pool.reset_task();
 
-      for (int i = 0; i < num_cores; ++i) {
+      for (unsigned int i = 0; i < num_cores; ++i) {
         thread_pool.enqueue([&, i, per_num_cores]() {
           for (auto j = per_num_cores * i; j < per_num_cores * (i + 1) && j < vector_num_; ++j) {
             auto &node = graph_[j];
             auto &nn_new = node.nn_new_;
             auto &nn_old = node.nn_old_;
 
-            for (int l = 0; l < node.max_edge_; ++l) {
+            for (uint32_t l = 0; l < node.max_edge_; ++l) {
               auto &nn = node.candidate_pool_[l];
               auto &other = graph_[nn.id_];
 
@@ -390,7 +390,7 @@ struct NndescentImpl {
     {
       thread_pool.reset_task();
 
-      for (int i = 0; i < num_cores; ++i) {
+      for (unsigned int i = 0; i < num_cores; ++i) {
         thread_pool.enqueue([this, i, per_num_cores]() {
           for (auto j = i * per_num_cores; j < i * per_num_cores + per_num_cores && j < vector_num_;
                ++j) {
@@ -430,7 +430,7 @@ struct NndescentImpl {
     auto per_num_cores = (eval_set.size() + num_cores - 1) / num_cores;
     for (unsigned int thread_id = 0; thread_id < num_cores; ++thread_id) {
       thread_pool.enqueue([thread_id, per_num_cores, &eval_set, &eval_gt, this]() {
-        for (int j = thread_id * per_num_cores;
+        for (size_t j = thread_id * per_num_cores;
              j < (thread_id + 1) * per_num_cores && j < eval_set.size(); ++j) {
           std::vector<Neighbor<IDType>> tmp;
 
@@ -443,7 +443,7 @@ struct NndescentImpl {
           }
 
           std::partial_sort(tmp.begin(), tmp.begin() + max_nbrs_, tmp.end());
-          for (int it = 0; it < max_nbrs_; ++it) {
+          for (uint32_t it = 0; it < max_nbrs_; ++it) {
             eval_gt[j].push_back(tmp[it].id_);
           }
         }
@@ -468,11 +468,11 @@ struct NndescentImpl {
     auto t1 = Timer();
 
     float mean_acc = 0.0F;
-    for (int i = 0; i < eval_set.size(); i++) {
+    for (size_t i = 0; i < eval_set.size(); i++) {
       float acc = 0;
       std::vector<Neighbor<IDType>> &g = graph_[eval_set[i]].candidate_pool_;
       const std::vector<IDType> &v = eval_gt[i];
-      for (int j = 0; j < g.size(); j++) {
+      for (size_t j = 0; j < g.size(); j++) {
         for (const auto &id : v) {
           if (g[j].id_ == id) {
             acc++;

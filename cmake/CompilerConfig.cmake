@@ -60,7 +60,7 @@ else()
   # GCC/Clang flags
   message(STATUS "Configuring for GCC/Clang compiler")
   set(CMAKE_CXX_FLAGS "-fopenmp ${CMAKE_CXX_FLAGS}") # OpenMP support
-  set(CMAKE_CXX_FLAGS "-Wall -Wextra ${CMAKE_CXX_FLAGS}") # Enable common
+  set(CMAKE_CXX_FLAGS "-Wall ${CMAKE_CXX_FLAGS}") # Enable common
   set(CMAKE_CXX_FLAGS_RELEASE "-Ofast -DNDEBUG")
   set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 endif()

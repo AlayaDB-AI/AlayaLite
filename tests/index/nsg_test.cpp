@@ -42,8 +42,8 @@ class NSGTest : public ::testing::Test {
 
     // Init the vector data.
     srand(time(nullptr));
-    for (int i = 0; i < max_node_; ++i) {
-      for (int j = 0; j < dim_; ++j) {
+    for (uint32_t i = 0; i < max_node_; ++i) {
+      for (uint32_t j = 0; j < dim_; ++j) {
         data_[i * dim_ + j] = rand() % max_node_;
       }
     }
@@ -147,7 +147,7 @@ TEST_F(NSGSearchTest, SimpleSearchTest) {
   const size_t kSearchThreadNum = 16;
   std::vector<std::thread> tasks(kSearchThreadNum);
 
-  auto search_knn = [&](int i) {
+  auto search_knn = [&](uint32_t i) {
     for (; i < query_num_; i += kSearchThreadNum) {
       std::vector<uint32_t> ids(topk);
       auto cur_query = queries_.data() + i * dim_;
@@ -163,11 +163,11 @@ TEST_F(NSGSearchTest, SimpleSearchTest) {
     }
   };
 
-  for (int i = 0; i < kSearchThreadNum; i++) {
+  for (size_t i = 0; i < kSearchThreadNum; i++) {
     tasks[i] = std::thread(search_knn, i);
   }
 
-  for (int i = 0; i < kSearchThreadNum; i++) {
+  for (size_t i = 0; i < kSearchThreadNum; i++) {
     if (tasks[i].joinable()) {
       tasks[i].join();
     }
@@ -177,9 +177,9 @@ TEST_F(NSGSearchTest, SimpleSearchTest) {
 
   // Computing recall;
   size_t cnt = 0;
-  for (int i = 0; i < query_num_; i++) {
-    for (int j = 0; j < topk; j++) {
-      for (int k = 0; k < topk; k++) {
+  for (uint32_t i = 0; i < query_num_; i++) {
+    for (size_t j = 0; j < topk; j++) {
+      for (size_t k = 0; k < topk; k++) {
         if (res_pool[i][j] == answers_[i * gt_col_ + k]) {
           cnt++;
           break;

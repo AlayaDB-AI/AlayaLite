@@ -17,6 +17,7 @@
 #include <gtest/gtest.h>
 #include <cstring>  // for memcmp
 #include <fstream>
+#include <random>
 #include <vector>
 
 #include "storage/static_storage.hpp"
@@ -25,9 +26,10 @@ namespace alaya {
 // NOLINTBEGIN
 //  Helper to create a temporary file name
 auto GetTempFileName() -> std::string {
-  std::string name = std::tmpnam(nullptr);
-  if (name.empty()) name = "temp_static_storage_test.bin";
-  return name;
+  std::random_device rd;
+  std::mt19937 gen(rd());
+  std::uniform_int_distribution<> dis(0, 999999);
+  return "temp_static_storage_test_" + std::to_string(dis(gen)) + ".bin";
 }
 
 TEST(StaticStorageTest, BasicConstructionAndAccess) {

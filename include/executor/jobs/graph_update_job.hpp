@@ -35,9 +35,9 @@ template <typename DistanceSpaceType,
   requires Space<DistanceSpaceType, DataType, DistanceType, IDType>
 class GraphUpdateJob {
  public:
+  std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job_ = nullptr;  ///< The search job
   std::shared_ptr<DistanceSpaceType> space_ = nullptr;  ///< The is a data manager interface .
   std::shared_ptr<Graph<DataType, IDType>> graph_ = nullptr;  ///< The search graph.
-  std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job_ = nullptr;  ///< The search job
   std::shared_ptr<JobContext<IDType>> job_context_;  ///< The shared job context
 
   explicit GraphUpdateJob(
@@ -57,7 +57,7 @@ class GraphUpdateJob {
     for (IDType i = 0; i < graph_->max_nbrs_; i++) {
       auto invert_node = search_results[i];
 
-      if (invert_node != -1) {
+      if (invert_node != static_cast<IDType>(-1)) {
         job_context_->inserted_edges_[invert_node].push_back(node_id);
       }
     }
@@ -70,16 +70,16 @@ class GraphUpdateJob {
     search_job_->search_solo(query, graph_->max_nbrs_, search_results.data(),
                              ef);
     auto node_id = graph_->insert(search_results.data());
-    if (node_id == -1) {
-      assert(space_->insert(query) == -1);
-      return -1;
+    if (node_id == static_cast<IDType>(-1)) {
+      assert(space_->insert(query) == static_cast<IDType>(-1));
+      return static_cast<IDType>(-1);
     }
     space_->insert(query);
 
     for (IDType i = 0; i < graph_->max_nbrs_; i++) {
       auto invert_node = search_results[i];
 
-      if (invert_node != -1) {
+      if (invert_node != static_cast<IDType>(-1)) {
         job_context_->inserted_edges_[invert_node].push_back(node_id);
       }
     }
@@ -94,7 +94,7 @@ class GraphUpdateJob {
     auto nbrs = graph_->edges(node_id);
     for (IDType i = 0; i < graph_->max_nbrs_; i++) {
       auto nbr = nbrs[i];
-      if (nbr == -1) {
+      if (nbr == static_cast<IDType>(-1)) {
         break;
       }
       job_context_->removed_node_nbrs_[node_id].push_back(nbr);
@@ -109,7 +109,7 @@ class GraphUpdateJob {
     auto current_edges = graph_->edges(node_id);
     for (IDType i = 0; i < graph_->max_nbrs_; i++) {
       auto nbr = current_edges[i];
-      if (nbr == -1) {
+      if (nbr == static_cast<IDType>(-1)) {
         break;
       }
       if (job_context_->removed_vertices_.count(nbr)) {

@@ -128,8 +128,8 @@ class OverlayGraph {
       while (changed) {
         changed = false;
         auto list = edges(level, u);
-        for (int i = 0; i < max_nbrs_ && list[i] != -1; ++i) {
-          int v = list[i];
+        for (uint32_t i = 0; i < max_nbrs_ && list[i] != static_cast<NodeIDType>(-1); ++i) {
+          auto v = list[i];
           auto dist = dist_func(v);
           if (dist < cur_dist) {
             cur_dist = dist;
@@ -160,12 +160,12 @@ class OverlayGraph {
     levels_.resize(node_num_);
     lists_.resize(node_num_);
 
-    for (int i = 0; i < node_num_; ++i) {
+    for (NodeIDType i = 0; i < node_num_; ++i) {
       int cur;
       reader.read(reinterpret_cast<char *>(&cur), 4);
       levels_[i] = cur / max_nbrs_;
 
-      if (lists_[i].capacity() < cur) {
+      if (lists_[i].capacity() < static_cast<size_t>(cur)) {
         lists_[i].reserve(cur);
       }
       lists_[i].clear();
@@ -186,7 +186,7 @@ class OverlayGraph {
     writer.write(const_cast<char *>(reinterpret_cast<const char *>(&node_num_)), 4);
     writer.write(const_cast<char *>(reinterpret_cast<const char *>(&max_nbrs_)), 4);
     writer.write(const_cast<char *>(reinterpret_cast<const char *>(&ep_)), 4);
-    for (int i = 0; i < node_num_; ++i) {
+    for (NodeIDType i = 0; i < node_num_; ++i) {
       int cur = levels_[i] * max_nbrs_;
       writer.write(reinterpret_cast<char *>(&cur), 4);
       writer.write(const_cast<char *>(reinterpret_cast<const char *>(lists_[i].data())), cur * 4);

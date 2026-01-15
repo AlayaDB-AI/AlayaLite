@@ -74,7 +74,6 @@ class UpdateTest : public ::testing::Test {
 };
 
 TEST_F(UpdateTest, HalfInsertTest) {
-  const size_t kM = 64;
   uint32_t topk = 10;
   uint32_t half_size = data_.size() / dim_ / 2;
 
@@ -100,7 +99,7 @@ TEST_F(UpdateTest, HalfInsertTest) {
 
   auto search_job = std::make_shared<alaya::GraphSearchJob<alaya::RawSpace<>>>(space, hnsw_graph);
   std::vector<uint32_t> ids(query_num_ * topk);
-  for (int i = 0; i < query_num_; i++) {
+  for (uint32_t i = 0; i < query_num_; i++) {
     auto cur_query = queries_.data() + i * dim_;
     search_job->search_solo(cur_query, topk, ids.data() + i * topk, 30);
   }

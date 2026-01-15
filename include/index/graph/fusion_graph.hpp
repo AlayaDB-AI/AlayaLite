@@ -114,10 +114,10 @@ struct FusionGraphBuilder {
     } else if (secondary_graph->overlay_graph_ != nullptr) {
       final_graph->overlay_graph_ = std::move(secondary_graph->overlay_graph_);
     } else {
-      for (int i = 0; i < primary_graph->eps_.size(); i++) {
+      for (size_t i = 0; i < primary_graph->eps_.size(); i++) {
         final_graph->eps_.push_back(primary_graph->eps_[i]);
       }
-      for (int i = 0; i < secondary_graph->eps_.size(); i++) {
+      for (size_t i = 0; i < secondary_graph->eps_.size(); i++) {
         final_graph->eps_.push_back(secondary_graph->eps_[i]);
       }
     }

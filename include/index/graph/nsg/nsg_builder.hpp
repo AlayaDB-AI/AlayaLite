@@ -105,7 +105,7 @@ struct NSGBuilder {
     auto nndescent_graph = nndescent.build_graph();
 
     init(nndescent_graph);
-    std::vector<int> degrees(vector_num_, 0);
+    std::vector<uint32_t> degrees(vector_num_, 0);
 
     {
       Graph<DataType, IDType> tmp_graph(space_->get_capacity(), max_nbrs_);
@@ -120,14 +120,14 @@ struct NSGBuilder {
       ThreadPool pool(num_cores);
 
       IDType per_core_num = (vector_num_ + num_cores - 1) / num_cores;
-      for (int thread_id = 0; thread_id < num_cores; thread_id++) {
+      for (unsigned int thread_id = 0; thread_id < num_cores; thread_id++) {
         pool.enqueue([this, &tmp_graph, &degrees, per_core_num, thread_id]() {
           IDType start = thread_id * per_core_num;
           IDType end = std::min((thread_id + 1) * per_core_num, vector_num_);
 
           for (IDType i = start; i < end; i++) {
             int cnt = 0;
-            for (int j = 0; j < max_nbrs_; j++) {
+            for (uint32_t j = 0; j < max_nbrs_; j++) {
               IDType id = tmp_graph.at(i, j);
               if (id != Graph<DataType, IDType>::kEmptyId) {
                 final_graph_->at(i, cnt) = id;
@@ -141,13 +141,13 @@ struct NSGBuilder {
       pool.wait_until_all_tasks_completed(num_cores);
     }
 
-    int num_attached = tree_grow(degrees);
+    tree_grow(degrees);
     int max_degree = 0;
     int min_degree = 1e6;
     double avg_degree = 0;
-    for (int i = 0; i < vector_num_; i++) {
+    for (IDType i = 0; i < vector_num_; i++) {
       int size = 0;
-      while (size < max_nbrs_ && final_graph_->at(i, size) != Graph<DataType, IDType>::kEmptyId) {
+      while (static_cast<uint32_t>(size) < max_nbrs_ && final_graph_->at(i, size) != Graph<DataType, IDType>::kEmptyId) {
         size += 1;
       }
       max_degree = std::max(size, max_degree);
@@ -217,9 +217,9 @@ struct NSGBuilder {
 
     std::vector<IDType> init_ids(pool_size);
     int num_ids = 0;
-    for (int i = 0; i < init_ids.size() && i < graph->max_nbrs_; i++) {
+    for (size_t i = 0; i < init_ids.size() && i < graph->max_nbrs_; i++) {
       IDType id = graph->at(ep, i);
-      if (id < 0 || id >= vector_num_) {
+      if (id >= vector_num_) {
         continue;
       }
       init_ids[i] = id;
@@ -227,7 +227,7 @@ struct NSGBuilder {
       num_ids += 1;
     }
     while (num_ids < pool_size) {
-      int id = gen.rand_int(vector_num_);
+      IDType id = gen.rand_int(vector_num_);
       if (vis[id]) {
         continue;
       }
@@ -235,8 +235,8 @@ struct NSGBuilder {
       num_ids++;
       vis[id] = true;
     }
-    for (int i = 0; i < init_ids.size(); i++) {
-      int id = init_ids[i];
+    for (size_t i = 0; i < init_ids.size(); i++) {
+      IDType id = init_ids[i];
       DistanceType dist =
           space_->get_dist_func()(const_cast<DataType *>(q), space_->get_data_by_id(id), dim_);
       retset[i] = Neighbor<IDType>(id, dist, true);
@@ -250,10 +250,10 @@ struct NSGBuilder {
       int updated_pos = pool_size;
       if (retset[k].flag_) {
         retset[k].flag_ = false;
-        int n = retset[k].id_;
-        for (int m = 0; m < graph->max_nbrs_; m++) {
-          int id = graph->at(n, m);
-          if (id < 0 || id >= vector_num_ || vis[id]) {
+        IDType n = retset[k].id_;
+        for (size_t m = 0; m < graph->max_nbrs_; m++) {
+          IDType id = graph->at(n, m);
+          if (id >= vector_num_ || vis[id]) {
             continue;
           }
           vis[id] = true;
@@ -289,7 +289,7 @@ struct NSGBuilder {
     ThreadPool pool(num_cores);
 
     IDType per_core_num = (vector_num_ + num_cores - 1) / num_cores;
-    for (int thread_id = 0; thread_id < num_cores; thread_id++) {
+    for (unsigned int thread_id = 0; thread_id < num_cores; thread_id++) {
       pool.enqueue([this, &knng, &graph, &cnt, per_core_num, thread_id]() {
         for (IDType i = thread_id * per_core_num;
              i < (thread_id + 1) * per_core_num && i < vector_num_; i++) {
@@ -312,7 +312,7 @@ struct NSGBuilder {
 
     pool.reset_task();
     std::vector<std::mutex> locks(vector_num_);
-    for (int thread_id = 0; thread_id < num_cores; thread_id++) {
+    for (unsigned int thread_id = 0; thread_id < num_cores; thread_id++) {
       pool.enqueue([this, &graph, &locks, per_core_num, thread_id]() {
         for (IDType i = thread_id * per_core_num;
              i < (thread_id + 1) * per_core_num && i < vector_num_; ++i) {
@@ -339,9 +339,9 @@ struct NSGBuilder {
   void sync_prune(IDType q, std::vector<Node<IDType>> &pool, std::vector<bool> &vis,
                   const std::unique_ptr<Graph<DataType, IDType>> &knng,
                   Graph<DataType, IDType> &graph) {
-    for (int i = 0; i < knng->max_nbrs_; i++) {
+    for (size_t i = 0; i < knng->max_nbrs_; i++) {
       IDType id = knng->at(q, i);
-      if (id < 0 || id >= vector_num_ || vis[id]) {
+      if (id >= vector_num_ || vis[id]) {
         continue;
       }
 
@@ -353,7 +353,7 @@ struct NSGBuilder {
 
     std::vector<Node<IDType>> result;
 
-    int start = 0;
+    size_t start = 0;
     if (pool[start].id_ == q) {
       start++;
     }
@@ -362,7 +362,7 @@ struct NSGBuilder {
     while (result.size() < max_nbrs_ && (++start) < pool.size() && start < cut_len_) {
       auto &p = pool[start];
       bool occlude = false;
-      for (int t = 0; t < result.size(); t++) {
+      for (size_t t = 0; t < result.size(); t++) {
         if (p.id_ == result[t].id_) {
           occlude = true;
           break;
@@ -379,7 +379,7 @@ struct NSGBuilder {
       }
     }
 
-    for (int i = 0; i < max_nbrs_; i++) {
+    for (uint32_t i = 0; i < max_nbrs_; i++) {
       if (i < result.size()) {
         graph.at(q, i) = result[i].id_;
       } else {
@@ -400,7 +400,7 @@ struct NSGBuilder {
    * @param graph The graph to which reverse links are to be added.
    */
   void add_reverse_links(IDType q, std::vector<std::mutex> &locks, Graph<DataType, IDType> &graph) {
-    for (int i = 0; i < max_nbrs_; i++) {
+    for (uint32_t i = 0; i < max_nbrs_; i++) {
       if (graph.at(q, i) == Graph<DataType, IDType>::kEmptyId) {
         break;
       }
@@ -412,7 +412,7 @@ struct NSGBuilder {
       int dup = 0;
       {
         std::scoped_lock guard(locks[des]);
-        for (int j = 0; j < max_nbrs_; j++) {
+        for (uint32_t j = 0; j < max_nbrs_; j++) {
           if (graph.at(des, j) == Graph<DataType, IDType>::kEmptyId) {
             break;
           }
@@ -436,10 +436,10 @@ struct NSGBuilder {
         std::sort(tmp_pool.begin(), tmp_pool.end());
         result.push_back(tmp_pool[start]);
 
-        while (result.size() < max_nbrs_ && (++start) < tmp_pool.size()) {
+        while (result.size() < max_nbrs_ && (++start) < static_cast<int>(tmp_pool.size())) {
           auto &p = tmp_pool[start];
           bool occlude = false;
-          for (int t = 0; t < result.size(); t++) {
+          for (size_t t = 0; t < result.size(); t++) {
             if (p.id_ == result[t].id_) {
               occlude = true;
               break;
@@ -458,14 +458,14 @@ struct NSGBuilder {
 
         {
           std::scoped_lock guard(locks[des]);
-          for (int t = 0; t < result.size(); t++) {
+          for (size_t t = 0; t < result.size(); t++) {
             graph.at(des, t) = result[t].id_;
           }
         }
 
       } else {
         std::scoped_lock guard(locks[des]);
-        for (int t = 0; t < max_nbrs_; t++) {
+        for (uint32_t t = 0; t < max_nbrs_; t++) {
           if (graph.at(des, t) == Graph<DataType, IDType>::kEmptyId) {
             graph.at(des, t) = sn.id_;
             break;
@@ -485,14 +485,14 @@ struct NSGBuilder {
    * @param degrees A vector containing the degree of each node.
    * @return int The number of nodes that were attached to the tree.
    */
-  auto tree_grow(std::vector<int> &degrees) -> int {
+  auto tree_grow(std::vector<uint32_t> &degrees) -> int {
     int root = ep_;
     std::vector<bool> vis(vector_num_, false);
     int num_attached = 0;
     int cnt = 0;
     while (true) {
       cnt = dfs(vis, root, cnt);
-      if (cnt >= vector_num_) {
+      if (static_cast<IDType>(cnt) >= vector_num_) {
         break;
       }
       std::vector<bool> vis2(vector_num_, false);
@@ -523,7 +523,7 @@ struct NSGBuilder {
     vis[root] = true;
     while (!stack.empty()) {
       IDType next = Graph<DataType, IDType>::kEmptyId;
-      for (int i = 0; i < max_nbrs_; i++) {
+      for (uint32_t i = 0; i < max_nbrs_; i++) {
         IDType id = final_graph_->at(node, i);
         if (id != Graph<DataType, IDType>::kEmptyId && !vis[id]) {
           next = id;
@@ -559,7 +559,7 @@ struct NSGBuilder {
    * @return IDType The ID of the node that was attached.
    */
   auto attach_unlinked(std::vector<bool> &vis, std::vector<bool> &vis2,
-                       std::vector<int> &degrees) -> IDType {
+                       std::vector<uint32_t> &degrees) -> IDType {
     IDType id = Graph<DataType, IDType>::kEmptyId;
     for (IDType i = 0; i < vector_num_; i++) {
       if (vis[i]) {
@@ -577,7 +577,7 @@ struct NSGBuilder {
     std::sort(pool.begin(), pool.end());
     IDType node;
     bool found = false;
-    for (int i = 0; i < pool.size(); i++) {
+    for (size_t i = 0; i < pool.size(); i++) {
       node = pool[i].id_;
       if (degrees[node] < max_nbrs_ && node != id) {
         found = true;
@@ -592,7 +592,7 @@ struct NSGBuilder {
         }
       } while (!found);
     }
-    int pos = degrees[node];
+    uint32_t pos = degrees[node];
     final_graph_->at(node, pos) = id;
     degrees[node] += 1;
 

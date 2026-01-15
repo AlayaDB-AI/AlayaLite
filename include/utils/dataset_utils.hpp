@@ -38,8 +38,8 @@ class TestDatasetBase {
       if (!std::filesystem::exists(dataset_dir_)) {
         std::filesystem::create_directories(dataset_dir_);
       }
-      std::system(get_download_command().c_str());
-      std::system(get_extract_command().c_str());
+      [[maybe_unused]] int ret1 = std::system(get_download_command().c_str());
+      [[maybe_unused]] int ret2 = std::system(get_extract_command().c_str());
     }
 
     uint32_t data_dim;
