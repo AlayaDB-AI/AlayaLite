@@ -25,7 +25,9 @@
 
 namespace alaya {
 
-template <typename DistanceSpaceType, typename PrimaryGraph, typename SecondaryGraph,
+template <typename DistanceSpaceType,
+          typename PrimaryGraph,
+          typename SecondaryGraph,
           typename DataType = typename DistanceSpaceType::DataTypeAlias,
           typename DistanceType = typename DistanceSpaceType::DistanceTypeAlias,
           typename IDType = typename DistanceSpaceType::IDTypeAlias>
@@ -36,7 +38,8 @@ struct FusionGraphBuilder {
   std::shared_ptr<DistanceSpaceType> space_ = nullptr;
   uint32_t max_nbrs_;         ///< Maximum number of neighbors for each node.
   uint32_t ef_construction_;  ///< Size of the search pool during graph construction.
-  explicit FusionGraphBuilder(const std::shared_ptr<DistanceSpaceType> &space, uint32_t R = 32,
+  explicit FusionGraphBuilder(const std::shared_ptr<DistanceSpaceType> &space,
+                              uint32_t R = 32,
                               uint32_t L = 200)
       : space_(space), max_nbrs_(R) {
     space_ = space;

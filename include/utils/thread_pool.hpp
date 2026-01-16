@@ -40,13 +40,15 @@ class ThreadPool {
    */
   explicit ThreadPool(size_t num_threads) {
     for (size_t i = 0; i < num_threads; ++i) {
-      workers_.emplace_back([this] {
+      workers_.emplace_back([this]() -> void {
         for (;;) {
           std::function<void()> task;
           {
             std::unique_lock<std::mutex> lock(this->queue_mutex_);
             // Wait until a task is available or the pool is stopped
-            this->condition_.wait(lock, [this] { return this->stop_ || !this->tasks_.empty(); });
+            this->condition_.wait(lock, [this]() -> bool {
+              return this->stop_ || !this->tasks_.empty();
+            });
             if (this->stop_ && this->tasks_.empty()) {
               return;  // Exit the thread if the pool is stopped and there are no tasks
             }
@@ -79,9 +81,8 @@ class ThreadPool {
    * @return A std::future representing the result of the task.
    */
   template <class F, class... Args>
-  auto enqueue(F &&f,
-               Args &&...args) -> std::future<typename std::invoke_result<F, Args...>::type> {
-    using return_type = typename std::invoke_result<F, Args...>::type;
+  auto enqueue(F &&f, Args &&...args) -> std::future<std::invoke_result_t<F, Args...>> {
+    using return_type = std::invoke_result_t<F, Args...>;
     auto task = std::make_shared<std::packaged_task<return_type()>>(
         std::bind(std::forward<F>(f), std::forward<Args>(args)...));
     std::future<return_type> res = task->get_future();
@@ -90,7 +91,9 @@ class ThreadPool {
       if (stop_) {
         throw std::runtime_error("enqueue on stopped ThreadPool");
       }
-      tasks_.emplace([task]() { (*task)(); });  // Store the task in the queue
+      tasks_.emplace([task]() -> auto {
+        (*task)();
+      });  // Store the task in the queue
     }
     condition_.notify_one();  // Notify one waiting thread
     return res;               // Return the future for the task result
@@ -116,8 +119,9 @@ class ThreadPool {
   void wait_until_all_tasks_completed(size_t task_num) {
     std::unique_lock<std::mutex> lock(queue_mutex_);
     // Wait until the number of completed tasks matches the total number of tasks
-    condition_tasks_completed_.wait(
-        lock, [this, task_num] { return tasks_completed_.load() == task_num; });
+    condition_tasks_completed_.wait(lock, [this, task_num]() -> bool {
+      return tasks_completed_.load() == task_num;
+    });
   }
 
   void reset_task() {

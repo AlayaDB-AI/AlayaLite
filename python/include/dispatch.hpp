@@ -103,40 +103,41 @@ namespace py = pybind11;
     __VA_ARGS__                                                      \
   } while (0);
 
-#define DISPATCH_BUILDER_TYPE(...)                                                             \
-  do {                                                                                         \
-    if (params_.index_type_ == IndexType::HNSW) {                                              \
-      using GraphBuilderType = HNSWBuilder<BuildSpaceType>;                                    \
-      __VA_ARGS__                                                                              \
-    } else if (params_.index_type_ == IndexType::NSG) {                                        \
-      using GraphBuilderType = NSGBuilder<BuildSpaceType>;                                     \
-      __VA_ARGS__                                                                              \
-    } else if (params_.index_type_ == IndexType::FUSION) {                                     \
-      using GraphBuilderType = FusionGraphBuilder<BuildSpaceType, HNSWBuilder<BuildSpaceType>, \
-                                                  NSGBuilder<BuildSpaceType>>;                 \
-      __VA_ARGS__                                                                              \
-    } else {                                                                                   \
-      throw std::runtime_error("Unsupported index type");                                      \
-    }                                                                                          \
+#define DISPATCH_BUILDER_TYPE(...)                                             \
+  do {                                                                         \
+    if (params_.index_type_ == IndexType::HNSW) {                              \
+      using GraphBuilderType = HNSWBuilder<BuildSpaceType>;                    \
+      __VA_ARGS__                                                              \
+    } else if (params_.index_type_ == IndexType::NSG) {                        \
+      using GraphBuilderType = NSGBuilder<BuildSpaceType>;                     \
+      __VA_ARGS__                                                              \
+    } else if (params_.index_type_ == IndexType::FUSION) {                     \
+      using GraphBuilderType = FusionGraphBuilder<BuildSpaceType,              \
+                                                  HNSWBuilder<BuildSpaceType>, \
+                                                  NSGBuilder<BuildSpaceType>>; \
+      __VA_ARGS__                                                              \
+    } else {                                                                   \
+      throw std::runtime_error("Unsupported index type");                      \
+    }                                                                          \
   } while (0);
 
-#define DISPATCH_SEARCH_SPACE_TYPE(...)                                  \
-  do {                                                                   \
-    if (params_.quantization_type_ == QuantizationType::NONE) {          \
-      using SearchSpaceType = RawSpace<DataType, DistanceType, IDType>;  \
-      __VA_ARGS__                                                        \
-    } else if (params_.quantization_type_ == QuantizationType::SQ8) {    \
-      using SearchSpaceType = SQ8Space<DataType, DistanceType, IDType>;  \
-      __VA_ARGS__                                                        \
-    } else if (params_.quantization_type_ == QuantizationType::SQ4) {    \
-      using SearchSpaceType = SQ4Space<DataType, DistanceType, IDType>;  \
-      __VA_ARGS__                                                        \
-    } else if (params_.quantization_type_ == QuantizationType::RABITQ) { \
-      using SearchSpaceType = RaBitQSpace<DataType, DistanceType, IDType>;  \
-      __VA_ARGS__                                                        \
-    } else {                                                             \
-      throw std::runtime_error("Unsupported quantization type");         \
-    }                                                                    \
+#define DISPATCH_SEARCH_SPACE_TYPE(...)                                    \
+  do {                                                                     \
+    if (params_.quantization_type_ == QuantizationType::NONE) {            \
+      using SearchSpaceType = RawSpace<DataType, DistanceType, IDType>;    \
+      __VA_ARGS__                                                          \
+    } else if (params_.quantization_type_ == QuantizationType::SQ8) {      \
+      using SearchSpaceType = SQ8Space<DataType, DistanceType, IDType>;    \
+      __VA_ARGS__                                                          \
+    } else if (params_.quantization_type_ == QuantizationType::SQ4) {      \
+      using SearchSpaceType = SQ4Space<DataType, DistanceType, IDType>;    \
+      __VA_ARGS__                                                          \
+    } else if (params_.quantization_type_ == QuantizationType::RABITQ) {   \
+      using SearchSpaceType = RaBitQSpace<DataType, DistanceType, IDType>; \
+      __VA_ARGS__                                                          \
+    } else {                                                               \
+      throw std::runtime_error("Unsupported quantization type");           \
+    }                                                                      \
   } while (0);
 
 #define CAST_INDEX(INDEX, ...)                                                             \
@@ -154,10 +155,11 @@ namespace py = pybind11;
 
 #define DISPATCH_AND_CAST_WITH_ARR(NTYPED_ARR, TYPED_ARR, INDEX, ...)                              \
   do {                                                                                             \
-    DISPATCH_DATA_TYPE_WITH_ARR(                                                                   \
-        NTYPED_ARR, TYPED_ARR,                                                                     \
-        DISPATCH_DISTANCE_TYPE(DISPATCH_ID_TYPE(DISPATCH_BUILD_SPACE_TYPE(                         \
-            DISPATCH_BUILDER_TYPE(DISPATCH_SEARCH_SPACE_TYPE(CAST_INDEX(INDEX, __VA_ARGS__))))))); \
+    DISPATCH_DATA_TYPE_WITH_ARR(NTYPED_ARR,                                                        \
+                                TYPED_ARR,                                                         \
+                                DISPATCH_DISTANCE_TYPE(DISPATCH_ID_TYPE(DISPATCH_BUILD_SPACE_TYPE( \
+                                    DISPATCH_BUILDER_TYPE(DISPATCH_SEARCH_SPACE_TYPE(              \
+                                        CAST_INDEX(INDEX, __VA_ARGS__)))))));                      \
   } while (0);
 
 #define DISPATCH_AND_CAST(INDEX, ...)                                                          \

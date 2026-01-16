@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
 #include <random>
@@ -36,7 +37,8 @@
 namespace alaya {
 
 template <typename DistanceSpaceType>
-  requires Space<DistanceSpaceType, typename DistanceSpaceType::DataTypeAlias,
+  requires Space<DistanceSpaceType,
+                 typename DistanceSpaceType::DataTypeAlias,
                  typename DistanceSpaceType::DistanceTypeAlias,
                  typename DistanceSpaceType::IDTypeAlias>
 struct NSGBuilder {
@@ -120,8 +122,8 @@ struct NSGBuilder {
       ThreadPool pool(num_cores);
 
       IDType per_core_num = (vector_num_ + num_cores - 1) / num_cores;
-      for (unsigned int thread_id = 0; thread_id < num_cores; thread_id++) {
-        pool.enqueue([this, &tmp_graph, &degrees, per_core_num, thread_id]() {
+      for (uint32_t thread_id = 0; thread_id < num_cores; thread_id++) {
+        pool.enqueue([this, &tmp_graph, &degrees, per_core_num, thread_id]() -> auto {
           IDType start = thread_id * per_core_num;
           IDType end = std::min((thread_id + 1) * per_core_num, vector_num_);
 
@@ -141,13 +143,14 @@ struct NSGBuilder {
       pool.wait_until_all_tasks_completed(num_cores);
     }
 
-    tree_grow(degrees);
+    [[maybe_unused]] int num_attached = tree_grow(degrees);
     int max_degree = 0;
     int min_degree = 1e6;
     double avg_degree = 0;
     for (IDType i = 0; i < vector_num_; i++) {
       int size = 0;
-      while (static_cast<uint32_t>(size) < max_nbrs_ && final_graph_->at(i, size) != Graph<DataType, IDType>::kEmptyId) {
+      while (static_cast<uint32_t>(size) < max_nbrs_ &&
+             final_graph_->at(i, size) != Graph<DataType, IDType>::kEmptyId) {
         size += 1;
       }
       max_degree = std::max(size, max_degree);
@@ -208,8 +211,11 @@ struct NSGBuilder {
    * @param full_set Full set of neighbors (if collect_full_set is true).
    */
   template <bool collect_full_set>
-  void search_on_graph(const DataType *q, const std::unique_ptr<Graph<DataType, IDType>> &graph,
-                       std::vector<bool> &vis, IDType ep, int pool_size,
+  void search_on_graph(const DataType *q,
+                       const std::unique_ptr<Graph<DataType, IDType>> &graph,
+                       std::vector<bool> &vis,
+                       IDType ep,
+                       int pool_size,
                        std::vector<Neighbor<IDType>> &retset,
                        std::vector<Node<IDType>> &full_set) const {
     RandomGenerator gen(0x1234);
@@ -289,14 +295,20 @@ struct NSGBuilder {
     ThreadPool pool(num_cores);
 
     IDType per_core_num = (vector_num_ + num_cores - 1) / num_cores;
-    for (unsigned int thread_id = 0; thread_id < num_cores; thread_id++) {
-      pool.enqueue([this, &knng, &graph, &cnt, per_core_num, thread_id]() {
+    for (uint32_t thread_id = 0; thread_id < num_cores; thread_id++) {
+      pool.enqueue([this, &knng, &graph, &cnt, per_core_num, thread_id]() -> auto {
         for (IDType i = thread_id * per_core_num;
-             i < (thread_id + 1) * per_core_num && i < vector_num_; i++) {
+             i < (thread_id + 1) * per_core_num && i < vector_num_;
+             i++) {
           std::vector<Node<IDType>> pool;
           std::vector<Neighbor<IDType>> tmp;
           std::vector<bool> vis(vector_num_);
-          search_on_graph<true>(space_->get_data_by_id(i), knng, vis, ep_, ef_construction_, tmp,
+          search_on_graph<true>(space_->get_data_by_id(i),
+                                knng,
+                                vis,
+                                ep_,
+                                ef_construction_,
+                                tmp,
                                 pool);
           sync_prune(i, pool, vis, knng, graph);
           pool.clear();
@@ -312,10 +324,11 @@ struct NSGBuilder {
 
     pool.reset_task();
     std::vector<std::mutex> locks(vector_num_);
-    for (unsigned int thread_id = 0; thread_id < num_cores; thread_id++) {
-      pool.enqueue([this, &graph, &locks, per_core_num, thread_id]() {
+    for (uint32_t thread_id = 0; thread_id < num_cores; thread_id++) {
+      pool.enqueue([this, &graph, &locks, per_core_num, thread_id]() -> auto {
         for (IDType i = thread_id * per_core_num;
-             i < (thread_id + 1) * per_core_num && i < vector_num_; ++i) {
+             i < (thread_id + 1) * per_core_num && i < vector_num_;
+             ++i) {
           add_reverse_links(i, locks, graph);
         }
       });
@@ -336,7 +349,9 @@ struct NSGBuilder {
    * @param knng The initial graph built by Nndescent.
    * @param graph The graph to be synchronized and pruned.
    */
-  void sync_prune(IDType q, std::vector<Node<IDType>> &pool, std::vector<bool> &vis,
+  void sync_prune(IDType q,
+                  std::vector<Node<IDType>> &pool,
+                  std::vector<bool> &vis,
                   const std::unique_ptr<Graph<DataType, IDType>> &knng,
                   Graph<DataType, IDType> &graph) {
     for (size_t i = 0; i < knng->max_nbrs_; i++) {
@@ -359,7 +374,7 @@ struct NSGBuilder {
     }
     result.push_back(pool[start]);
 
-    while (result.size() < max_nbrs_ && (++start) < pool.size() && start < cut_len_) {
+    while (result.size() < max_nbrs_ && (++start) < pool.size() && start < cut_len_) {  // NOLINT
       auto &p = pool[start];
       bool occlude = false;
       for (size_t t = 0; t < result.size(); t++) {
@@ -558,7 +573,8 @@ struct NSGBuilder {
    * @param degrees A vector containing the degree of each node.
    * @return IDType The ID of the node that was attached.
    */
-  auto attach_unlinked(std::vector<bool> &vis, std::vector<bool> &vis2,
+  auto attach_unlinked(std::vector<bool> &vis,
+                       std::vector<bool> &vis2,
                        std::vector<uint32_t> &degrees) -> IDType {
     IDType id = Graph<DataType, IDType>::kEmptyId;
     for (IDType i = 0; i < vector_num_; i++) {
@@ -572,8 +588,13 @@ struct NSGBuilder {
     }
     std::vector<Neighbor<IDType>> tmp;
     std::vector<Node<IDType>> pool;
-    search_on_graph<true>(space_->get_data_by_id(id), final_graph_, vis2, ep_, ef_construction_,
-                          tmp, pool);
+    search_on_graph<true>(space_->get_data_by_id(id),
+                          final_graph_,
+                          vis2,
+                          ep_,
+                          ef_construction_,
+                          tmp,
+                          pool);
     std::sort(pool.begin(), pool.end());
     IDType node;
     bool found = false;
@@ -607,8 +628,8 @@ struct NSGBuilder {
    * @param nn The node to insert.
    * @return int The position of the inserted node in the pool.
    */
-  auto insert_into_pool(Neighbor<IDType> *pool, int pool_size,
-                        const Neighbor<IDType> &nn) const -> int {
+  auto insert_into_pool(Neighbor<IDType> *pool, int pool_size, const Neighbor<IDType> &nn) const
+      -> int {
     for (int i = 0; i < pool_size; i++) {
       if (pool[i].id_ == nn.id_) {
         return pool_size;

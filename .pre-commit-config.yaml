@@ -71,3 +71,12 @@ repos:
   hooks:
   - id: cmake-format
   - id: cmake-lint
+
+#===========================================================================
+#                            CLANG FORMAT HOOK
+#===========================================================================
+- repo: https://github.com/pre-commit/mirrors-clang-format
+  rev: v21.1.8
+  hooks:
+  - id: clang-format
+    files: ^(include|python/include|python/src)/.*\.(c|cc|cpp|cxx|h|hpp|hxx)$

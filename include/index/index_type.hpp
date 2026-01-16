@@ -41,12 +41,11 @@ enum class IndexType {
 // NOLINTEND
 
 struct IndexTypeMap {
-  static constexpr std::array<std::tuple<std::string_view, IndexType>, 3>
-      kStaticMap = {
-          std::make_tuple("FLAT", IndexType::FLAT),
-          std::make_tuple("HNSW", IndexType::HNSW),
-          std::make_tuple("QG", IndexType::QG),
-      };
+  static constexpr std::array<std::tuple<std::string_view, IndexType>, 3> kStaticMap = {
+      std::make_tuple("FLAT", IndexType::FLAT),
+      std::make_tuple("HNSW", IndexType::HNSW),
+      std::make_tuple("QG", IndexType::QG),
+  };
 
   constexpr auto operator[](const std::string_view &str) const -> IndexType {
     for (const auto &[key, val] : kStaticMap) {
@@ -60,12 +59,11 @@ struct IndexTypeMap {
 
 // index type to string
 struct IndexTypeToString {
-  static constexpr std::array<std::tuple<IndexType, std::string_view>, 3>
-      kStaticMap = {
-          std::make_tuple(IndexType::FLAT, "FLAT"),
-          std::make_tuple(IndexType::HNSW, "HNSW"),
-          std::make_tuple(IndexType::QG, "QG"),
-      };
+  static constexpr std::array<std::tuple<IndexType, std::string_view>, 3> kStaticMap = {
+      std::make_tuple(IndexType::FLAT, "FLAT"),
+      std::make_tuple(IndexType::HNSW, "HNSW"),
+      std::make_tuple(IndexType::QG, "QG"),
+  };
 
   constexpr auto operator[](IndexType index_type) const -> std::string_view {
     for (const auto &[key, val] : kStaticMap) {

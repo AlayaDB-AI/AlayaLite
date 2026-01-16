@@ -32,18 +32,18 @@ namespace alaya {
 
 // NOLINTBEGIN
 enum class QuantizationType {
-  NONE = 0,  // none quantization
-  SQ8 = 1,   // 8-bit quantization
-  SQ4 = 2,   // 4-bit quantization
-  RABITQ = 3,   // 1-bit quantization
+  NONE = 0,    // none quantization
+  SQ8 = 1,     // 8-bit quantization
+  SQ4 = 2,     // 4-bit quantization
+  RABITQ = 3,  // 1-bit quantization
 };
 // NOLINTEND
 
 struct QuantizationTypeMap {
   static constexpr std::array<std::tuple<std::string_view, QuantizationType>, 4> kStaticMap = {
       std::make_tuple("NONE", QuantizationType::NONE),
-      std::make_tuple("SQ8", QuantizationType::SQ8),  // 8-bit quantization
-      std::make_tuple("SQ4", QuantizationType::SQ4),  // 4-bit quantization
+      std::make_tuple("SQ8", QuantizationType::SQ8),        // 8-bit quantization
+      std::make_tuple("SQ4", QuantizationType::SQ4),        // 4-bit quantization
       std::make_tuple("RABITQ", QuantizationType::RABITQ),  // 1-bit quantization
   };
 
@@ -61,8 +61,8 @@ struct QuantizationTypeMap {
 struct QuantizationTypeToString {
   static constexpr std::array<std::tuple<QuantizationType, std::string_view>, 4> kStaticMap = {
       std::make_tuple(QuantizationType::NONE, "NONE"),
-      std::make_tuple(QuantizationType::SQ8, "SQ8"),  // 8-bit quantization
-      std::make_tuple(QuantizationType::SQ4, "SQ4"),  // 4-bit quantization
+      std::make_tuple(QuantizationType::SQ8, "SQ8"),        // 8-bit quantization
+      std::make_tuple(QuantizationType::SQ4, "SQ4"),        // 4-bit quantization
       std::make_tuple(QuantizationType::RABITQ, "RABITQ"),  // 1-bit quantization
   };
 

@@ -27,7 +27,6 @@
 #include "executor/jobs/graph_update_job.hpp"
 #include "executor/jobs/job_context.hpp"
 #include "executor/scheduler.hpp"
-#include "fmt/format.h"
 #include "index/graph/graph.hpp"
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "space/distance/dist_l2.hpp"

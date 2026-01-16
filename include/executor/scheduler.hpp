@@ -137,8 +137,11 @@ class Scheduler {
    */
   void begin() {
     for (CpuID i = 0; i < cpus_.size(); i++) {
-      workers_.emplace_back(std::make_unique<Worker>(
-          i, cpus_.at(i), task_queue_.get(), &this->total_task_count_, &this->total_finish_count_));
+      workers_.emplace_back(std::make_unique<Worker>(i,
+                                                     cpus_.at(i),
+                                                     task_queue_.get(),
+                                                     &this->total_task_count_,
+                                                     &this->total_finish_count_));
     }
     for (auto &worker : workers_) {
       worker->start();

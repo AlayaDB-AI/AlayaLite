@@ -54,7 +54,9 @@ namespace alaya {
  * @tparam DistanceType The data type for storing distances, with the default being float.
  * @tparam IDType The data type for storing IDs, with the default being uint32_t.
  */
-template <typename DataType = float, typename DistanceType = float, typename IDType = uint32_t,
+template <typename DataType = float,
+          typename DistanceType = float,
+          typename IDType = uint32_t,
           typename DataStorage = SequentialStorage<uint8_t, IDType>>
 class SQ4Space {
  public:
@@ -140,7 +142,10 @@ class SQ4Space {
    * @return The calculated distance
    */
   auto get_distance(IDType i, IDType j) -> DistanceType {
-    return distance_calu_func_(get_data_by_id(i), get_data_by_id(j), dim_, quantizer_.get_min(),
+    return distance_calu_func_(get_data_by_id(i),
+                               get_data_by_id(j),
+                               dim_,
+                               quantizer_.get_min(),
                                quantizer_.get_max());
   }
 
@@ -295,9 +300,11 @@ class SQ4Space {
      * @return The calculated distance
      */
     auto operator()(IDType u) const -> DistanceType {
-      return distance_space_.distance_calu_func_(
-          query_, distance_space_.get_data_by_id(u), distance_space_.get_dim(),
-          distance_space_.get_quantizer().get_min(), distance_space_.get_quantizer().get_max());
+      return distance_space_.distance_calu_func_(query_,
+                                                 distance_space_.get_data_by_id(u),
+                                                 distance_space_.get_dim(),
+                                                 distance_space_.get_quantizer().get_min(),
+                                                 distance_space_.get_quantizer().get_max());
     }
   };
 

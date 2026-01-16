@@ -110,7 +110,8 @@ class PyIndex : public BasePyIndex {
 
   auto get_dim() const -> uint32_t { return data_dim_; }
 
-  auto save(const std::string &index_path, const std::string &data_path = std::string(),
+  auto save(const std::string &index_path,
+            const std::string &data_path = std::string(),
             const std::string &quant_path = std::string()) -> void {
     std::string_view index_path_view{index_path};
     std::string_view data_path_view{data_path};
@@ -128,7 +129,8 @@ class PyIndex : public BasePyIndex {
     }
   }
 
-  auto load(const std::string &index_path, const std::string &data_path = std::string(),
+  auto load(const std::string &index_path,
+            const std::string &data_path = std::string(),
             const std::string &quant_path = std::string()) -> void {
     // index_path_ = index_path;
     std::string_view index_path_view{index_path};
@@ -140,8 +142,8 @@ class PyIndex : public BasePyIndex {
       search_space_->load(quant_path_view);
       data_size_ = search_space_->get_data_size();
       data_dim_ = search_space_->get_dim();
-      search_job_ = std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(
-          search_space_, nullptr);
+      search_job_ =
+          std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(search_space_, nullptr);
     } else {
       graph_index_ = std::make_shared<Graph<DataType, IDType>>();
       graph_index_->load(index_path_view);
@@ -164,8 +166,9 @@ class PyIndex : public BasePyIndex {
       data_dim_ = build_space_->dim_;
 
       job_context_ = std::make_shared<JobContext<IDType>>();
-      search_job_ = std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(
-          search_space_, graph_index_, job_context_);
+      search_job_ = std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(search_space_,
+                                                                             graph_index_,
+                                                                             job_context_);
       update_job_ = std::make_shared<GraphUpdateJob<SearchSpaceType>>(search_job_);
     }
     LOG_INFO("creator task generator success");
@@ -203,19 +206,21 @@ class PyIndex : public BasePyIndex {
       }
 
       auto build_start = std::chrono::steady_clock::now();
-      auto graph_builder = std::make_shared<HNSWBuilder<BuildSpaceType>>(
-          build_space_, params_.max_nbrs_, ef_construction);
+      auto graph_builder = std::make_shared<HNSWBuilder<BuildSpaceType>>(build_space_,
+                                                                         params_.max_nbrs_,
+                                                                         ef_construction);
       graph_index_ = graph_builder->build_graph(num_threads);
 
-      LOG_INFO(
-          "The time of building hnsw is {}s.",
-          static_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - build_start)
-              .count());
+      LOG_INFO("The time of building hnsw is {}s.",
+               static_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() -
+                                                          build_start)
+                   .count());
 
       job_context_ = std::make_shared<JobContext<IDType>>();
 
-      search_job_ = std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(
-          search_space_, graph_index_, job_context_);
+      search_job_ = std::make_shared<alaya::GraphSearchJob<SearchSpaceType>>(search_space_,
+                                                                             graph_index_,
+                                                                             job_context_);
       update_job_ = std::make_shared<GraphUpdateJob<SearchSpaceType>>(search_job_);
     }
     LOG_INFO("Create task generator successfully!");
@@ -271,13 +276,19 @@ class PyIndex : public BasePyIndex {
       std::copy(res_pool.begin(), res_pool.begin() + topk, ret_id_ptr);
       std::copy(dist_pool.begin(), dist_pool.begin() + topk, ret_dist_ptr);
     } else {
-      rerank<DistanceType>(res_pool, ret_id_ptr, ret_dist_ptr,
-                           build_space_->get_query_computer(query_ptr), ef, topk);
+      rerank<DistanceType>(res_pool,
+                           ret_id_ptr,
+                           ret_dist_ptr,
+                           build_space_->get_query_computer(query_ptr),
+                           ef,
+                           topk);
     }
     return py::make_tuple(ret_ids, ret_dists);
   }
 
-  auto batch_search(py::array_t<DataType> &queries, uint32_t topk, uint32_t ef,
+  auto batch_search(py::array_t<DataType> &queries,
+                    uint32_t topk,
+                    uint32_t ef,
                     uint32_t num_threads) -> py::array_t<IDType> {
     auto shape = queries.shape();
     size_t query_size = shape[0];
@@ -325,8 +336,11 @@ class PyIndex : public BasePyIndex {
       }
     } else {
       for (size_t i = 0; i < query_size; i++) {
-        rerank(res_pool[i], ret_ptr + i * topk,
-               build_space_->get_query_computer(query_ptr + i * query_dim), ef, topk);
+        rerank(res_pool[i],
+               ret_ptr + i * topk,
+               build_space_->get_query_computer(query_ptr + i * query_dim),
+               ef,
+               topk);
       }
     }
     return ret;
@@ -355,7 +369,9 @@ class PyIndex : public BasePyIndex {
 #endif
   }
 
-  auto batch_search_with_distance(py::array_t<DataType> &queries, uint32_t topk, uint32_t ef,
+  auto batch_search_with_distance(py::array_t<DataType> &queries,
+                                  uint32_t topk,
+                                  uint32_t ef,
                                   uint32_t num_threads) -> py::object {
     size_t query_size = queries.shape(0);
     size_t query_dim = queries.shape(1);
@@ -418,8 +434,12 @@ class PyIndex : public BasePyIndex {
         std::copy(res_pool.begin(), res_pool.begin() + topk, ret_id_ptr + i * topk);
         std::copy(dist_pool.begin(), dist_pool.begin() + topk, ret_dist_ptr + i * topk);
       } else {
-        rerank(res_pool, ret_id_ptr + i * topk, ret_dist_ptr + i * topk,
-               build_space_->get_query_computer(query_ptr), ef, topk);
+        rerank(res_pool,
+               ret_id_ptr + i * topk,
+               ret_dist_ptr + i * topk,
+               build_space_->get_query_computer(query_ptr),
+               ef,
+               topk);
       }
     }
 
@@ -428,10 +448,14 @@ class PyIndex : public BasePyIndex {
   }
 
   template <typename DistanceType = float>
-  void rerank(std::vector<IDType> &src, IDType *desc, auto dist_compute, uint32_t ef,
+  void rerank(std::vector<IDType> &src,
+              IDType *desc,
+              auto dist_compute,
+              uint32_t ef,
               uint32_t topk) {
     std::priority_queue<std::pair<DistanceType, IDType>,
-                        std::vector<std::pair<DistanceType, IDType>>, std::greater<>>
+                        std::vector<std::pair<DistanceType, IDType>>,
+                        std::greater<>>
         pq;
     for (size_t i = 0; i < ef; i++) {
       pq.push({dist_compute(src[i]), src[i]});
@@ -443,10 +467,15 @@ class PyIndex : public BasePyIndex {
   }
 
   template <typename DistanceType = float>
-  void rerank(std::vector<IDType> &src, IDType *desc, DistanceType *distances, auto dist_compute,
-              uint32_t ef, uint32_t topk) {
+  void rerank(std::vector<IDType> &src,
+              IDType *desc,
+              DistanceType *distances,
+              auto dist_compute,
+              uint32_t ef,
+              uint32_t topk) {
     std::priority_queue<std::pair<DistanceType, IDType>,
-                        std::vector<std::pair<DistanceType, IDType>>, std::greater<>>
+                        std::vector<std::pair<DistanceType, IDType>>,
+                        std::greater<>>
         pq;
     for (size_t i = 0; i < ef; i++) {
       pq.push({dist_compute(src[i]), src[i]});
@@ -485,13 +514,18 @@ class PyIndexInterface {
   auto to_string() -> std::string { return "PyIndexInterface"; }
 
   auto fit(py::array &vectors,  // NOLINT
-           uint32_t ef_construction, uint32_t num_threads) -> void {
-    DISPATCH_AND_CAST_WITH_ARR(vectors, typed_vectors, index,
+           uint32_t ef_construction,
+           uint32_t num_threads) -> void {
+    DISPATCH_AND_CAST_WITH_ARR(vectors,
+                               typed_vectors,
+                               index,
                                index->fit(typed_vectors, ef_construction, num_threads););
   }
 
   auto search(py::array &query, uint32_t topk, uint32_t ef) -> py::array {  // NOLINT
-    DISPATCH_AND_CAST_WITH_ARR(query, typed_query, index,
+    DISPATCH_AND_CAST_WITH_ARR(query,
+                               typed_query,
+                               index,
                                return index->search(typed_query, topk, ef););
   }
 
@@ -500,7 +534,9 @@ class PyIndexInterface {
   }
 
   auto insert(py::array &insert_data, uint32_t ef) -> std::variant<uint32_t, uint64_t> {  // NOLINT
-    DISPATCH_AND_CAST_WITH_ARR(insert_data, typed_insert_data, index,
+    DISPATCH_AND_CAST_WITH_ARR(insert_data,
+                               typed_insert_data,
+                               index,
                                return index->insert(typed_insert_data, ef););
   }
 
@@ -508,17 +544,27 @@ class PyIndexInterface {
     DISPATCH_AND_CAST(index, index->remove(id););
   }
 
-  auto batch_search(py::array &queries, uint32_t topk, uint32_t ef,  // NOLINT
+  auto batch_search(py::array &queries,
+                    uint32_t topk,
+                    uint32_t ef,  // NOLINT
                     uint32_t num_threads) -> py::array {
-    DISPATCH_AND_CAST_WITH_ARR(queries, typed_queries, index,
+    DISPATCH_AND_CAST_WITH_ARR(queries,
+                               typed_queries,
+                               index,
                                return index->batch_search(typed_queries, topk, ef, num_threads););
   }
 
-  auto batch_search_with_distance(py::array &queries, uint32_t topk, uint32_t ef,  // NOLINT
+  auto batch_search_with_distance(py::array &queries,
+                                  uint32_t topk,
+                                  uint32_t ef,  // NOLINT
                                   uint32_t num_threads) -> py::object {
-    DISPATCH_AND_CAST_WITH_ARR(
-        queries, typed_queries, index,
-        return index->batch_search_with_distance(typed_queries, topk, ef, num_threads););
+    DISPATCH_AND_CAST_WITH_ARR(queries,
+                               typed_queries,
+                               index,
+                               return index->batch_search_with_distance(typed_queries,
+                                                                        topk,
+                                                                        ef,
+                                                                        num_threads););
   }
 
   auto load(const std::string &index_path,  // NOLINT

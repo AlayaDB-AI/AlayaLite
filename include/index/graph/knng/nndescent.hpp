@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <random>
@@ -31,7 +32,8 @@
 
 namespace alaya {
 
-template <typename DistanceSpaceType, typename DataType = typename DistanceSpaceType::DataTypeAlias,
+template <typename DistanceSpaceType,
+          typename DataType = typename DistanceSpaceType::DataTypeAlias,
           typename DistanceType = typename DistanceSpaceType::DistanceTypeAlias,
           typename IDType = typename DistanceSpaceType::IDTypeAlias>
   requires Space<DistanceSpaceType, DataType, DistanceType, IDType>
@@ -177,8 +179,8 @@ struct NndescentImpl {
       ThreadPool pool(num_cores);
 
       IDType per_core_num = (vector_num_ + num_cores - 1) / num_cores;
-      for (unsigned int thread_id = 0; thread_id < num_cores; thread_id++) {
-        pool.enqueue([thread_id, &rng, per_core_num, this]() {
+      for (uint32_t thread_id = 0; thread_id < num_cores; thread_id++) {
+        pool.enqueue([thread_id, &rng, per_core_num, this]() -> auto {
           IDType start = thread_id * per_core_num;
           IDType end = std::min((thread_id + 1) * per_core_num, vector_num_);
 
@@ -226,7 +228,7 @@ struct NndescentImpl {
     std::vector<IDType> eval_points(num_eval);
 
     std::vector<std::vector<IDType>> eval_gt(num_eval);
-    std::mt19937 rng(random_seed_ * 6577 + std::thread::hardware_concurrency());
+    std::mt19937 rng((random_seed_ * 6577) + std::thread::hardware_concurrency());
 
     gen_random(rng, eval_points.data(), num_eval, vector_num_);
     gen_eval_gt(eval_points, eval_gt);
@@ -251,18 +253,18 @@ struct NndescentImpl {
   void join() {
     auto t1 = Timer();
 
-    // TODO: Use the thread_num parameter, not the hardware_concurrency
+    // TODO(ljh): Use the thread_num parameter, not the hardware_concurrency
     unsigned int num_cores = std::thread::hardware_concurrency();
     ThreadPool thread_pool(num_cores);
 
     IDType per_num_cores = (vector_num_ + num_cores - 1) / num_cores;
-    for (unsigned int i = 0; i < num_cores; i++) {
-      thread_pool.enqueue([this, i, per_num_cores]() {
+    for (uint32_t i = 0; i < num_cores; i++) {
+      thread_pool.enqueue([this, i, per_num_cores]() -> auto {
         IDType start = i * per_num_cores;
         IDType end = std::min((i + 1) * per_num_cores, vector_num_);
 
         for (; start < end; start++) {
-          graph_[start].join([this](IDType item1, IDType item2) {
+          graph_[start].join([this](IDType item1, IDType item2) -> auto {
             if (item1 != item2) {
               DistanceType dist = space_->get_distance(item1, item2);
               graph_[item1].insert(item2, dist);
@@ -292,13 +294,13 @@ struct NndescentImpl {
   void update() {
     auto t1 = Timer();
 
-    // TODO: Use the thread_num parameter, not the hardware_concurrency
+    // TODO(ljh): Use the thread_num parameter, not the hardware_concurrency
     unsigned int num_cores = std::thread::hardware_concurrency();
     ThreadPool thread_pool(num_cores);
 
     IDType per_num_cores = (vector_num_ + num_cores - 1) / num_cores;
-    for (unsigned int i = 0; i < num_cores; i++) {
-      thread_pool.enqueue([i, this, per_num_cores]() {
+    for (uint32_t i = 0; i < num_cores; i++) {
+      thread_pool.enqueue([i, this, per_num_cores]() -> auto {
         for (IDType j = i * per_num_cores; j < (i + 1) * per_num_cores && j < vector_num_; j++) {
           std::vector<IDType>().swap(graph_[j].nn_new_);
           std::vector<IDType>().swap(graph_[j].nn_old_);
@@ -309,8 +311,8 @@ struct NndescentImpl {
 
     thread_pool.reset_task();
 
-    for (unsigned int i = 0; i < num_cores; i++) {
-      thread_pool.enqueue([i, this, per_num_cores]() {
+    for (uint32_t i = 0; i < num_cores; i++) {
+      thread_pool.enqueue([i, this, per_num_cores]() -> auto {
         for (IDType j = i * per_num_cores; j < (i + 1) * per_num_cores && j < vector_num_; j++) {
           auto &nn = graph_[j];
           std::sort(nn.candidate_pool_.begin(), nn.candidate_pool_.end());
@@ -339,12 +341,12 @@ struct NndescentImpl {
     thread_pool.wait_until_all_tasks_completed(num_cores);
 
     {
-      std::mt19937 rng(random_seed_ * 5081 + num_cores);
+      std::mt19937 rng((random_seed_ * 5081) + num_cores);
 
       thread_pool.reset_task();
 
-      for (unsigned int i = 0; i < num_cores; ++i) {
-        thread_pool.enqueue([&, i, per_num_cores]() {
+      for (uint32_t i = 0; i < num_cores; ++i) {
+        thread_pool.enqueue([&, i, per_num_cores]() -> auto {
           for (auto j = per_num_cores * i; j < per_num_cores * (i + 1) && j < vector_num_; ++j) {
             auto &node = graph_[j];
             auto &nn_new = node.nn_new_;
@@ -390,9 +392,10 @@ struct NndescentImpl {
     {
       thread_pool.reset_task();
 
-      for (unsigned int i = 0; i < num_cores; ++i) {
-        thread_pool.enqueue([this, i, per_num_cores]() {
-          for (auto j = i * per_num_cores; j < i * per_num_cores + per_num_cores && j < vector_num_;
+      for (uint32_t i = 0; i < num_cores; ++i) {
+        thread_pool.enqueue([this, i, per_num_cores]() -> auto {
+          for (auto j = i * per_num_cores;
+               j < (i * per_num_cores) + per_num_cores && j < vector_num_;
                ++j) {
             auto &nn_new = graph_[j].nn_new_;
             auto &nn_old = graph_[j].nn_old_;
@@ -424,14 +427,15 @@ struct NndescentImpl {
   void gen_eval_gt(const std::vector<IDType> &eval_set, std::vector<std::vector<IDType>> &eval_gt) {
     auto t1 = Timer();
 
-    // TODO: Use the thread_num parameter, not the hardware_concurrency
+    // TODO(?): Use the thread_num parameter, not the hardware_concurrency
     unsigned int num_cores = std::thread::hardware_concurrency();
     ThreadPool thread_pool(num_cores);
     auto per_num_cores = (eval_set.size() + num_cores - 1) / num_cores;
     for (unsigned int thread_id = 0; thread_id < num_cores; ++thread_id) {
-      thread_pool.enqueue([thread_id, per_num_cores, &eval_set, &eval_gt, this]() {
-        for (size_t j = thread_id * per_num_cores;
-             j < (thread_id + 1) * per_num_cores && j < eval_set.size(); ++j) {
+      thread_pool.enqueue([thread_id, per_num_cores, &eval_set, &eval_gt, this]() -> auto {
+        for (uint32_t j = thread_id * per_num_cores;
+             j < (thread_id + 1) * per_num_cores && j < eval_set.size();
+             ++j) {
           std::vector<Neighbor<IDType>> tmp;
 
           for (IDType iter = 0; iter < vector_num_; ++iter) {

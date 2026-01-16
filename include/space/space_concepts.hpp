@@ -25,9 +25,8 @@ namespace alaya {
 
 const uint32_t kAlignment = 64;  ///< Constant for alignment (cache line / SIMD)
 
-
 template <typename DataType, typename DistanceType>
-using DistFuncRaBitQ = DistanceType (*)(const DataType *,const DataType *, size_t);
+using DistFuncRaBitQ = DistanceType (*)(const DataType *, const DataType *, size_t);
 
 /**
  * @brief Type alias for a distance function pointer.
@@ -49,7 +48,10 @@ using DistFunc = DistanceType (*)(DataType *, DataType *, size_t);
  * @tparam DistanceType The data type for the calculated distance.
  */
 template <typename DataType, typename DistanceType>
-using DistFuncSQ = DistanceType (*)(const uint8_t *, const uint8_t *, size_t, const DataType *min,
+using DistFuncSQ = DistanceType (*)(const uint8_t *,
+                                    const uint8_t *,
+                                    size_t,
+                                    const DataType *min,
                                     const DataType *max);
 
 /**
@@ -141,8 +143,8 @@ concept HasGetDistance = (requires(T t, IDType i, IDType j) {
 template <typename T, typename DataType, typename DistanceType, typename IDType>
 concept Space = HasGetDataSize<T> && HasGetDistance<T, IDType> &&
                 (HasGetDistFunc<T, typename T::DistDataType, DistanceType> ||
-                 HasGetDistFuncSQ<T, typename T::DistDataType, DistanceType>||
-                HasGetDistFuncRaBitQ<T, typename T::DistDataType, DistanceType>) &&
+                 HasGetDistFuncSQ<T, typename T::DistDataType, DistanceType> ||
+                 HasGetDistFuncRaBitQ<T, typename T::DistDataType, DistanceType>) &&
                 HasFitFn<T, DataType, IDType> && HasMertricFunc<T>;
 
 }  // namespace alaya

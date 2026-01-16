@@ -54,9 +54,9 @@ class RaBitQSpace {
 
   DistFuncRaBitQ<DataType, DistanceType> distance_cal_func_;  ///< Distance calculation function
 
-  StaticStorage<> storage_;                            ///< Data Storage
+  StaticStorage<> storage_;                               ///< Data Storage
   std::unique_ptr<RaBitQQuantizer<DataType>> quantizer_;  ///< Data Quantizer
-  std::unique_ptr<Rotator<DataType>> rotator_;         ///< Data rotator
+  std::unique_ptr<Rotator<DataType>> rotator_;            ///< Data rotator
 
   IDType ep_;  ///< search entry point
 
@@ -113,8 +113,10 @@ class RaBitQSpace {
 
   auto get_ep() const -> IDType { return ep_; }
 
-  RaBitQSpace(IDType capacity, size_t dim, MetricType metric,
-           RotatorType type = RotatorType::FhtKacRotator)
+  RaBitQSpace(IDType capacity,
+              size_t dim,
+              MetricType metric,
+              RotatorType type = RotatorType::FhtKacRotator)
       : capacity_(capacity), dim_(dim), metric_(metric), type_(type) {
     rotator_ = choose_rotator<DataType>(dim_, type_, round_up_to_multiple_of<size_t>(dim_, 64));
     quantizer_ = std::make_unique<RaBitQQuantizer<DataType>>(dim_, rotator_->size());
@@ -153,8 +155,12 @@ class RaBitQSpace {
     this->rotator_->rotate(get_data_by_id(c), rotated_centroid.data());
 
     // quantize data and update batch data
-    quantizer_->batch_quantize(rotated_neighbors.data(), rotated_centroid.data(), kDegreeBound,
-                               get_nei_qc_ptr(c), get_f_add_ptr(c), get_f_rescale_ptr(c));
+    quantizer_->batch_quantize(rotated_neighbors.data(),
+                               rotated_centroid.data(),
+                               kDegreeBound,
+                               get_nei_qc_ptr(c),
+                               get_f_add_ptr(c),
+                               get_f_rescale_ptr(c));
   }
 
   void fit(DataType *data, IDType item_cnt) {
@@ -260,7 +266,9 @@ class RaBitQSpace {
 
   auto get_dim() const -> uint32_t { return dim_; }
 
-  auto get_dist_func() const -> DistFuncRaBitQ<DataType, DistanceType> { return distance_cal_func_; }
+  auto get_dist_func() const -> DistFuncRaBitQ<DataType, DistanceType> {
+    return distance_cal_func_;
+  }
 
   auto get_data_num() const -> IDType { return item_cnt_; }
 
@@ -295,20 +303,17 @@ class RaBitQSpace {
       DataType *__restrict__ est_ptr = est_dists_.data();
 
       // look up, get sum(nth_segment)
-      fastscan::accumulate(qc_ptr, lookup_table_.lut(),
-                           accu_res_.data(), padded_dim);
+      fastscan::accumulate(qc_ptr, lookup_table_.lut(), accu_res_.data(), padded_dim);
 
       ConstRowMajorArrayMap<u_int16_t> n_th_segment_arr(accu_res_.data(), 1, fastscan::kBatchSize);
-      ConstRowMajorArrayMap<DataType> f_add_arr(f_add_ptr, 1,
-                                                fastscan::kBatchSize);
-      ConstRowMajorArrayMap<DataType> f_rescale_arr(f_rescale_ptr, 1,
-                                                    fastscan::kBatchSize);
+      ConstRowMajorArrayMap<DataType> f_add_arr(f_add_ptr, 1, fastscan::kBatchSize);
+      ConstRowMajorArrayMap<DataType> f_rescale_arr(f_rescale_ptr, 1, fastscan::kBatchSize);
 
       RowMajorArrayMap<DistDataType> est_dist_arr(est_ptr, 1, fastscan::kBatchSize);
       est_dist_arr =
           f_add_arr + g_add_ +
           (f_rescale_arr * (lookup_table_.delta() * (n_th_segment_arr.template cast<DataType>()) +
-                           lookup_table_.sum_vl() + g_k1xsumq_));
+                            lookup_table_.sum_vl() + g_k1xsumq_));
     }
 
    public:
@@ -336,7 +341,8 @@ class RaBitQSpace {
 
       float c_1 = -((1 << 1) - 1) / 2.F;  // -0.5F
 
-      auto sumq = std::accumulate(rotated_query.begin(), rotated_query.begin() + padded_dim,
+      auto sumq = std::accumulate(rotated_query.begin(),
+                                  rotated_query.begin() + padded_dim,
                                   static_cast<DataType>(0));
 
       g_k1xsumq_ = sumq * c_1;

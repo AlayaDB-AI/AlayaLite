@@ -67,8 +67,12 @@ PYBIND11_MODULE(_alayalitepy, m) {
 
   py::class_<alaya::IndexParams>(m, "IndexParams")
       .def(py::init<>())
-      .def(py::init<alaya::IndexType, py::dtype, py::dtype, alaya::QuantizationType,
-                    alaya::MetricType, uint32_t>(),
+      .def(py::init<alaya::IndexType,
+                    py::dtype,
+                    py::dtype,
+                    alaya::QuantizationType,
+                    alaya::MetricType,
+                    uint32_t>(),
            py::arg("index_type_") = alaya::IndexType::HNSW,
            py::arg("data_type_") = py::dtype::of<float>(),
            py::arg("id_type_") = py::dtype::of<uint32_t>(),
@@ -87,8 +91,9 @@ PYBIND11_MODULE(_alayalitepy, m) {
 
   py::class_<alaya::Client>(m, "Client")
       .def(py::init<>())
-      .def("create_index", &alaya::Client::create_index,  //
-           py::arg("name"),                               //
+      .def("create_index",
+           &alaya::Client::create_index,  //
+           py::arg("name"),               //
            py::arg("param"))
       .def("load_index",                          //
            &alaya::Client::load_index,            //
@@ -102,33 +107,38 @@ PYBIND11_MODULE(_alayalitepy, m) {
                                                                                 "PyIndexInterface")
       .def(py::init<alaya::IndexParams>(), py::arg("params"))
       .def("to_string", &alaya::PyIndexInterface::to_string)
-      .def("fit", &alaya::PyIndexInterface::fit,  //
-           py::arg("vectors"),                    //
-           py::arg("ef_construction"),            //
+      .def("fit",
+           &alaya::PyIndexInterface::fit,  //
+           py::arg("vectors"),             //
+           py::arg("ef_construction"),     //
            py::arg("num_threads"))
-      .def("search", &alaya::PyIndexInterface::search,  //
-           py::arg("query"),                            //
-           py::arg("topk"),                             //
+      .def("search",
+           &alaya::PyIndexInterface::search,  //
+           py::arg("query"),                  //
+           py::arg("topk"),                   //
            py::arg("ef"))
       .def("get_data_by_id", &alaya::PyIndexInterface::get_data_by_id, py::arg("id"))
-      .def("insert", &alaya::PyIndexInterface::insert,  //
-           py::arg("insert_data"),                      //
+      .def("insert",
+           &alaya::PyIndexInterface::insert,  //
+           py::arg("insert_data"),            //
            py::arg("ef"))
       .def("remove", &alaya::PyIndexInterface::remove, py::arg("id"))
-      .def("batch_search", &alaya::PyIndexInterface::batch_search,                              //
-           py::arg("queries"),                                                                  //
-           py::arg("topk"),                                                                     //
-           py::arg("ef"),                                                                       //
-           py::arg("num_threads"))                                                              //
-      .def("batch_search_with_distance", &alaya::PyIndexInterface::batch_search_with_distance,  //
-           py::arg("queries"),                                                                  //
-           py::arg("topk"),                                                                     //
-           py::arg("ef"),                                                                       //
-           py::arg("num_threads"))                                                              //
-      .def("save",                                                                              //
-           &alaya::PyIndexInterface::save,                                                      //
-           py::arg("index_path"),                                                               //
-           py::arg("data_path"),                                                                //
+      .def("batch_search",
+           &alaya::PyIndexInterface::batch_search,  //
+           py::arg("queries"),                      //
+           py::arg("topk"),                         //
+           py::arg("ef"),                           //
+           py::arg("num_threads"))                  //
+      .def("batch_search_with_distance",
+           &alaya::PyIndexInterface::batch_search_with_distance,  //
+           py::arg("queries"),                                    //
+           py::arg("topk"),                                       //
+           py::arg("ef"),                                         //
+           py::arg("num_threads"))                                //
+      .def("save",                                                //
+           &alaya::PyIndexInterface::save,                        //
+           py::arg("index_path"),                                 //
+           py::arg("data_path"),                                  //
            py::arg("quant_path") = std::string())
       .def("load",                          //
            &alaya::PyIndexInterface::load,  //

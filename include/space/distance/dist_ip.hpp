@@ -35,8 +35,11 @@ FAST_END
 
 FAST_BEGIN
 template <typename DataType = float, typename DistanceType = float>
-inline auto ip_sqr_sq4(const uint8_t *encoded_x, const uint8_t *encoded_y, size_t dim,
-                       const DataType *min, const DataType *max) -> DistanceType {
+inline auto ip_sqr_sq4(const uint8_t *encoded_x,
+                       const uint8_t *encoded_y,
+                       size_t dim,
+                       const DataType *min,
+                       const DataType *max) -> DistanceType {
   DistanceType sum = 0;
 
   for (size_t i = 0; i < dim; i += 2) {
@@ -58,8 +61,11 @@ FAST_END
 
 FAST_BEGIN
 template <typename DataType = float, typename DistanceType = float>
-inline auto ip_sqr_sq8(const uint8_t *encoded_x, const uint8_t *encoded_y, size_t dim,
-                       const DataType *min, const DataType *max) -> DistanceType {
+inline auto ip_sqr_sq8(const uint8_t *encoded_x,
+                       const uint8_t *encoded_y,
+                       size_t dim,
+                       const DataType *min,
+                       const DataType *max) -> DistanceType {
   DistanceType sum = 0;
 
   for (size_t i = 0; i < dim; i += 1) {

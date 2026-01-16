@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-
 #pragma once
 
 #include <filesystem>
@@ -48,7 +47,13 @@ class TestDatasetBase {
     alaya::load_fvecs(query_file_, queries_, query_num_, query_dim);
     alaya::load_ivecs(gt_file_, answers_, ans_num_, ans_dim_);
     if (data_dim != query_dim || query_num_ != ans_num_) {
-      LOG_CRITICAL("The dimension of data, query and ground truth is not the same. data_dim: {}, query_dim: {}, query_num: {}, ans_num: {}", data_dim, query_dim, query_num_, ans_num_);
+      LOG_CRITICAL(
+          "The dimension of data, query and ground truth is not the same. data_dim: {}, query_dim: "
+          "{}, query_num: {}, ans_num: {}",
+          data_dim,
+          query_dim,
+          query_num_,
+          ans_num_);
       exit(-1);
     }
     dim_ = data_dim;
@@ -70,7 +75,6 @@ class TestDatasetBase {
   uint32_t get_ans_num() const noexcept { return ans_num_; }
   uint32_t get_dim() const noexcept { return dim_; }
   uint32_t get_ans_dim() const noexcept { return ans_dim_; }
-
 
  protected:
   virtual std::string get_download_command() const = 0;

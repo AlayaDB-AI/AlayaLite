@@ -36,12 +36,11 @@ template <typename DistanceSpaceType,
 class GraphUpdateJob {
  public:
   std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job_ = nullptr;  ///< The search job
-  std::shared_ptr<DistanceSpaceType> space_ = nullptr;  ///< The is a data manager interface .
+  std::shared_ptr<DistanceSpaceType> space_ = nullptr;        ///< The is a data manager interface .
   std::shared_ptr<Graph<DataType, IDType>> graph_ = nullptr;  ///< The search graph.
-  std::shared_ptr<JobContext<IDType>> job_context_;  ///< The shared job context
+  std::shared_ptr<JobContext<IDType>> job_context_;           ///< The shared job context
 
-  explicit GraphUpdateJob(
-      std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job)
+  explicit GraphUpdateJob(std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job)
       : search_job_(search_job),
         space_(search_job->space_),
         graph_(search_job->graph_),
@@ -67,8 +66,7 @@ class GraphUpdateJob {
   auto insert_and_update(DataType *query, uint32_t ef) -> IDType {
     std::vector<IDType> search_results(graph_->max_nbrs_, -1);
 
-    search_job_->search_solo(query, graph_->max_nbrs_, search_results.data(),
-                             ef);
+    search_job_->search_solo(query, graph_->max_nbrs_, search_results.data(), ef);
     auto node_id = graph_->insert(search_results.data());
     if (node_id == static_cast<IDType>(-1)) {
       assert(space_->insert(query) == static_cast<IDType>(-1));
@@ -120,13 +118,12 @@ class GraphUpdateJob {
       candidate_nbrs.insert(nbr);
     }
     if (job_context_->inserted_edges_.count(node_id)) {
-        for (auto inserted_nbr : job_context_->inserted_edges_.at(node_id)) {
-            candidate_nbrs.insert(inserted_nbr);
-        }
+      for (auto inserted_nbr : job_context_->inserted_edges_.at(node_id)) {
+        candidate_nbrs.insert(inserted_nbr);
+      }
     }
     auto handler = space_->get_query_computer(node_id);
-    LinearPool<DistanceType, IDType> pool(space_->get_data_num(),
-                                          graph_->max_nbrs_);
+    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), graph_->max_nbrs_);
     for (auto &nbr : candidate_nbrs) {
       auto dist = handler(nbr);
       pool.insert(nbr, dist);

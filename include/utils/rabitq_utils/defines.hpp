@@ -30,19 +30,20 @@
 
 namespace alaya {
 // Eigen::Matrix<T, Rows, Cols, Options>
-// A dense linear algebra matrix supporting mathematical operations (e.g., multiplication, inversion).
-// Designed for linear algebra — operators like * mean matrix multiplication.
-// Use it when you need standard matrix math (e.g., A * B, A.inverse(), A.transpose()).
+// A dense linear algebra matrix supporting mathematical operations (e.g., multiplication,
+// inversion). Designed for linear algebra — operators like * mean matrix multiplication. Use it
+// when you need standard matrix math (e.g., A * B, A.inverse(), A.transpose()).
 
 // Eigen::Array<T, Rows, Cols, Options>
-// A general-purpose multidimensional array supporting coefficient-wise operations (e.g., +, *, sin, <).
-// Designed for element-wise math — operators like * mean element-wise multiplication.
-// Use for signal processing, per-pixel operations, or when you need "array-style" math, not linear algebra.
+// A general-purpose multidimensional array supporting coefficient-wise operations (e.g., +, *, sin,
+// <). Designed for element-wise math — operators like * mean element-wise multiplication. Use for
+// signal processing, per-pixel operations, or when you need "array-style" math, not linear algebra.
 
 // Eigen::Map<MatrixType>
 // Zero-copy wrapper that maps existing raw memory (e.g., T*) to an Eigen Matrix or Array interface.
-// Allows external buffers (from C arrays, std::vector, etc.) to be used as Eigen objects without copying.
-// Ideal for interoperability and performance-critical code. Modifying the Map modifies the original memory.
+// Allows external buffers (from C arrays, std::vector, etc.) to be used as Eigen objects without
+// copying. Ideal for interoperability and performance-critical code. Modifying the Map modifies the
+// original memory.
 template <typename T>
 using RowMajorMatrix = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
@@ -78,13 +79,13 @@ auto dot_product(const T *__restrict__ vec0, const T *__restrict__ vec1, size_t 
 }
 
 template <typename T>
-inline auto l2_sqr(const T* __restrict__ vec0, size_t dim) -> T {
-    ConstVectorMap<T> v0(vec0, dim);
-    return v0.dot(v0);
+inline auto l2_sqr(const T *__restrict__ vec0, size_t dim) -> T {
+  ConstVectorMap<T> v0(vec0, dim);
+  return v0.dot(v0);
 }
 
 template <typename T>
-inline auto l2_sqr(const T* __restrict__ vec0,const T* __restrict__ vec1, size_t dim) -> T {
+inline auto l2_sqr(const T *__restrict__ vec0, const T *__restrict__ vec1, size_t dim) -> T {
   ConstVectorMap<T> v0(vec0, dim);
   ConstVectorMap<T> v1(vec1, dim);
   return (v0 - v1).dot(v0 - v1);

@@ -15,7 +15,6 @@
  */
 
 #include <gtest/gtest.h>
-#include <bitset>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -24,14 +23,10 @@
 #include <thread>
 #include <vector>
 #include "executor/jobs/graph_search_job.hpp"
-#include "executor/scheduler.hpp"
-#include "fmt/format.h"
 #include "index/graph/graph.hpp"
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "space/raw_space.hpp"
-#include "space/sq4_space.hpp"
 #include "utils/dataset_utils.hpp"
-#include "utils/io_utils.hpp"
 #include "utils/log.hpp"
 #include "utils/timer.hpp"
 

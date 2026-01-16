@@ -38,13 +38,11 @@ struct Neighbor {
   Neighbor(IDType id, DistanceType distance, bool f = false)
       : id_(id), distance_(distance), flag_(f) {}
 
-  inline friend auto operator<(const Neighbor &lhs, const Neighbor &rhs) -> bool {
+  friend auto operator<(const Neighbor &lhs, const Neighbor &rhs) -> bool {
     return lhs.distance_ < rhs.distance_ || (lhs.distance_ == rhs.distance_ && lhs.id_ < rhs.id_);
   }
 
-  inline friend auto operator>(const Neighbor &lhs, const Neighbor &rhs) -> bool {
-    return !(lhs < rhs);
-  }
+  friend auto operator>(const Neighbor &lhs, const Neighbor &rhs) -> bool { return !(lhs < rhs); }
 };
 
 template <typename IDType = uint64_t, typename DistanceType = float>
@@ -55,7 +53,7 @@ struct Node {
   Node() = default;
   Node(IDType id, DistanceType distance) : id_(id), distance_(distance) {}
 
-  inline auto operator<(const Node &other) const -> bool { return distance_ < other.distance_; }
+  auto operator<(const Node &other) const -> bool { return distance_ < other.distance_; }
 };
 
 /**

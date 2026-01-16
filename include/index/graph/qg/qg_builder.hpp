@@ -30,7 +30,8 @@
 
 namespace alaya {
 template <typename DistanceSpaceType>
-  requires Space<DistanceSpaceType, typename DistanceSpaceType::DataTypeAlias,
+  requires Space<DistanceSpaceType,
+                 typename DistanceSpaceType::DataTypeAlias,
                  typename DistanceSpaceType::DistanceTypeAlias,
                  typename DistanceSpaceType::IDTypeAlias>
 class QGBuilder {
@@ -131,7 +132,7 @@ class QGBuilder {
 
   void search_new_neighbors(bool sup) {
     LOG_INFO("Searching for new neighbor candidates...");
-     #if defined(__AVX512F__)
+#if defined(__AVX512F__)
 #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < num_nodes_; ++i) {
       IDType cur_id = i;
@@ -159,13 +160,12 @@ class QGBuilder {
       // prune and update qg
       heuristic_prune(cur_id, candidates, new_neighbors_[cur_id], sup);
     }
-    #endif
+#endif
   }
-
 
   void add_reverse_edges(bool sup) {
     LOG_INFO("Adding reverse edges...");
-    #if defined(__AVX512F__)
+#if defined(__AVX512F__)
     std::vector<std::mutex> locks(num_nodes_);
     std::vector<CandidateList> reverse_buffer(num_nodes_);
 #pragma omp parallel for schedule(dynamic)
@@ -199,12 +199,13 @@ class QGBuilder {
       CandidateList &tmp_pool = reverse_buffer[data_id];
       tmp_pool.reserve(tmp_pool.size() + degree_bound_);
       // add current neighbors
-      tmp_pool.insert(tmp_pool.end(), new_neighbors_[data_id].begin(),
+      tmp_pool.insert(tmp_pool.end(),
+                      new_neighbors_[data_id].begin(),
                       new_neighbors_[data_id].end());
       std::sort(tmp_pool.begin(), tmp_pool.end());
       heuristic_prune(data_id, tmp_pool, new_neighbors_[data_id], sup);
     }
-    #endif
+#endif
   }
 
   /**
@@ -215,7 +216,7 @@ class QGBuilder {
    */
   void angle_based_supplement() {
     LOG_INFO("Supplementing edges...");
-    #if defined(__AVX512F__)
+#if defined(__AVX512F__)
 #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < num_nodes_; ++i) {
       CandidateList &cur_neighbors = new_neighbors_[i];
@@ -267,12 +268,12 @@ class QGBuilder {
 
       cur_neighbors = new_result;
     }
-    #endif
+#endif
     LOG_INFO("Supplementing finished...");
   }
 
 #if defined(__AVX512F__)
- /**
+  /**
    * @brief Use est_dist to find candidate neighbors for cur_id, exclude the vertex itself
    *
    * @param cur_id find candidate neighbors for cur_id
@@ -324,7 +325,9 @@ class QGBuilder {
    * @param pool candidates pool(sorted by distance to cur_id)
    * @param pruned_results neighbors result after pruning, not neighbors that are pruned
    */
-  void heuristic_prune(IDType cur_id, CandidateList &pool, CandidateList &pruned_results,
+  void heuristic_prune(IDType cur_id,
+                       CandidateList &pool,
+                       CandidateList &pruned_results,
                        bool sup) {
     if (pool.empty()) {
       return;
@@ -383,8 +386,10 @@ class QGBuilder {
    * @param new_result final neighbors list
    * @param threshold experimental prune threshold
    */
-  void add_pruned_edges(const CandidateList &result, const CandidateList &pruned_list,
-                        CandidateList &new_result, float threshold) {
+  void add_pruned_edges(const CandidateList &result,
+                        const CandidateList &pruned_list,
+                        CandidateList &new_result,
+                        float threshold) {
     size_t start = 0;
     new_result.clear();
     new_result = result;
@@ -462,8 +467,9 @@ class QGBuilder {
     }
 
     // find the exact nearest neighbor of the centroid and set it as the entry point of qg.
-    std::vector<Neighbor<IDType, DistanceType>> best_entries(
-        num_threads_, Neighbor<IDType, DistanceType>{0, std::numeric_limits<DistanceType>::max()});
+    std::vector<Neighbor<IDType, DistanceType>>
+        best_entries(num_threads_,
+                     Neighbor<IDType, DistanceType>{0, std::numeric_limits<DistanceType>::max()});
 #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < num_nodes_; ++i) {
       auto tid = omp_get_thread_num();

@@ -37,7 +37,9 @@ namespace alaya {
  * File format: [num] [dim] [vector1] [vector2] ...
  */
 template <typename T>
-inline void load_vecs(const std::filesystem::path &filepath, std::vector<T> &data, uint32_t &num,
+inline void load_vecs(const std::filesystem::path &filepath,
+                      std::vector<T> &data,
+                      uint32_t &num,
                       uint32_t &dim) {
   std::ifstream reader(filepath, std::ios::binary);
 
@@ -95,7 +97,9 @@ inline void save_ivecs(const std::filesystem::path &filepath, T *data, uint32_t 
  * File format: [num] [gt_topk] [id1] [id2] ...
  */
 template <typename T>
-inline void load_gt(const std::filesystem::path &filepath, std::vector<T> &data, uint32_t &num,
+inline void load_gt(const std::filesystem::path &filepath,
+                    std::vector<T> &data,
+                    uint32_t &num,
                     uint32_t &gt_topk) {
   std::ifstream reader(filepath, std::ios::binary);
   if (!reader.is_open()) {
@@ -124,7 +128,9 @@ inline void load_gt(const std::filesystem::path &filepath, std::vector<T> &data,
  *
  */
 template <typename T>
-inline void load_fvecs(const std::filesystem::path &filepath, std::vector<T> &data, uint32_t &num,
+inline void load_fvecs(const std::filesystem::path &filepath,
+                       std::vector<T> &data,
+                       uint32_t &num,
                        uint32_t &dim) {
   std::ifstream reader(filepath, std::ios::binary);
 
@@ -168,7 +174,9 @@ inline void load_fvecs(const std::filesystem::path &filepath, std::vector<T> &da
  *
  */
 template <typename T>
-inline void load_bvecs(const std::filesystem::path &filepath, std::vector<T> &data, uint32_t &num,
+inline void load_bvecs(const std::filesystem::path &filepath,
+                       std::vector<T> &data,
+                       uint32_t &num,
                        uint32_t &dim) {
   std::ifstream reader(filepath, std::ios::binary);
 
@@ -208,7 +216,9 @@ inline void load_bvecs(const std::filesystem::path &filepath, std::vector<T> &da
  *
  */
 template <typename T>
-inline void load_ivecs(const std::filesystem::path &filepath, std::vector<T> &data, uint32_t &num,
+inline void load_ivecs(const std::filesystem::path &filepath,
+                       std::vector<T> &data,
+                       uint32_t &num,
                        uint32_t &dim) {
   std::ifstream file(filepath, std::ios::binary);
 
@@ -219,7 +229,7 @@ inline void load_ivecs(const std::filesystem::path &filepath, std::vector<T> &da
 
   file.read(reinterpret_cast<char *>(&dim), sizeof(uint32_t));
   if (file.fail()) {
-    std::cerr << "Failed to read dimension from file: " << filepath.string() << std::endl;
+    std::cerr << "Failed to read dimension from file: " << filepath.string() << '\n';
   }
 
   file.seekg(0, std::ios::end);
@@ -233,7 +243,7 @@ inline void load_ivecs(const std::filesystem::path &filepath, std::vector<T> &da
   for (uint32_t i = 0; i < num; ++i) {
     file.read(reinterpret_cast<char *>(&dim), sizeof(uint32_t));
     // file.read(reinterpret_cast<char *>(data.data() + i * dim), dim * sizeof(float));
-    file.read(reinterpret_cast<char *>(data.data() + i * dim), dim * sizeof(T));
+    file.read(reinterpret_cast<char *>(data.data() + (i * dim)), dim * sizeof(T));
     if (file.fail()) {
       throw std::runtime_error("Failed to read data from file: " + filepath.string());
     }

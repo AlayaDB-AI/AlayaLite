@@ -34,11 +34,11 @@ namespace alaya {
  */
 inline auto prefetch_l1(const void *address) -> void {
 #if defined(_MSC_VER)
-    _mm_prefetch((const char *)address, _MM_HINT_T0);
+  _mm_prefetch((const char *)address, _MM_HINT_T0);
 #elif defined(__SSE2__)
-    _mm_prefetch((const char *)address, _MM_HINT_T0);
+  _mm_prefetch((const char *)address, _MM_HINT_T0);
 #else
-    __builtin_prefetch(address, 0, 3);
+  __builtin_prefetch(address, 0, 3);
 #endif
 }
 
@@ -47,11 +47,11 @@ inline auto prefetch_l1(const void *address) -> void {
  */
 inline auto prefetch_l2(const void *address) -> void {
 #if defined(_MSC_VER)
-    _mm_prefetch((const char *)address, _MM_HINT_T1);
+  _mm_prefetch((const char *)address, _MM_HINT_T1);
 #elif defined(__SSE2__)
-    _mm_prefetch((const char *)address, _MM_HINT_T1);
+  _mm_prefetch((const char *)address, _MM_HINT_T1);
 #else
-    __builtin_prefetch(address, 0, 2);
+  __builtin_prefetch(address, 0, 2);
 #endif
 }
 
@@ -60,11 +60,11 @@ inline auto prefetch_l2(const void *address) -> void {
  */
 inline auto prefetch_l3(const void *address) -> void {
 #if defined(_MSC_VER)
-    _mm_prefetch((const char *)address, _MM_HINT_T2);
+  _mm_prefetch((const char *)address, _MM_HINT_T2);
 #elif defined(__SSE2__)
-    _mm_prefetch((const char *)address, _MM_HINT_T2);
+  _mm_prefetch((const char *)address, _MM_HINT_T2);
 #else
-    __builtin_prefetch(address, 0, 1);
+  __builtin_prefetch(address, 0, 1);
 #endif
 }
 
@@ -73,7 +73,7 @@ inline auto prefetch_l3(const void *address) -> void {
  */
 inline auto mem_prefetch_l1(const void *address, uint32_t line) -> void {
   for (uint32_t i = 0; i < line; ++i) {
-    prefetch_l1(static_cast<const char *>(address) + i * 64);
+    prefetch_l1(static_cast<const char *>(address) + (i * 64));
   }
 }
 
@@ -82,7 +82,7 @@ inline auto mem_prefetch_l1(const void *address, uint32_t line) -> void {
  */
 inline auto mem_prefetch_l2(const void *address, uint32_t line) -> void {
   for (uint32_t i = 0; i < line; ++i) {
-    prefetch_l2(static_cast<const char *>(address) + i * 64);
+    prefetch_l2(static_cast<const char *>(address) + (i * 64));
   }
 }
 
@@ -91,7 +91,7 @@ inline auto mem_prefetch_l2(const void *address, uint32_t line) -> void {
  */
 inline auto mem_prefetch_l3(const void *address, uint32_t line) -> void {
   for (uint32_t i = 0; i < line; ++i) {
-    prefetch_l3(static_cast<const char *>(address) + i * 64);
+    prefetch_l3(static_cast<const char *>(address) + (i * 64));
   }
 }
 };  // namespace alaya

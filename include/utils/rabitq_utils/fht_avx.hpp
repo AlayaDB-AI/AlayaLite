@@ -16,6 +16,7 @@
 
 #pragma once
 
+// clang-format off
 namespace alaya {
 // Fast Hadamard Transform using AVX instructions
 // NOLINTBEGIN

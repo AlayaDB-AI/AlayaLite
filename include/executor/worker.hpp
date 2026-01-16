@@ -39,8 +39,11 @@ class Worker : public std::enable_shared_from_this<Worker> {
  public:
   Worker() = default;  // Designed for running on current cpu
 
-  Worker(WorkerID worker_id, CpuID cpu_id, TaskQueue *task_queue,
-         std::atomic<size_t> *total_task_cnt, std::atomic<size_t> *total_finish_cnt,
+  Worker(WorkerID worker_id,
+         CpuID cpu_id,
+         TaskQueue *task_queue,
+         std::atomic<size_t> *total_task_cnt,
+         std::atomic<size_t> *total_finish_cnt,
          uint32_t local_task_cnt = 4)
       : id_(worker_id),
         cpu_id_(cpu_id),
@@ -188,8 +191,8 @@ class Worker : public std::enable_shared_from_this<Worker> {
   uint32_t local_task_cnt_;  ////< The count of local tasks assigned to the worker.
 
   std::vector<std::coroutine_handle<>>
-      local_tasks_;          ///< The mini-batch of tasks assigned to the worker. Each task is
-                             ///< represented by a coroutine handle.
+      local_tasks_;  ///< The mini-batch of tasks assigned to the worker. Each task is
+                     ///< represented by a coroutine handle.
 
   std::atomic<size_t> *total_task_cnt_;  ///< Pointer to an atomic variable that tracks the
                                          ///< total number of tasks across all workers.

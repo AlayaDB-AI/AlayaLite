@@ -324,7 +324,7 @@ std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
   if (padded_dim == 0) {
     padded_dim = rotator_impl::padding_requirement(dim, type);
     if (padded_dim != dim) {
-      LOG_DEBUG("vectors are padded to {} dimensions for aligned computation\n",padded_dim);
+      LOG_DEBUG("vectors are padded to {} dimensions for aligned computation\n", padded_dim);
     }
   }
 

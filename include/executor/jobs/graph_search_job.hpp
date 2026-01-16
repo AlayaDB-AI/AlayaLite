@@ -38,7 +38,8 @@
 
 namespace alaya {
 
-template <typename DistanceSpaceType, typename DataType = typename DistanceSpaceType::DataTypeAlias,
+template <typename DistanceSpaceType,
+          typename DataType = typename DistanceSpaceType::DataTypeAlias,
           typename DistanceType = typename DistanceSpaceType::DistanceTypeAlias,
           typename IDType = typename DistanceSpaceType::IDTypeAlias>
   requires Space<DistanceSpaceType, DataType, DistanceType, IDType>
@@ -55,7 +56,8 @@ struct GraphSearchJob {
    * @param vis record whether current neighbor has been visited
    * @param query raw data pointer of the query
    */
-  void rabitq_supplement_result(SearchBuffer<DistanceType> &result_pool, HashBasedBooleanSet &vis,
+  void rabitq_supplement_result(SearchBuffer<DistanceType> &result_pool,
+                                HashBasedBooleanSet &vis,
                                 const DataType *query) {
     // Add unvisited neighbors of the result nodes as supplementary result nodes
     auto data = result_pool.data();
@@ -66,7 +68,8 @@ struct GraphSearchJob {
         if (!vis.get(cur_neighbor)) {
           vis.set(cur_neighbor);
           result_pool.insert(cur_neighbor,
-                             space_->get_dist_func()(query, space_->get_data_by_id(cur_neighbor),
+                             space_->get_dist_func()(query,
+                                                     space_->get_data_by_id(cur_neighbor),
                                                      space_->get_dim()));
         }
       }
@@ -149,8 +152,10 @@ struct GraphSearchJob {
 #endif
   }
 
-  auto rabitq_search([[maybe_unused]] const DataType *query, [[maybe_unused]] uint32_t k,
-                     [[maybe_unused]] IDType *ids, [[maybe_unused]] uint32_t ef) -> coro::task<> {
+  auto rabitq_search([[maybe_unused]] const DataType *query,
+                     [[maybe_unused]] uint32_t k,
+                     [[maybe_unused]] IDType *ids,
+                     [[maybe_unused]] uint32_t ef) -> coro::task<> {
 #if defined(__AVX512F__)
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");

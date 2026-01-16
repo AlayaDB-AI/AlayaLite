@@ -27,8 +27,10 @@
 namespace alaya {
 
 template <typename DataType = float, typename DistanceType = float, typename IDType = uint32_t>
-auto find_exact_gt(const std::vector<DataType> &queries, const std::vector<DataType> &data_view,
-                   uint32_t dim, uint32_t topk,
+auto find_exact_gt(const std::vector<DataType> &queries,
+                   const std::vector<DataType> &data_view,
+                   uint32_t dim,
+                   uint32_t topk,
                    std::unordered_set<IDType> *deleted = nullptr) -> std::vector<IDType> {
   if (queries.empty() || data_view.empty() || queries.size() % dim != 0 ||
       data_view.size() % dim != 0) {
@@ -44,13 +46,14 @@ auto find_exact_gt(const std::vector<DataType> &queries, const std::vector<DataT
       if (deleted && deleted->find(j) != deleted->end()) {
         continue;
       }
-      float dist = l2_sqr(queries.data() + i * dim, data_view.data() + j * dim, dim);
+      float dist = l2_sqr(queries.data() + (i * dim), data_view.data() + (j * dim), dim);
       dists.emplace_back(j, dist);
     }
-    std::sort(dists.begin(), dists.end(),
-              [](const auto &lhs, const auto &rhs) { return lhs.second < rhs.second; });
+    std::sort(dists.begin(), dists.end(), [](const auto &lhs, const auto &rhs) -> auto {
+      return lhs.second < rhs.second;
+    });
     for (uint32_t j = 0; j < topk; j++) {
-      res[i * topk + j] = dists[j].first;
+      res[(i * topk) + j] = dists[j].first;
     }
   }
   return res;
@@ -61,7 +64,7 @@ auto calc_recall(std::vector<IDType> &res, std::vector<IDType> &gt, uint32_t top
   uint32_t cnt = 0;
   for (uint32_t i = 0; i < res.size(); i++) {
     for (uint32_t j = 0; j < topk; j++) {
-      if (res[i] == gt[(i / topk) * topk + j]) {
+      if (res[i] == gt[((i / topk) * topk) + j]) {
         cnt++;
         break;
       }

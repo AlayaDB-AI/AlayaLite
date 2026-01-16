@@ -1,9 +1,23 @@
 ---
-BasedOnStyle          : Google
-DerivePointerAlignment: false
-PointerAlignment      : Right
-ColumnLimit           : 100
+BasedOnStyle                             : Google
+DerivePointerAlignment                   : false
+PointerAlignment                         : Right
+ColumnLimit                              : 100
 
 # Default for clang-8, changed in later clangs. Set explicitly for forwards
 # compatibility for students with modern clangs
-IncludeBlocks         : Preserve
+IncludeBlocks                            : Preserve
+AlwaysBreakTemplateDeclarations          : Yes
+
+# Function/Call Parameters: Non-compact packing, one per line
+BinPackParameters                        : false
+BinPackArguments                         : false
+AllowAllParametersOfDeclarationOnNextLine: false
+
+# Lambdas
+AllowShortLambdasOnASingleLine           : Empty # only empty lambdas on a single line
+LambdaBodyIndentation                    : Signature # lambda bodies align with the signature
+
+# Operator alignment (such as =, +, <<, etc.)
+AlignOperands                            : true
+PenaltyBreakBeforeFirstCallParameter     : 10000

@@ -35,7 +35,10 @@ inline void data_range(const T *__restrict__ vec0, size_t dim, T &lo, T &hi) {
 
 template <typename T>
 inline void scalar_quantize_normal(
-    uint8_t *__restrict__ result, const T *__restrict__ vec0, size_t dim, T lo,
+    uint8_t *__restrict__ result,
+    const T *__restrict__ vec0,
+    size_t dim,
+    T lo,
     T delta) {  // normal implementation when AVX512F is not available
   T one_over_delta = 1.0F / delta;
 
@@ -48,8 +51,11 @@ inline void scalar_quantize_normal(
 }
 
 template <typename T>
-inline void scalar_quantize_optimized(uint8_t *__restrict__ result, const T *__restrict__ vec0,
-                                      size_t dim, T lo, T delta) {
+inline void scalar_quantize_optimized(uint8_t *__restrict__ result,
+                                      const T *__restrict__ vec0,
+                                      size_t dim,
+                                      T lo,
+                                      T delta) {
 #if defined(__AVX512F__)
   size_t mul16 = dim - (dim & 0b1111);
   size_t i = 0;

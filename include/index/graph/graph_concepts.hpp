@@ -44,7 +44,8 @@ concept HasBuildGraph = (requires(T t) {
 });
 
 template <typename T>
-concept GraphBuilder = HasBuildGraph<T, typename T::DistanceSpaceTypeAlias::DataTypeAlias,
+concept GraphBuilder = HasBuildGraph<T,
+                                     typename T::DistanceSpaceTypeAlias::DataTypeAlias,
                                      typename T::DistanceSpaceTypeAlias::IDTypeAlias>;
 
 }  // namespace alaya

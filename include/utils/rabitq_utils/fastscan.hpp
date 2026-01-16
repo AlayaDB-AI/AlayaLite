@@ -30,18 +30,24 @@
 namespace alaya::fastscan {
 constexpr static size_t kBatchSize = 32;  // number of vectors in each batch
 
+// clang-format off
 constexpr static std::array<int, 16> kPos = {
     3 /*0000*/, 3 /*0001*/, 2 /*0010*/, 3 /*0011*/, 1 /*0100*/, 3 /*0101*/, 2 /*0110*/, 3 /*0111*/,
     0 /*1000*/, 3 /*1001*/, 2 /*1010*/, 3 /*1011*/, 1 /*1100*/, 3 /*1101*/, 2 /*1110*/, 3 /*1111*/,
 };  // all possible combination for a 4 bit string
+// clang-format on
 
 // data order of packed quantization code, please refer to code and the link offered above for
 // detailed information
-constexpr static std::array<int, 16> kPerm0 = {0, 8,  1, 9,  2, 10, 3, 11,
-                                               4, 12, 5, 13, 6, 14, 7, 15};
+constexpr static std::array<int, 16> kPerm0 =
+    {0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15};
 
 template <typename T, class TA>
-static inline void get_column(const T *src, size_t rows, size_t cols, size_t row, size_t col,
+static inline void get_column(const T *src,
+                              size_t rows,
+                              size_t cols,
+                              size_t row,
+                              size_t col,
                               TA &dest) {
   size_t k = 0;
   size_t max_k = std::min(rows - row, dest.size());
@@ -63,7 +69,9 @@ static inline void get_column(const T *src, size_t rows, size_t cols, size_t row
  * @param num   number of quantization code
  * @param blocks packed quantization code
  */
-inline void pack_codes(size_t padded_dim, const uint8_t *quantization_code, size_t num,
+inline void pack_codes(size_t padded_dim,
+                       const uint8_t *quantization_code,
+                       size_t num,
                        uint8_t *blocks) {
   size_t num_rd = (num + 31) & ~31;  // round up num of vecs to multiple of batch size(32)
 
@@ -83,7 +91,7 @@ inline void pack_codes(size_t padded_dim, const uint8_t *quantization_code, size
     // i.e., we get the codes for 8 dims of 32 vectors and re-orgnize the data layout
     // based on the shuffle SIMD instruction used during querying
     for (size_t i = 0; i < cols; ++i) {
-      get_column(quantization_code, num, cols, row, i, col); // get a byte
+      get_column(quantization_code, num, cols, row, i, col);  // get a byte
       for (size_t j = 0; j < 32; ++j) {
         col_0[j] = col[j] >> 4;
         col_1[j] = col[j] & 15;
@@ -103,8 +111,10 @@ inline void pack_codes(size_t padded_dim, const uint8_t *quantization_code, size
 
 // NOLINTBEGIN
 //  use fast scan to accumulate one block, dim % 16 == 0
-inline void accumulate(const uint8_t *__restrict__ codes, const uint8_t *__restrict__ lp_table,
-                       uint16_t *__restrict__ result, size_t dim) {
+inline void accumulate(const uint8_t *__restrict__ codes,
+                       const uint8_t *__restrict__ lp_table,
+                       uint16_t *__restrict__ result,
+                       size_t dim) {
   size_t code_length = dim << 2;
 #if defined(__AVX512F__)
   __m512i c;

@@ -109,7 +109,6 @@ message(STATUS "Configuring project dependencies...")
 find_package(concurrentqueue REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
-find_package(fmt REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
 
 # OpenMP: only try to find if Conan provided it (i.e., libomp is used) Otherwise, rely on compiler flags and system
@@ -125,7 +124,7 @@ else()
 endif()
 
 # Configure common third-party libraries
-set(COMMON_THIRD_PARTY_LIBS spdlog::spdlog fmt::fmt concurrentqueue::concurrentqueue Eigen3::Eigen)
+set(COMMON_THIRD_PARTY_LIBS spdlog::spdlog concurrentqueue::concurrentqueue Eigen3::Eigen)
 # Add OpenMP target only if available
 if(OPENMP_TARGET)
   list(APPEND COMMON_THIRD_PARTY_LIBS ${OPENMP_TARGET})

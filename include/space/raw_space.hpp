@@ -47,26 +47,25 @@ namespace alaya {
  * @tparam DistanceType The data type for storing distances, with the default being float.
  * @tparam IDType The data type for storing IDs, with the default being uint32_t.
  */
-template <typename DataType = float, typename DistanceType = float,
+template <typename DataType = float,
+          typename DistanceType = float,
           typename IDType = uint32_t,
           typename DataStorage = SequentialStorage<DataType, IDType>>
 class RawSpace {
  public:
-  using DistDataType =
-      DataType;  ///< Type alias for the data type used in distance calculations
+  using DistDataType = DataType;  ///< Type alias for the data type used in distance calculations
   using DataTypeAlias = DataType;
   using IDTypeAlias = IDType;
   using DistanceTypeAlias = DistanceType;
-  IDType capacity_{0};        ///< The maximum number of data points (nodes)
-  uint32_t dim_{0};           ///< Dimensionality of the data points
-  MetricType metric_{MetricType::L2};  ///< Metric type
 
-  DistFunc<DistDataType, DistanceType>
-      distance_calu_func_;    ///< Distance calculation function
-  uint32_t data_size_{0};     ///< Size of each data point in bytes
-  IDType item_cnt_{0};        ///< Number of data points (nodes), can be either
-                              ///< available or deleted
-  IDType delete_cnt_{0};      ///< Number of deleted data points
+  DistFunc<DistDataType, DistanceType> distance_calu_func_;  ///< Distance calculation function
+
+  IDType capacity_{0};                 ///< The maximum number of data points (nodes)
+  uint32_t dim_{0};                    ///< Dimensionality of the data points
+  MetricType metric_{MetricType::L2};  ///< Metric type
+  uint32_t data_size_{0};              ///< Size of each data point in bytes
+  IDType item_cnt_{0};    ///< Number of data points (nodes), can be either, available or deleted
+  IDType delete_cnt_{0};  ///< Number of deleted data points
   DataStorage data_storage_;  ///< Data storage
 
  public:
@@ -82,13 +81,11 @@ class RawSpace {
   RawSpace(IDType capacity, size_t dim, MetricType metric)
       : capacity_(capacity), dim_(dim), metric_(metric) {
     data_size_ = dim * sizeof(DataType);
-    distance_calu_func_ =
-        l2_sqr<DataType, DistanceType>;  // Assign the distance function
+    distance_calu_func_ = l2_sqr<DataType, DistanceType>;  // Assign the distance function
 
     data_storage_.init(data_size_, capacity);
 
-    if constexpr (!(std::is_same_v<DataType, float> ||
-                    std::is_same_v<DataType, double>)) {
+    if constexpr (!(std::is_same_v<DataType, float> || std::is_same_v<DataType, double>)) {
       if (metric_ == MetricType::COS) {
         LOG_ERROR("COS metric only support float or double");
         exit(-1);
@@ -136,9 +133,9 @@ class RawSpace {
     for (IDType i = 0; i < item_cnt_; ++i) {
       // if the metric is cosine, normalize the query
       if (metric_ == MetricType::COS) {
-        normalize(const_cast<DataType *>(data + i * dim_), dim_);
+        normalize(const_cast<DataType *>(data + (i * dim_)), dim_);
       }
-      data_storage_.insert(data + i * dim_);
+      data_storage_.insert(data + (i * dim_));
     }
   }
 
@@ -211,9 +208,7 @@ class RawSpace {
    * @brief Get the distance calculation function
    * @return The distance calculation function
    */
-  auto get_dist_func() -> DistFunc<DataType, DistanceType> {
-    return distance_calu_func_;
-  }
+  auto get_dist_func() -> DistFunc<DataType, DistanceType> { return distance_calu_func_; }
 
   /**
    * @brief Get the dimensionality of the data points
@@ -273,31 +268,24 @@ class RawSpace {
         normalize(const_cast<DataType *>(query), distance_space_.dim_);
       }
 
-      size_t aligned_size =
-          (distance_space_.data_size_ + kAlignment - 1) & ~(kAlignment - 1);
+      size_t aligned_size = (distance_space_.data_size_ + kAlignment - 1) & ~(kAlignment - 1);
 #ifdef _MSC_VER
-      query_ =
-          static_cast<DataType *>(_aligned_malloc(aligned_size, kAlignment));
+      query_ = static_cast<DataType *>(_aligned_malloc(aligned_size, kAlignment));
 #else
-      query_ =
-          static_cast<DataType *>(std::aligned_alloc(kAlignment, aligned_size));
+      query_ = static_cast<DataType *>(std::aligned_alloc(kAlignment, aligned_size));
 #endif
       std::memcpy(query_, query, distance_space.data_size_);
     }
 
     QueryComputer(const RawSpace &distance_space, const IDType id)
         : distance_space_(distance_space) {
-      size_t aligned_size =
-          (distance_space_.data_size_ + kAlignment - 1) & ~(kAlignment - 1);
+      size_t aligned_size = (distance_space_.data_size_ + kAlignment - 1) & ~(kAlignment - 1);
 #ifdef _MSC_VER
-      query_ =
-          static_cast<DataType *>(_aligned_malloc(aligned_size, kAlignment));
+      query_ = static_cast<DataType *>(_aligned_malloc(aligned_size, kAlignment));
 #else
-      query_ =
-          static_cast<DataType *>(std::aligned_alloc(kAlignment, aligned_size));
+      query_ = static_cast<DataType *>(std::aligned_alloc(kAlignment, aligned_size));
 #endif
-      std::memcpy(query_, distance_space.get_data_by_id(id),
-                  distance_space.data_size_);
+      std::memcpy(query_, distance_space.get_data_by_id(id), distance_space.data_size_);
     }
 
     /**
@@ -320,8 +308,9 @@ class RawSpace {
       if (!distance_space_.data_storage_.is_valid(u)) {
         return std::numeric_limits<float>::max();
       }
-      return distance_space_.distance_calu_func_(
-          query_, distance_space_.get_data_by_id(u), distance_space_.dim_);
+      return distance_space_.distance_calu_func_(query_,
+                                                 distance_space_.get_data_by_id(u),
+                                                 distance_space_.dim_);
     }
   };
 
@@ -329,21 +318,15 @@ class RawSpace {
    * @brief Prefetch data into cache by ID to optimize memory access
    * @param id The ID of the data point to prefetch
    */
-  inline auto prefetch_by_id(IDType id) -> void {
-    mem_prefetch_l1(get_data_by_id(id), data_size_ / 64);
-  }
+  auto prefetch_by_id(IDType id) -> void { mem_prefetch_l1(get_data_by_id(id), data_size_ / 64); }
 
   /**
    * @brief Prefetch data into cache by address to optimize memory access
    * @param address The address of the data to prefetch
    */
-  inline auto prefetch_by_address(DataType *address) -> void {
-    mem_prefetch_l1(address, data_size_ / 64);
-  }
+  auto prefetch_by_address(DataType *address) -> void { mem_prefetch_l1(address, data_size_ / 64); }
 
-  auto get_query_computer(const DataType *query) {
-    return QueryComputer(*this, query);
-  }
+  auto get_query_computer(const DataType *query) { return QueryComputer(*this, query); }
 
   auto get_query_computer(IDType id) { return QueryComputer(*this, id); }
 };

@@ -15,6 +15,7 @@
  */
 
 #pragma once
+#include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 #include <cstdarg>
 #include <filesystem>
@@ -22,8 +23,8 @@
 
 #ifdef PROJECT_ROOT
 #define RELATIVE_FILE get_relative_path(__FILE__, PROJECT_ROOT)
-auto inline get_relative_path(const std::string &full_path,
-                              const std::string &base_path) -> std::string {
+auto inline get_relative_path(const std::string &full_path, const std::string &base_path)
+    -> std::string {
   std::filesystem::path full(full_path);
   std::filesystem::path base(base_path);
   return std::filesystem::relative(full, base).string();
@@ -33,33 +34,45 @@ auto inline get_relative_path(const std::string &full_path,
 #endif
 
 #define CONCATENATE_STRINGS(a, b) a b
-#define LOG_TRACE(fmt, ...)                                                              \
-  {                                                                                      \
-    spdlog::trace(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", fmt), RELATIVE_FILE, __LINE__, \
-                  ##__VA_ARGS__);                                                        \
+#define LOG_TRACE(msg, ...)                                                     \
+  {                                                                             \
+    spdlog::trace(::fmt::runtime(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", msg)), \
+                  RELATIVE_FILE,                                                \
+                  __LINE__,                                                     \
+                  ##__VA_ARGS__);                                               \
   }
-#define LOG_DEBUG(fmt, ...)                                                              \
-  {                                                                                      \
-    spdlog::debug(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", fmt), RELATIVE_FILE, __LINE__, \
-                  ##__VA_ARGS__);                                                        \
+#define LOG_DEBUG(msg, ...)                                                     \
+  {                                                                             \
+    spdlog::debug(::fmt::runtime(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", msg)), \
+                  RELATIVE_FILE,                                                \
+                  __LINE__,                                                     \
+                  ##__VA_ARGS__);                                               \
   }
-#define LOG_INFO(fmt, ...)                                                              \
-  {                                                                                     \
-    spdlog::info(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", fmt), RELATIVE_FILE, __LINE__, \
-                 ##__VA_ARGS__);                                                        \
+#define LOG_INFO(msg, ...)                                                     \
+  {                                                                            \
+    spdlog::info(::fmt::runtime(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", msg)), \
+                 RELATIVE_FILE,                                                \
+                 __LINE__,                                                     \
+                 ##__VA_ARGS__);                                               \
   }
-#define LOG_WARN(fmt, ...)                                                              \
-  {                                                                                     \
-    spdlog::warn(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", fmt), RELATIVE_FILE, __LINE__, \
-                 ##__VA_ARGS__);                                                        \
+#define LOG_WARN(msg, ...)                                                     \
+  {                                                                            \
+    spdlog::warn(::fmt::runtime(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", msg)), \
+                 RELATIVE_FILE,                                                \
+                 __LINE__,                                                     \
+                 ##__VA_ARGS__);                                               \
   }
-#define LOG_ERROR(fmt, ...)                                                              \
-  {                                                                                      \
-    spdlog::error(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", fmt), RELATIVE_FILE, __LINE__, \
-                  ##__VA_ARGS__);                                                        \
+#define LOG_ERROR(msg, ...)                                                     \
+  {                                                                             \
+    spdlog::error(::fmt::runtime(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", msg)), \
+                  RELATIVE_FILE,                                                \
+                  __LINE__,                                                     \
+                  ##__VA_ARGS__);                                               \
   }
-#define LOG_CRITICAL(fmt, ...)                                                              \
-  {                                                                                         \
-    spdlog::critical(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", fmt), RELATIVE_FILE, __LINE__, \
-                     ##__VA_ARGS__);                                                        \
+#define LOG_CRITICAL(msg, ...)                                                     \
+  {                                                                                \
+    spdlog::critical(::fmt::runtime(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", msg)), \
+                     RELATIVE_FILE,                                                \
+                     __LINE__,                                                     \
+                     ##__VA_ARGS__);                                               \
   }

@@ -39,7 +39,8 @@ struct IndexParams {
               py::dtype data_type = py::dtype::of<float>(),
               py::dtype id_type = py::dtype::of<uint32_t>(),
               QuantizationType quantization_type = QuantizationType::NONE,
-              MetricType metric = MetricType::L2, uint32_t capacity = 100000,
+              MetricType metric = MetricType::L2,
+              uint32_t capacity = 100000,
               uint32_t max_nbrs = 32)
       : index_type_(index_type),
         data_type_(std::move(data_type)),

@@ -34,7 +34,8 @@
 
 namespace alaya {
 
-template <typename SpaceType, typename DataType = typename SpaceType::DataTypeAlias,
+template <typename SpaceType,
+          typename DataType = typename SpaceType::DataTypeAlias,
           typename DistanceType = typename SpaceType::DistanceTypeAlias,
           typename IDType = typename SpaceType::IDTypeAlias>
   requires Space<SpaceType, DataType, DistanceType, IDType>
@@ -83,8 +84,11 @@ class HNSWImpl {
   std::vector<ExternalID> tableint_lookup_;     ///< Mapping of internal id and external id
   std::default_random_engine level_generator_;  ///< Generator a level for each node.
 
-  HNSWImpl(std::shared_ptr<SpaceType> &s, size_t max_elements, size_t max_edge_num = 16,
-           size_t ef_construction = 200, size_t random_seed = 100)
+  HNSWImpl(std::shared_ptr<SpaceType> &s,
+           size_t max_elements,
+           size_t max_edge_num = 16,
+           size_t ef_construction = 200,
+           size_t random_seed = 100)
       : link_list_locks_(max_elements),
         label_op_locks_(kMaxLabelOperationLocks),
         element_levels_(max_elements) {
@@ -96,7 +100,7 @@ class HNSWImpl {
     ef_construction_ = std::max(ef_construction, max_edge_num_);
 
     level_generator_.seed(random_seed);
-    size_data_per_element_ = max_edge_num_l0_ * sizeof(InternalID) + sizeof(LinkListSizeType);
+    size_data_per_element_ = (max_edge_num_l0_ * sizeof(InternalID)) + sizeof(LinkListSizeType);
     offset_l0_ = 0;
 
     linklists_l0_memory_ = reinterpret_cast<char *>(malloc(max_elements_ * size_data_per_element_));
@@ -109,7 +113,7 @@ class HNSWImpl {
     maxlevel_ = -1;
 
     link_lists_ = reinterpret_cast<char **>(malloc(sizeof(void *) * max_elements_));
-    size_links_per_element_ = max_edge_num_ * sizeof(InternalID) + sizeof(LinkListSizeType);
+    size_links_per_element_ = (max_edge_num_ * sizeof(InternalID)) + sizeof(LinkListSizeType);
     mult_ = 1 / log(1.0 * max_edge_num_);
     rev_size_ = 1.0 / mult_;
     tableint_lookup_.resize(max_elements);
@@ -143,7 +147,7 @@ class HNSWImpl {
    * @param internal_id The internal id of required node in hnsw graph.
    * @return LabelType The label of node.
    */
-  inline auto get_external_label(InternalID internal_id) const -> ExternalID {
+  auto get_external_label(InternalID internal_id) const -> ExternalID {
     auto label = tableint_lookup_[internal_id];
     return label;
   }
@@ -154,7 +158,7 @@ class HNSWImpl {
    * @param label The label value for which to retrieve the associated mutex.
    * @return Reference to the mutex associated with the specified label.
    */
-  inline auto get_label_op_mutex(ExternalID label) const -> std::mutex & {
+  auto get_label_op_mutex(ExternalID label) const -> std::mutex & {
     size_t lock_id = label & (kMaxLabelOperationLocks - 1);
     return label_op_locks_[lock_id];
   }
@@ -186,8 +190,8 @@ class HNSWImpl {
    * @param internal_id The internal ID used to identify the specific link list.
    */
   auto get_linklist0(InternalID internal_id) const -> LinkListSizeType * {
-    return reinterpret_cast<LinkListSizeType *>(linklists_l0_memory_ +
-                                                internal_id * size_data_per_element_ + offset_l0_);
+    return reinterpret_cast<LinkListSizeType *>(
+        linklists_l0_memory_ + (internal_id * size_data_per_element_) + offset_l0_);
   }
 
   /**
@@ -202,9 +206,7 @@ class HNSWImpl {
    * @note The function assumes that the pointer `ptr` points to a valid memory location
    *       where the size can be safely written.
    */
-  auto set_list_count(LinkListSizeType *ptr, LinkListSizeType size) const -> void {
-    *(reinterpret_cast<LinkListSizeType *>(ptr)) = size;
-  }
+  auto set_list_count(LinkListSizeType *ptr, LinkListSizeType size) const -> void { *(ptr) = size; }
 
   /**
    * @brief Retrieves the count of elements from the provided link list.
@@ -236,7 +238,7 @@ class HNSWImpl {
    */
   auto get_linklist(InternalID internal_id, int level) const -> LinkListSizeType * {
     return reinterpret_cast<LinkListSizeType *>(
-        (link_lists_[internal_id] + (level - 1) * size_links_per_element_));
+        (link_lists_[internal_id] + ((level - 1) * size_links_per_element_)));
   }
 
   /**
@@ -245,7 +247,7 @@ class HNSWImpl {
    * @param internal_id The internal id of required node in hnsw graph.
    * @return char* The raw vector data.
    */
-  inline auto get_data_by_internal_id(InternalID internal_id) const -> char * {
+  auto get_data_by_internal_id(InternalID internal_id) const -> char * {
     return reinterpret_cast<char *>(space_->get_data_by_id(get_external_label(internal_id)));
   }
   /**
@@ -287,8 +289,8 @@ class HNSWImpl {
    */
   void get_neighbors_by_heuristic2(
       std::priority_queue<std::pair<DistanceType, InternalID>,
-                          std::vector<std::pair<DistanceType, InternalID>>, CompareByFirst>
-          &top_candidates,
+                          std::vector<std::pair<DistanceType, InternalID>>,
+                          CompareByFirst> &top_candidates,
       const size_t m) {
     // If the number of top candidates is less than m, no filtering is necessary.
     if (top_candidates.size() < m) {
@@ -323,10 +325,12 @@ class HNSWImpl {
       // Check the current candidate against the already selected neighbors.
       for (std::pair<DistanceType, InternalID> second_pair : return_list) {
         // Calculate the distance between the current candidate and the existing neighbor.
-        DistanceType curdist = space_->get_distance(
-            get_external_label(second_pair.second),  // Get data for the existing neighbor.
-            get_external_label(current_pair.second)  // Get data for the current candidate.
-        );  // Additional parameters for the distance function.
+        DistanceType curdist =
+            space_->get_distance(get_external_label(
+                                     second_pair.second),  // Get data for the existing neighbor.
+                                 get_external_label(
+                                     current_pair.second)  // Get data for the current candidate.
+            );  // Additional parameters for the distance function.
 
         // If the current candidate is closer to an existing neighbor, mark it as not good.
         if (curdist < dist_to_query) {
@@ -367,17 +371,20 @@ class HNSWImpl {
    */
   auto search_base_layer(InternalID enterpoint_id, ExternalID data_label, uint32_t layer)
       -> std::priority_queue<std::pair<DistanceType, InternalID>,
-                             std::vector<std::pair<DistanceType, InternalID>>, CompareByFirst> {
+                             std::vector<std::pair<DistanceType, InternalID>>,
+                             CompareByFirst> {
     // Obtain a free visited list from the pool to track visited nodes during the search.
     VisitedList *vl = visited_list_pool_->get_free_visited_list();
     vl_type *visited_array = vl->mass_;
     vl_type visited_array_tag = vl->cur_v_;
     // Priority queues to store top candidates and the current candidate set.
     std::priority_queue<std::pair<DistanceType, InternalID>,
-                        std::vector<std::pair<DistanceType, InternalID>>, CompareByFirst>
+                        std::vector<std::pair<DistanceType, InternalID>>,
+                        CompareByFirst>
         top_candidates;
     std::priority_queue<std::pair<DistanceType, InternalID>,
-                        std::vector<std::pair<DistanceType, InternalID>>, CompareByFirst>
+                        std::vector<std::pair<DistanceType, InternalID>>,
+                        CompareByFirst>
         candidate_set;
 
     DistanceType lower_bound;  // Variable to track the lower bound of distances.
@@ -385,9 +392,9 @@ class HNSWImpl {
     DistanceType dist = space_->get_distance(data_label, get_external_label(enterpoint_id));
     top_candidates.emplace(dist, enterpoint_id);  // Add the entry point as the first candidate.
     lower_bound = dist;                           // Set the initial lower bound.
-    candidate_set.emplace(
-        -dist,
-        enterpoint_id);  // Add to candidate set with negative distance for max-heap behavior.
+    candidate_set.emplace(-dist,
+                          enterpoint_id);  // Add to candidate set with negative distance for
+                                           // max-heap behavior.
 
     // Mark the entry point as visited.
     visited_array[enterpoint_id] = visited_array_tag;
@@ -417,8 +424,7 @@ class HNSWImpl {
         data = get_linklist(cur_node_num, layer);
       }
 
-      LinkListSizeType size = get_list_count(
-          reinterpret_cast<LinkListSizeType *>(data));  // Get the size of the link list.
+      LinkListSizeType size = get_list_count(data);  // Get the size of the link list.
       auto *datal = reinterpret_cast<InternalID *>(
           data + 1);  // Pointer to the candidate IDs in the link list.
 
@@ -446,7 +452,8 @@ class HNSWImpl {
         }
 
         visited_array[candidate_id] = visited_array_tag;  // Mark the candidate as visited.
-        [[maybe_unused]] char *curr_obj1 = (get_data_by_internal_id(candidate_id));  // Get data for the candidate.
+        [[maybe_unused]] char *curr_obj1 =
+            (get_data_by_internal_id(candidate_id));  // Get data for the candidate.
 
         // Calculate the distance to the current candidate.
         DistanceType dist1 = space_->get_distance(data_label, get_external_label(candidate_id));
@@ -504,9 +511,10 @@ class HNSWImpl {
   auto mutually_connect_new_element(
       InternalID cur_c,
       std::priority_queue<std::pair<DistanceType, InternalID>,
-                          std::vector<std::pair<DistanceType, InternalID>>, CompareByFirst>
-          &top_candidates,
-      int level, bool isUpdate) -> InternalID {
+                          std::vector<std::pair<DistanceType, InternalID>>,
+                          CompareByFirst> &top_candidates,
+      int level,
+      bool isUpdate) -> InternalID {
     // Determine the maximum number of edges for the current level.
     size_t mcurmax = (level != 0) ? max_edge_num_ : max_edge_num_l0_;
 
@@ -592,7 +600,8 @@ class HNSWImpl {
                                                     get_external_label(selected_neighbor));
           // Use a priority queue to find the weakest connection.
           std::priority_queue<std::pair<DistanceType, InternalID>,
-                              std::vector<std::pair<DistanceType, InternalID>>, CompareByFirst>
+                              std::vector<std::pair<DistanceType, InternalID>>,
+                              CompareByFirst>
               candidates;
           candidates.emplace(d_max, cur_c);
 
@@ -676,8 +685,8 @@ class HNSWImpl {
     if (cur_level != 0) {
       // Allocate storage space for upper-level graphs.
       link_lists_[internal_id] =
-          static_cast<char *>(malloc(size_links_per_element_ * cur_level + 1));
-      memset(link_lists_[internal_id], 0, size_links_per_element_ * cur_level + 1);
+          static_cast<char *>(malloc((size_links_per_element_ * cur_level) + 1));
+      memset(link_lists_[internal_id], 0, (size_links_per_element_ * cur_level) + 1);
     }
 
     if (curr_node != static_cast<InternalID>(-1)) {
@@ -692,7 +701,8 @@ class HNSWImpl {
             data = get_linklist(curr_node, level);
             LinkListSizeType size = get_list_count(data);
 
-            auto *datal = static_cast<InternalID *>(reinterpret_cast<LinkListSizeType *>(data) + 1);
+            auto *datal = static_cast<InternalID *>(reinterpret_cast<LinkListSizeType *>(data) +
+                                                    1);  // NOLINT
             for (LinkListSizeType i = 0; i < size; i++) {
               InternalID cand = datal[i];
               DistanceType d = space_->get_distance(label, get_external_label(cand));
@@ -708,7 +718,8 @@ class HNSWImpl {
       // Update the structure of each layer of the graph
       for (int level = std::min(cur_level, maxlevel_copy); level >= 0; level--) {
         std::priority_queue<std::pair<DistanceType, InternalID>,
-                            std::vector<std::pair<DistanceType, InternalID>>, CompareByFirst>
+                            std::vector<std::pair<DistanceType, InternalID>>,
+                            CompareByFirst>
             top_candidates = search_base_layer(curr_node, label, level);
 
         // {

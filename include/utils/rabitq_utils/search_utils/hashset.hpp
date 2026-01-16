@@ -58,7 +58,6 @@ class HashBasedBooleanSet {
         mask_(other.mask_),
         table_(std::move(other.table_)),
         stl_hash_(std::move(other.stl_hash_)) {}
-
   auto operator=(HashBasedBooleanSet &&other) noexcept -> HashBasedBooleanSet & {
     table_size_ = other.table_size_;
     mask_ = other.mask_;
