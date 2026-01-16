@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include <filesystem>
+#include <filesystem>  // NOLINT(build/c++17)
 #include <string>
 #include "utils/io_utils.hpp"
 namespace alaya {
@@ -100,7 +100,7 @@ class TestDatasetBase {
 
 class SIFTTestData : public TestDatasetBase {
  public:
-  SIFTTestData(std::string data_dir) {
+  explicit SIFTTestData(const std::string &data_dir) {
     dataset_name_ = "siftsmall";
     dataset_dir_ = std::filesystem::path(data_dir) / "siftsmall";
     data_file_ = dataset_dir_ / "siftsmall_base.fvecs";

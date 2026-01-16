@@ -160,7 +160,7 @@ struct Graph {
    *
    * @param filename File path.
    */
-  void save(std::string_view &filename) const {
+  void save(std::string_view filename) const {
     static_assert(std::is_trivial_v<NodeIDType> && std::is_standard_layout_v<NodeIDType>,
                   "IDType must be a POD type");
     std::ofstream writer(std::string(filename), std::ios::binary);
@@ -202,10 +202,10 @@ struct Graph {
    *
    * @param filename File path.
    */
-  void load(std::string_view &filename) {
+  void load(std::string_view filename) {
     static_assert(std::is_trivial_v<NodeIDType> && std::is_standard_layout_v<NodeIDType>,
                   "IDType must be a POD type");
-    std::ifstream reader(filename.data(), std::ios::binary);
+    std::ifstream reader(std::string(filename), std::ios::binary);
     if (!reader.is_open()) {
       throw std::runtime_error("Cannot open file " + std::string(filename));
     }

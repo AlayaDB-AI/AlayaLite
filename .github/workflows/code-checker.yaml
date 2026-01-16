@@ -2,9 +2,6 @@
 name       : CI
 on         : [push, pull_request]
 
-env        :
-  LLVM_VERSION: 18
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -127,36 +124,3 @@ jobs       :
           coverage.xml
           coverage_c++.info
         token: ${{ secrets.CODECOV_TOKEN }}
-
-  cpp-lint-check:
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
-    needs: [typo-check, commit-format-check, py-format-check, py-lint-check]
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Restore Caches
-      uses: ./.github/actions/cache-restore
-
-    - name: Set up C++ environment
-      uses: aminya/setup-cpp@v1
-      with:
-        compiler: llvm-${{ env.LLVM_VERSION }}
-        cpplint: true
-        clang-tidy: true
-        clang-format: true
-        cmake: true
-        ninja: true
-        conan: true
-
-    - name: Prepare compile_commands.json
-      run: |
-        clang++ --version
-        mkdir -p build
-        cd build
-        cmake ..
-
-    - name: run check
-      run: |
-        ./scripts/ci/cpplint/ci_script.sh

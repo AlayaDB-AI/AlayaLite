@@ -47,7 +47,7 @@ struct QuantizationTypeMap {
       std::make_tuple("RABITQ", QuantizationType::RABITQ),  // 1-bit quantization
   };
 
-  constexpr auto operator[](const std::string_view &str) const -> QuantizationType {
+  constexpr auto operator[](const std::string_view str) const -> QuantizationType {
     for (const auto &[key, val] : kStaticMap) {
       if (key == str) {
         return val;

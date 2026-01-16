@@ -19,6 +19,7 @@ Checks          :
 - -clang-analyzer-security.insecureAPI.rand,
 - -clang-diagnostic-implicit-int-float-conversion,
 - -clang-diagnostic-deprecated-declarations,
+- -clang-diagnostic-invalid-consteval-call,
 - -google-readability-avoid-underscore-in-googletest-name,
 - -modernize-avoid-c-arrays,
 - -modernize-use-nodiscard,
@@ -30,8 +31,7 @@ Checks          :
 - -readability-qualified-auto,
 - -readability-redundant-access-specifiers,
 - -bugprone-exception-escape,
-- -modernize-use-nodiscard,
-- -readability-magic-numbers,
+- -readability-math-missing-parentheses,
 
 CheckOptions    :
 - {key: readability-identifier-naming.ClassCase, value: CamelCase}

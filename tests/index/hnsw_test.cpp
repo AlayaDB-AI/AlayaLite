@@ -55,7 +55,7 @@ class HNSWTest : public ::testing::Test {
     // NOLINTEND
     delete[] data_;
     if (std::filesystem::exists(filename_)) {
-      remove(filename_.data());
+      std::filesystem::remove(std::string(filename_));
     }
   }
 

@@ -38,7 +38,7 @@ struct MetricMap {
       std::make_tuple("COS", MetricType::COS),
   };
 
-  constexpr auto operator[](const std::string_view &str) const -> MetricType {
+  constexpr auto operator[](const std::string_view str) const -> MetricType {
     for (const auto &[key, val] : kStaticMap) {
       if (key == str) {
         return val;

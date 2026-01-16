@@ -17,7 +17,7 @@
 #pragma once
 
 #include <cstdint>
-#include <filesystem>
+#include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
 #include <iostream>
 #include <memory>

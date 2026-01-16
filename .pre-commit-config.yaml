@@ -80,3 +80,27 @@ repos:
   hooks:
   - id: clang-format
     files: ^(include|python/include|python/src)/.*\.(c|cc|cpp|cxx|h|hpp|hxx)$
+
+#===========================================================================
+#                            CPPLINT HOOK
+#===========================================================================
+- repo: https://github.com/cpplint/cpplint
+  rev: 2.0.0
+  hooks:
+  - id: cpplint
+    files: ^(include|python/include|python/src)/.*\.(c|cc|cpp|cxx|h|hpp|hxx)$
+    args:
+    - --linelength=100
+
+    - >-
+      --filter=
+      -build/c++11,
+      -build/include_order,
+      -whitespace/parens,
+      -runtime/references,
+      -legal/copyright,
+      -whitespace/indent_namespace,
+      -build/include_subdir,
+      -build/include_what_you_use
+
+    - --recursive

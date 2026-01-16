@@ -18,7 +18,7 @@
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 #include <cstdarg>
-#include <filesystem>
+#include <filesystem>  // NOLINT(build/c++17)
 #include <string>
 
 #ifdef PROJECT_ROOT

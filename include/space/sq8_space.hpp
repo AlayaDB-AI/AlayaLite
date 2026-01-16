@@ -205,8 +205,8 @@ class SQ8Space {
    * @brief Load the space from a file
    * @param filename The name of the file to load
    */
-  auto load(std::string_view &filename) -> void {
-    std::ifstream reader(filename.data(), std::ios::binary);
+  auto load(std::string_view filename) -> void {
+    std::ifstream reader(std::string(filename), std::ios::binary);
 
     if (!reader.is_open()) {
       throw std::runtime_error("Cannot open file " + std::string(filename));
@@ -227,7 +227,7 @@ class SQ8Space {
    * @brief Save the space to a file
    * @param filename The name of the file to save
    */
-  auto save(std::string_view &filename) -> void {
+  auto save(std::string_view filename) -> void {
     std::ofstream writer(std::string(filename), std::ios::binary);
     if (!writer.is_open()) {
       throw std::runtime_error("Cannot open file " + std::string(filename));

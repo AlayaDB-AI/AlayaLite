@@ -37,7 +37,7 @@ namespace alaya {
  */
 inline auto count_trailing_zeros(uint64_t x) -> int {
 #if defined(_MSC_VER)
-  unsigned long index;
+  unsigned long index;  // NOLINT(runtime/int)
   _BitScanForward64(&index, x);
   return static_cast<int>(index);
 #elif defined(__GNUC__) || defined(__clang__)

@@ -26,7 +26,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <filesystem>
+#include <filesystem>  // NOLINT(build/c++17)
 #include <memory>
 #include <queue>
 #include <string>

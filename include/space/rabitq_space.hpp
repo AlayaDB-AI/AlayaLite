@@ -369,7 +369,7 @@ class RaBitQSpace {
     auto operator()(size_t i_th) const -> DistanceType { return est_dists_[i_th]; }
   };
 
-  auto save(std::string_view &filename) -> void {
+  auto save(std::string_view filename) -> void {
     std::ofstream writer(std::string(filename), std::ios::binary);
     if (!writer.is_open()) {
       throw std::runtime_error("Cannot open file " + std::string(filename));
@@ -392,8 +392,8 @@ class RaBitQSpace {
     LOG_INFO("RaBitQSpace is successfully saved to {}.", filename);
   }
 
-  auto load(std::string_view &filename) -> void {
-    std::ifstream reader(filename.data(), std::ios::binary);  // NOLINT
+  auto load(std::string_view filename) -> void {
+    std::ifstream reader(std::string(filename), std::ios::binary);  // NOLINT
 
     if (!reader.is_open()) {
       throw std::runtime_error("Cannot open file " + std::string(filename));

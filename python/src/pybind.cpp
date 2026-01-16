@@ -85,7 +85,6 @@ PYBIND11_MODULE(_alayalitepy, m) {
       .def_readwrite("quantization_type_", &alaya::IndexParams::quantization_type_)
       .def_readwrite("metric_", &alaya::IndexParams::metric_)
       .def_readwrite("capacity_", &alaya::IndexParams::capacity_);
-  ;
 
   alaya::IndexParams default_param;
 

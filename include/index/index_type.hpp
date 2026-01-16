@@ -47,7 +47,7 @@ struct IndexTypeMap {
       std::make_tuple("QG", IndexType::QG),
   };
 
-  constexpr auto operator[](const std::string_view &str) const -> IndexType {
+  constexpr auto operator[](const std::string_view str) const -> IndexType {
     for (const auto &[key, val] : kStaticMap) {
       if (key == str) {
         return val;

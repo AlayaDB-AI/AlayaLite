@@ -216,8 +216,8 @@ class RawSpace {
    */
   auto get_dim() -> uint32_t { return dim_; }
 
-  auto load(std::string_view &filename) -> void {
-    std::ifstream reader(filename.data(), std::ios::binary);
+  auto load(std::string_view filename) -> void {
+    std::ifstream reader(std::string(filename), std::ios::binary);
     if (!reader.is_open()) {
       throw std::runtime_error("Cannot open file " + std::string(filename));
     }
@@ -232,7 +232,7 @@ class RawSpace {
     LOG_INFO("RawSpace is loaded from {}", filename);
   }
 
-  auto save(std::string_view &filename) -> void {
+  auto save(std::string_view filename) -> void {
     std::ofstream writer(std::string(filename), std::ios::binary);
     if (!writer.is_open()) {
       throw std::runtime_error("Cannot open file " + std::string(filename));
