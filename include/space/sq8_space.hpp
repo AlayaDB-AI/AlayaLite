@@ -104,11 +104,17 @@ class SQ8Space {
   }
 
   /**
+   * @brief Get the capacity of the space
+   * @return The capacity
+   */
+  auto get_capacity() -> IDType { return capacity_; }
+
+  /**
    * @brief Fit the data into the space
    * @param data Pointer to the input data array
    * @param item_cnt Number of data points
    */
-  void fit(DataType *data, IDType item_cnt) {
+  void fit(const DataType *data, IDType item_cnt) {
     if (item_cnt > capacity_) {
       throw std::runtime_error("The number of data points exceeds the capacity of the space");
     }

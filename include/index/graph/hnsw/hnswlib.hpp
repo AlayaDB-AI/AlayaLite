@@ -38,7 +38,7 @@ template <typename SpaceType,
           typename DataType = typename SpaceType::DataTypeAlias,
           typename DistanceType = typename SpaceType::DistanceTypeAlias,
           typename IDType = typename SpaceType::IDTypeAlias>
-  requires Space<SpaceType, DataType, DistanceType, IDType>
+  requires Space<SpaceType>
 class HNSWImpl {
   using InternalID = IDType;        ///< The internal id type of hnsw.
   using LinkListSizeType = IDType;  ///< The size of the linklist for graph.

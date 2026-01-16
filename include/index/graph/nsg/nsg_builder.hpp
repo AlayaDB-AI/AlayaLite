@@ -37,10 +37,7 @@
 namespace alaya {
 
 template <typename DistanceSpaceType>
-  requires Space<DistanceSpaceType,
-                 typename DistanceSpaceType::DataTypeAlias,
-                 typename DistanceSpaceType::DistanceTypeAlias,
-                 typename DistanceSpaceType::IDTypeAlias>
+  requires Space<DistanceSpaceType>
 struct NSGBuilder {
   using DataType = typename DistanceSpaceType::DataTypeAlias;
   using DistanceType = typename DistanceSpaceType::DistanceTypeAlias;

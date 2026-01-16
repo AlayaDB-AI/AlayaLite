@@ -18,8 +18,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <iostream>
-#include <ostream>
 #include "dist_config.hpp"
 #include "utils/rabitq_utils/defines.hpp"
 
@@ -35,7 +33,7 @@ FAST_END
 
 FAST_BEGIN
 template <typename DataType = float, typename DistanceType = float>
-inline auto l2_sqr(DataType *x, DataType *y, size_t dim) -> DistanceType {
+inline auto l2_sqr(const DataType *x, const DataType *y, size_t dim) -> DistanceType {
   DistanceType sum = 0;
   for (size_t i = 0; i < dim; ++i) {
     DistanceType diff = static_cast<float>(x[i]) - static_cast<float>(y[i]);

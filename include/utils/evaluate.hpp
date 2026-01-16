@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <iostream>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -46,7 +45,9 @@ auto find_exact_gt(const std::vector<DataType> &queries,
       if (deleted && deleted->find(j) != deleted->end()) {
         continue;
       }
-      float dist = l2_sqr(queries.data() + (i * dim), data_view.data() + (j * dim), dim);
+      float dist = l2_sqr<DataType, DistanceType>(queries.data() + (i * dim),
+                                                  data_view.data() + (j * dim),
+                                                  dim);
       dists.emplace_back(j, dist);
     }
     std::sort(dists.begin(), dists.end(), [](const auto &lhs, const auto &rhs) -> auto {

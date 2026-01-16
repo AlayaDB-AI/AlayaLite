@@ -76,7 +76,7 @@ struct SQ4Quantizer {
    * @param dim The dimensionality of the input data.
    */
   explicit SQ4Quantizer(const uint32_t &dim) : dim_(dim) {
-    auto get_min_max_value = [] {
+    auto get_min_max_value = []() -> auto {
       if constexpr (std::is_integral_v<DataType>) {
         return std::pair<DataType, DataType>{std::numeric_limits<DataType>::min(),
                                              std::numeric_limits<DataType>::max()};

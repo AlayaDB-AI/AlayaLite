@@ -31,8 +31,7 @@ template <typename DistanceSpaceType,
           typename DataType = typename DistanceSpaceType::DataTypeAlias,
           typename DistanceType = typename DistanceSpaceType::DistanceTypeAlias,
           typename IDType = typename DistanceSpaceType::IDTypeAlias>
-  requires(Space<DistanceSpaceType, DataType, DistanceType, IDType> && GraphBuilder<PrimaryGraph> &&
-           GraphBuilder<SecondaryGraph>)
+  requires(Space<DistanceSpaceType> && GraphBuilder<PrimaryGraph> && GraphBuilder<SecondaryGraph>)
 struct FusionGraphBuilder {
   using DistanceSpaceTypeAlias = DistanceSpaceType;
   std::shared_ptr<DistanceSpaceType> space_ = nullptr;

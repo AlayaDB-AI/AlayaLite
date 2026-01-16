@@ -32,7 +32,7 @@ template <typename DistanceSpaceType,
           typename DataType = typename DistanceSpaceType::DataTypeAlias,
           typename DistanceType = typename DistanceSpaceType::DistanceTypeAlias,
           typename IDType = typename DistanceSpaceType::IDTypeAlias>
-  requires Space<DistanceSpaceType, DataType, DistanceType, IDType>
+  requires Space<DistanceSpaceType>
 class GraphUpdateJob {
  public:
   std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job_ = nullptr;  ///< The search job

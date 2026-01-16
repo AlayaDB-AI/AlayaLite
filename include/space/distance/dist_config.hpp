@@ -52,13 +52,11 @@
 #endif
 #endif
 
-#if defined(__GNUC__) || defined(__clang__)
-#define FAST_BEGIN            \
-  _Pragma("GCC push_options") \
-      _Pragma("GCC optimize (\"unroll-loops,associative-math,no-signed-zeros\")")
+#if defined(__GNUC__) && !defined(__clang__)
+#define FAST_BEGIN _Pragma("GCC push_options") _Pragma("GCC optimize (\"unroll-loops,fast-math\")")
 #define FAST_END _Pragma("GCC pop_options")
 #else
-// For other compilers like MSVC, define the macros as empty.
+// Clang / MSVC / others: no-op
 #define FAST_BEGIN
 #define FAST_END
 #endif

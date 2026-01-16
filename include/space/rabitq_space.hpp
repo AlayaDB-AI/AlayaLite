@@ -98,21 +98,6 @@ class RaBitQSpace {
 
   RaBitQSpace(RaBitQSpace &&other) = delete;
   RaBitQSpace(const RaBitQSpace &other) = delete;
-  auto operator=(const RaBitQSpace &) -> RaBitQSpace & = delete;
-  auto operator=(RaBitQSpace &&) -> RaBitQSpace & = delete;
-
-  auto insert([[maybe_unused]] DataType *data) -> IDType {
-    throw std::runtime_error("Insert operation is not supported yet!");
-  }
-
-  auto remove([[maybe_unused]] IDType id) -> IDType {
-    throw std::runtime_error("Remove operation is not supported yet!");
-  }
-
-  void set_ep(IDType ep) { ep_ = ep; }
-
-  auto get_ep() const -> IDType { return ep_; }
-
   RaBitQSpace(IDType capacity,
               size_t dim,
               MetricType metric,
@@ -122,6 +107,18 @@ class RaBitQSpace {
     quantizer_ = std::make_unique<RaBitQQuantizer<DataType>>(dim_, rotator_->size());
     initialize_offsets();
   }
+  auto operator=(const RaBitQSpace &) -> RaBitQSpace & = delete;
+  auto operator=(RaBitQSpace &&) -> RaBitQSpace & = delete;
+
+  auto insert(DataType *data) -> IDType {
+    throw std::runtime_error("Insert operation is not supported yet!");
+  }
+  auto remove(IDType id) -> IDType {
+    throw std::runtime_error("Remove operation is not supported yet!");
+  }
+
+  void set_ep(IDType ep) { ep_ = ep; }
+  auto get_ep() const -> IDType { return ep_; }
 
   void set_metric_function() {
     switch (metric_) {
@@ -163,7 +160,7 @@ class RaBitQSpace {
                                get_f_rescale_ptr(c));
   }
 
-  void fit(DataType *data, IDType item_cnt) {
+  void fit(const DataType *data, IDType item_cnt) {
     if constexpr (!std::is_floating_point_v<DataType>) {
       throw std::invalid_argument("Data type must be a floating point type!");
     }
@@ -192,7 +189,6 @@ class RaBitQSpace {
     return distance_cal_func_(get_data_by_id(i), get_data_by_id(j), dim_);
   }
 
-  // get raw data vector
   [[nodiscard]] auto get_data_by_id(IDType id) const -> const DataType * {
     return reinterpret_cast<const DataType *>(&storage_.at(data_chunk_size_ * id));
   }
@@ -339,7 +335,7 @@ class RaBitQSpace {
 
       lookup_table_ = std::move(Lut<DataType>(rotated_query.data(), padded_dim));
 
-      float c_1 = -((1 << 1) - 1) / 2.F;  // -0.5F
+      constexpr float c_1 = -((1 << 1) - 1) / 2.F;  // -0.5F NOLINT
 
       auto sumq = std::accumulate(rotated_query.begin(),
                                   rotated_query.begin() + padded_dim,

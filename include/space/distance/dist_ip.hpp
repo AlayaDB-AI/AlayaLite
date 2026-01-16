@@ -24,7 +24,7 @@ namespace alaya {
 
 FAST_BEGIN
 template <typename DataType = float, typename DistanceType = float>
-inline auto ip_sqr(DataType *x, DataType *y, size_t dim) -> DistanceType {
+inline auto ip_sqr(const DataType *x, const DataType *y, size_t dim) -> DistanceType {
   DistanceType sum = 0;
   for (size_t i = 0; i < dim; ++i) {
     sum += x[i] * y[i];

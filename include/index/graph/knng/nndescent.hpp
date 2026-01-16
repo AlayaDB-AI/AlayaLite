@@ -36,7 +36,7 @@ template <typename DistanceSpaceType,
           typename DataType = typename DistanceSpaceType::DataTypeAlias,
           typename DistanceType = typename DistanceSpaceType::DistanceTypeAlias,
           typename IDType = typename DistanceSpaceType::IDTypeAlias>
-  requires Space<DistanceSpaceType, DataType, DistanceType, IDType>
+  requires Space<DistanceSpaceType>
 struct NndescentImpl {
   using DistanceSpaceTypeAlias = DistanceSpaceType;
   struct Nhood {

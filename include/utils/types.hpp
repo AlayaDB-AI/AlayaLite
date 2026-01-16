@@ -23,6 +23,12 @@
 using WorkerID = uint32_t;
 using CpuID = uint32_t;
 namespace alaya {
+
+/**@brief Align the given size to the nearest multiple of align_num.
+ * @param size The original size to be aligned.
+ * @param align_num The alignment boundary.
+ * @return The aligned size.
+ */
 inline auto do_align(size_t size, size_t align_num) -> size_t {
   // Ensure align_num is not zero (to avoid division by zero)
   if (align_num == 0) {

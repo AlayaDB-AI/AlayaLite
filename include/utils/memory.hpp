@@ -30,6 +30,7 @@
 #endif
 
 namespace alaya {
+
 /**
  * @brief Aligned memory allocator.
  *

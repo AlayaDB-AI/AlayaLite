@@ -39,10 +39,7 @@ namespace alaya {
  vectors that need to be indexed, with the default type being uint32_t.
  */
 template <typename DistanceSpaceType>
-  requires Space<DistanceSpaceType,
-                 typename DistanceSpaceType::DataTypeAlias,
-                 typename DistanceSpaceType::DistanceTypeAlias,
-                 typename DistanceSpaceType::IDTypeAlias>
+  requires Space<DistanceSpaceType>
 struct HNSWBuilder {
   using DataType = typename DistanceSpaceType::DataTypeAlias;
   using DistanceType = typename DistanceSpaceType::DistanceTypeAlias;

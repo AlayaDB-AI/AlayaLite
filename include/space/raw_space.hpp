@@ -15,6 +15,7 @@
  */
 
 #pragma once
+#include <sys/types.h>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
@@ -330,4 +331,16 @@ class RawSpace {
 
   auto get_query_computer(IDType id) { return QueryComputer(*this, id); }
 };
+
+// use static assert to check if RawSpace satisfies the Space concept
+//                           data_type distance_type id_type data_storage
+static_assert(Space<RawSpace<uint32_t, float, uint32_t>>);
+static_assert(Space<RawSpace<uint32_t, float, uint64_t>>);
+static_assert(Space<RawSpace<uint64_t, float, uint32_t>>);
+static_assert(Space<RawSpace<uint64_t, float, uint64_t>>);
+static_assert(Space<RawSpace<float, float, uint32_t>>);
+static_assert(Space<RawSpace<float, float, uint64_t>>);
+static_assert(Space<RawSpace<double, float, uint32_t>>);
+static_assert(Space<RawSpace<double, float, uint64_t>>);
+
 }  // namespace alaya

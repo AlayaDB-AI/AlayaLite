@@ -30,10 +30,7 @@
 
 namespace alaya {
 template <typename DistanceSpaceType>
-  requires Space<DistanceSpaceType,
-                 typename DistanceSpaceType::DataTypeAlias,
-                 typename DistanceSpaceType::DistanceTypeAlias,
-                 typename DistanceSpaceType::IDTypeAlias>
+  requires Space<DistanceSpaceType>
 class QGBuilder {
   // static_assert(is_rabitq_space_v<DistanceSpaceType>, "qg only supports RaBitQSpace
   // specializations");
