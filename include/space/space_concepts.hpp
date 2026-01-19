@@ -60,7 +60,7 @@ concept Space = requires(T t,
   { t.fit(data, id) } -> std::same_as<void>;
   { t.set_metric_function() } -> std::same_as<void>;
 
-  // --- 5. Internal function pointer exposure (check if it supports a certain distance function
+  // --- 3. Internal function pointer exposure (check if it supports a certain distance function
   // interface) --- Here we use disjunction (||) logic to check if it returns one of the function
   // pointers we support
   requires std::same_as<decltype(t.get_dist_func()),

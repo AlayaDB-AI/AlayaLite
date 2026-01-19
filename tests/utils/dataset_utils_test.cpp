@@ -16,7 +16,6 @@
 
 #include <gtest/gtest.h>
 #include <filesystem>
-#include <string>
 
 #include "utils/dataset_utils.hpp"
 
@@ -26,20 +25,18 @@ class DatasetTest : public ::testing::Test {
  protected:
   void SetUp() override {
     data_dir_ = std::filesystem::current_path().parent_path() / "data";
-    config_ = sift_small(data_dir_);
-
-    if (std::filesystem::exists(config_.dir_)) {
-      std::filesystem::remove_all(config_.dir_);
-    }
-    printf("dataset_dir: %s\n", config_.dir_.string().c_str());
   }
 
   std::filesystem::path data_dir_;
-  DatasetConfig config_;
 };
 
-TEST_F(DatasetTest, LoadDatasetCorrectly) {
-  auto ds = load_dataset(config_);
+TEST_F(DatasetTest, LoadSiftSmall) {
+  auto config = sift_small(data_dir_);
+  if (std::filesystem::exists(config.dir_)) {
+    std::filesystem::remove_all(config.dir_);
+  }
+
+  auto ds = load_dataset(config);
 
   EXPECT_EQ(ds.name_, "siftsmall");
   EXPECT_GT(ds.data_num_, 0);
@@ -48,10 +45,29 @@ TEST_F(DatasetTest, LoadDatasetCorrectly) {
   EXPECT_EQ(ds.data_.size(), ds.data_num_ * ds.dim_);
   EXPECT_EQ(ds.queries_.size(), ds.query_num_ * ds.dim_);
 
-  // Check files exist after loading
-  EXPECT_TRUE(std::filesystem::exists(config_.data_file_));
-  EXPECT_TRUE(std::filesystem::exists(config_.query_file_));
-  EXPECT_TRUE(std::filesystem::exists(config_.gt_file_));
+  EXPECT_TRUE(std::filesystem::exists(config.data_file_));
+  EXPECT_TRUE(std::filesystem::exists(config.query_file_));
+  EXPECT_TRUE(std::filesystem::exists(config.gt_file_));
+}
+
+TEST_F(DatasetTest, LoadDeep1M) {
+  auto config = deep1m(data_dir_);
+  if (std::filesystem::exists(config.dir_)) {
+    std::filesystem::remove_all(config.dir_);
+  }
+
+  auto ds = load_dataset(config);
+
+  EXPECT_EQ(ds.name_, "deep1M");
+  EXPECT_GT(ds.data_num_, 0);
+  EXPECT_GT(ds.query_num_, 0);
+  EXPECT_GT(ds.dim_, 0);
+  EXPECT_EQ(ds.data_.size(), ds.data_num_ * ds.dim_);
+  EXPECT_EQ(ds.queries_.size(), ds.query_num_ * ds.dim_);
+
+  EXPECT_TRUE(std::filesystem::exists(config.data_file_));
+  EXPECT_TRUE(std::filesystem::exists(config.query_file_));
+  EXPECT_TRUE(std::filesystem::exists(config.gt_file_));
 }
 
 }  // namespace alaya
