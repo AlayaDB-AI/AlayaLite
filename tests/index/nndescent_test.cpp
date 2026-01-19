@@ -80,30 +80,12 @@ class NnDescentSearchTest : public ::testing::Test {
  protected:
   void SetUp() override {
     std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
-    dataset_ = std::make_unique<SIFTTestData>(data_dir.string());
-    dataset_->ensure_dataset();
-
-    data_ = dataset_->get_data();
-    queries_ = dataset_->get_queries();
-    answers_ = dataset_->get_answers();
-
-    points_num_ = dataset_->get_data_num();
-    query_num_ = dataset_->get_query_num();
-
-    dim_ = dataset_->get_dim();
-    gt_col_ = dataset_->get_ans_dim();
+    ds_ = load_dataset(sift_small(data_dir));
   }
 
   void TearDown() override {}
 
-  std::unique_ptr<TestDatasetBase> dataset_;
-  std::vector<float> data_;
-  std::vector<float> queries_;
-  std::vector<uint32_t> answers_;
-  uint32_t dim_;
-  uint32_t points_num_;
-  uint32_t query_num_;
-  uint32_t gt_col_;
+  Dataset ds_;
 };
 
 TEST_F(NnDescentSearchTest, SimpleSearchTest) {
@@ -112,13 +94,12 @@ TEST_F(NnDescentSearchTest, SimpleSearchTest) {
   size_t ef = 100;
   std::string index_type = "NnDescent";
 
-  std::filesystem::path index_file =
-      fmt::format("{}_M{}.{}", dataset_->get_dataset_name(), kM, index_type);
+  std::filesystem::path index_file = fmt::format("{}_M{}.{}", ds_.name_, kM, index_type);
   std::shared_ptr<alaya::RawSpace<>> space =
-      std::make_shared<alaya::RawSpace<>>(points_num_, dim_, MetricType::L2);
-  space->fit(data_.data(), points_num_);
+      std::make_shared<alaya::RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
+  space->fit(ds_.data_.data(), ds_.data_num_);
 
-  auto load_graph = std::make_shared<alaya::Graph<>>(points_num_, kM);
+  auto load_graph = std::make_shared<alaya::Graph<>>(ds_.data_num_, kM);
 
   if (!std::filesystem::exists(index_file)) {
     auto t1 = Timer();
@@ -145,14 +126,14 @@ TEST_F(NnDescentSearchTest, SimpleSearchTest) {
   using IDType = uint32_t;
 
   Timer timer{};
-  std::vector<std::vector<IDType>> res_pool(query_num_, std::vector<IDType>(topk));
+  std::vector<std::vector<IDType>> res_pool(ds_.query_num_, std::vector<IDType>(topk));
   const size_t kSearchThreadNum = 16;
   std::vector<std::thread> tasks(kSearchThreadNum);
 
   auto search_knn = [&](uint32_t i) {
-    for (; i < query_num_; i += kSearchThreadNum) {
+    for (; i < ds_.query_num_; i += kSearchThreadNum) {
       std::vector<uint32_t> ids(topk);
-      auto cur_query = queries_.data() + i * dim_;
+      auto cur_query = ds_.queries_.data() + i * ds_.dim_;
       task_generator->search_solo(cur_query, topk, ids.data(), ef);
 
       auto id_set = std::set(ids.begin(), ids.end());
@@ -179,10 +160,10 @@ TEST_F(NnDescentSearchTest, SimpleSearchTest) {
 
   // Computing recall;
   size_t cnt = 0;
-  for (uint32_t i = 0; i < query_num_; i++) {
+  for (uint32_t i = 0; i < ds_.query_num_; i++) {
     for (size_t j = 0; j < topk; j++) {
       for (size_t k = 0; k < topk; k++) {
-        if (res_pool[i][j] == answers_[i * gt_col_ + k]) {
+        if (res_pool[i][j] == ds_.ground_truth_[i * ds_.gt_dim_ + k]) {
           cnt++;
           break;
         }
@@ -190,7 +171,7 @@ TEST_F(NnDescentSearchTest, SimpleSearchTest) {
     }
   }
 
-  float recall = cnt * 1.0 / query_num_ / topk;
+  float recall = cnt * 1.0 / ds_.query_num_ / topk;
   LOG_INFO("recall is {}.", recall);
   EXPECT_GE(recall, 0.5);
 }

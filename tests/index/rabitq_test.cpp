@@ -37,41 +37,14 @@ class RaBitQSiftSmallTest : public ::testing::Test {
  protected:
   void SetUp() override {
     std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
-    dataset_ = std::make_unique<SIFTTestData>(data_dir.string());
-    dataset_->ensure_dataset();
-
-    data_ = dataset_->get_data();
-    queries_ = dataset_->get_queries();
-    answers_ = dataset_->get_answers();
-
-    points_num_ = dataset_->get_data_num();
-    query_num_ = dataset_->get_query_num();
-    ans_num_ = dataset_->get_ans_num();
-
-    dim_ = dataset_->get_dim();
-    query_dim_ = dim_;
-    gt_col_ = dataset_->get_ans_dim();
-
-    index_save_path_ = dataset_->get_dataset_dir();
+    config_ = sift_small(data_dir);
+    ds_ = load_dataset(config_);
   }
 
   void TearDown() override {}
 
-  std::unique_ptr<TestDatasetBase> dataset_;
-
-  std::vector<float> data_;
-  uint32_t points_num_;
-  uint32_t dim_;
-
-  std::vector<float> queries_;
-  uint32_t query_num_;
-  uint32_t query_dim_;
-
-  std::vector<uint32_t> answers_;
-  uint32_t ans_num_;
-  uint32_t gt_col_;
-
-  std::filesystem::path index_save_path_;
+  DatasetConfig config_;
+  Dataset ds_;
 };
 
 using IDType = uint32_t;
@@ -79,13 +52,13 @@ TEST_F(RaBitQSiftSmallTest, SiftSmallQGTest) {  // for code coverage
   // ***************INDEX******************
   LOG_INFO("Building QG...");
   std::filesystem::path index_file =
-      fmt::format("{}_rabitq.qg", index_save_path_.string() + "/siftsmall");
+      fmt::format("{}_rabitq.qg", config_.dir_.string() + "/siftsmall");
   std::string_view path = index_file.native();
 
   if (!std::filesystem::exists(index_file)) {
     std::shared_ptr<alaya::RaBitQSpace<>> space =
-        std::make_shared<alaya::RaBitQSpace<>>(points_num_, dim_, MetricType::L2);
-    space->fit(data_.data(), points_num_);
+        std::make_shared<alaya::RaBitQSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
+    space->fit(ds_.data_.data(), ds_.data_num_);
     LOG_INFO("Successfully fit data into space");
 
     auto qg = alaya::QGBuilder<RaBitQSpace<>>(space);
@@ -100,8 +73,8 @@ TEST_F(RaBitQSiftSmallTest, SiftSmallQGTest) {  // for code coverage
   auto search_job = std::make_unique<alaya::GraphSearchJob<RaBitQSpace<>>>(load_space, nullptr);
 
   // std::shared_ptr<alaya::RaBitQSpace<>> space =
-  //     std::make_shared<alaya::RaBitQSpace<>>(points_num_, dim_, MetricType::L2);
-  // space->fit(data_.data(), points_num_);
+  //     std::make_shared<alaya::RaBitQSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
+  // space->fit(ds_.data_.data(), ds_.data_num_);
   // LOG_INFO("Successfully fit data into space");
 
   // auto qg = alaya::QGBuilder<RaBitQSpace<>>(space);
@@ -124,13 +97,13 @@ TEST_F(RaBitQSiftSmallTest, SiftSmallQGTest) {  // for code coverage
       float total_time = 0;
       std::vector<IDType> results(topk);
       LOG_INFO("current ef in this round:{}", ef);
-      for (uint32_t n = 0; n < query_num_; ++n) {
+      for (uint32_t n = 0; n < ds_.query_num_; ++n) {
         timer.reset();
 #if defined(__AVX512F__)
-        search_job->rabitq_search_solo(queries_.data() + (n * query_dim_), topk, results.data(),
+        search_job->rabitq_search_solo(ds_.queries_.data() + (n * ds_.dim_), topk, results.data(),
                                        ef);
 #else
-        EXPECT_THROW(search_job->rabitq_search_solo(queries_.data() + (n * query_dim_), topk,
+        EXPECT_THROW(search_job->rabitq_search_solo(ds_.queries_.data() + (n * ds_.dim_), topk,
                                                     results.data(), ef),
                      std::runtime_error);
         return;
@@ -140,15 +113,15 @@ TEST_F(RaBitQSiftSmallTest, SiftSmallQGTest) {  // for code coverage
         // recall
         for (size_t k = 0; k < topk; ++k) {
           for (size_t j = 0; j < topk; ++j) {
-            if (results[k] == answers_[(n * gt_col_) + j]) {
+            if (results[k] == ds_.ground_truth_[(n * ds_.gt_dim_) + j]) {
               total_correct++;
               break;
             }
           }
         }
       }
-      float qps = static_cast<float>(query_num_) / (total_time / 1e6F);
-      float recall = static_cast<float>(total_correct) / static_cast<float>(query_num_ * topk);
+      float qps = static_cast<float>(ds_.query_num_) / (total_time / 1e6F);
+      float recall = static_cast<float>(total_correct) / static_cast<float>(ds_.query_num_ * topk);
 
       all_qps[r][i] = qps;
       all_recall[r][i] = recall;

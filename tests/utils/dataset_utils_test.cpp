@@ -22,35 +22,36 @@
 
 namespace alaya {
 
-class SIFTTestDataTest : public ::testing::Test {
+class DatasetTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
-    sift_data = std::make_unique<SIFTTestData>(data_dir.string());
+    data_dir_ = std::filesystem::current_path().parent_path() / "data";
+    config_ = sift_small(data_dir_);
 
-    auto dataset_dir = sift_data->get_dataset_dir();
-    if (std::filesystem::exists(dataset_dir)) {
-      std::filesystem::remove_all(dataset_dir);
+    if (std::filesystem::exists(config_.dir_)) {
+      std::filesystem::remove_all(config_.dir_);
     }
-    printf("dataset_dir: %s\n", dataset_dir.string().c_str());
-    EXPECT_FALSE(sift_data->ensure_dataset());
+    printf("dataset_dir: %s\n", config_.dir_.string().c_str());
   }
 
-  std::unique_ptr<SIFTTestData> sift_data;
+  std::filesystem::path data_dir_;
+  DatasetConfig config_;
 };
 
-TEST_F(SIFTTestDataTest, ConstructorInitializesCorrectly) {
-  EXPECT_NE(sift_data, nullptr);
-  EXPECT_TRUE(sift_data->ensure_dataset());
+TEST_F(DatasetTest, LoadDatasetCorrectly) {
+  auto ds = load_dataset(config_);
 
-  // Test that dataset name is set correctly
-  auto dataset_name = sift_data->get_dataset_name();
-  EXPECT_EQ(dataset_name, "siftsmall");
+  EXPECT_EQ(ds.name_, "siftsmall");
+  EXPECT_GT(ds.data_num_, 0);
+  EXPECT_GT(ds.query_num_, 0);
+  EXPECT_GT(ds.dim_, 0);
+  EXPECT_EQ(ds.data_.size(), ds.data_num_ * ds.dim_);
+  EXPECT_EQ(ds.queries_.size(), ds.query_num_ * ds.dim_);
 
-  // check file is exist
-  EXPECT_TRUE(std::filesystem::exists(sift_data->get_data_file()));
-  EXPECT_TRUE(std::filesystem::exists(sift_data->get_query_file()));
-  EXPECT_TRUE(std::filesystem::exists(sift_data->get_gt_file()));
+  // Check files exist after loading
+  EXPECT_TRUE(std::filesystem::exists(config_.data_file_));
+  EXPECT_TRUE(std::filesystem::exists(config_.query_file_));
+  EXPECT_TRUE(std::filesystem::exists(config_.gt_file_));
 }
 
 }  // namespace alaya

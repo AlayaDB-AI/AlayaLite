@@ -44,43 +44,24 @@ class UpdateTest : public ::testing::Test {
  protected:
   void SetUp() override {
     std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
-    dataset_ = std::make_unique<SIFTTestData>(data_dir.string());
-    dataset_->ensure_dataset();
-
-    data_ = dataset_->get_data();
-    queries_ = dataset_->get_queries();
-    answers_ = dataset_->get_answers();
-
-    points_num_ = dataset_->get_data_num();
-    query_num_ = dataset_->get_query_num();
-
-    dim_ = dataset_->get_dim();
-    gt_col_ = dataset_->get_ans_dim();
+    ds_ = load_dataset(sift_small(data_dir));
   }
 
   void TearDown() override {}
 
-  std::unique_ptr<TestDatasetBase> dataset_;
-  std::vector<float> data_;
-  std::vector<float> queries_;
-  std::vector<uint32_t> answers_;
-  uint32_t dim_;
-  uint32_t points_num_;
-  uint32_t query_num_;
-  uint32_t gt_col_;
-
+  Dataset ds_;
   std::unordered_set<uint32_t> point_set_;  ///< The set of points that has been inserted.
 };
 
 TEST_F(UpdateTest, HalfInsertTest) {
   uint32_t topk = 10;
-  uint32_t half_size = data_.size() / dim_ / 2;
+  uint32_t half_size = ds_.data_.size() / ds_.dim_ / 2;
 
-  LOG_DEBUG("the data size is {}", data_.size());
-  auto space = std::make_shared<alaya::RawSpace<>>(points_num_, dim_, MetricType::L2);
+  LOG_DEBUG("the data size is {}", ds_.data_.size());
+  auto space = std::make_shared<alaya::RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
 
   // Use the first half of the data to build the graph.
-  space->fit(data_.data(), half_size);
+  space->fit(ds_.data_.data(), half_size);
 
   auto build_start = std::chrono::steady_clock::now();
 
@@ -91,15 +72,15 @@ TEST_F(UpdateTest, HalfInsertTest) {
   auto build_time = static_cast<std::chrono::duration<double>>(build_end - build_start).count();
   LOG_INFO("The time of building hnsw is {}s.", build_time);
 
-  std::vector<float> half_data(half_size * dim_);
-  half_data.insert(half_data.begin(), data_.begin(), data_.begin() + half_size * dim_);
+  std::vector<float> half_data(half_size * ds_.dim_);
+  half_data.insert(half_data.begin(), ds_.data_.begin(), ds_.data_.begin() + half_size * ds_.dim_);
 
-  auto half_gt = find_exact_gt<>(queries_, half_data, dim_, topk);
+  auto half_gt = find_exact_gt<>(ds_.queries_, half_data, ds_.dim_, topk);
 
   auto search_job = std::make_shared<alaya::GraphSearchJob<alaya::RawSpace<>>>(space, hnsw_graph);
-  std::vector<uint32_t> ids(query_num_ * topk);
-  for (uint32_t i = 0; i < query_num_; i++) {
-    auto cur_query = queries_.data() + i * dim_;
+  std::vector<uint32_t> ids(ds_.query_num_ * topk);
+  for (uint32_t i = 0; i < ds_.query_num_; i++) {
+    auto cur_query = ds_.queries_.data() + i * ds_.dim_;
     search_job->search_solo(cur_query, topk, ids.data() + i * topk, 30);
   }
 
@@ -108,32 +89,33 @@ TEST_F(UpdateTest, HalfInsertTest) {
 
   auto update_job = std::make_shared<alaya::GraphUpdateJob<RawSpace<>>>(search_job);
 
-  for (uint32_t i = half_size; i < points_num_; i++) {
-    auto cur_data = data_.data() + i * dim_;
+  for (uint32_t i = half_size; i < ds_.data_num_; i++) {
+    auto cur_data = ds_.data_.data() + i * ds_.dim_;
     update_job->insert_and_update(cur_data, 50);
   }
 
-  for (uint32_t i = 0; i < query_num_; i++) {
-    auto cur_query = queries_.data() + i * dim_;
+  for (uint32_t i = 0; i < ds_.query_num_; i++) {
+    auto cur_query = ds_.queries_.data() + i * ds_.dim_;
     search_job->search_solo(cur_query, topk, ids.data() + i * topk, 50);
   }
 
-  auto full_gt = find_exact_gt(queries_, data_, dim_, topk);
+  auto full_gt = find_exact_gt(ds_.queries_, ds_.data_, ds_.dim_, topk);
   auto full_recall = calc_recall(ids, full_gt, topk);
   ASSERT_GT(full_recall, 0.9);
 
-  for (uint32_t i = half_size; i < points_num_; i++) {
+  for (uint32_t i = half_size; i < ds_.data_num_; i++) {
     update_job->remove(i);
   }
-  for (uint32_t i = 0; i < query_num_; i++) {
-    auto cur_query = queries_.data() + i * dim_;
+  for (uint32_t i = 0; i < ds_.query_num_; i++) {
+    auto cur_query = ds_.queries_.data() + i * ds_.dim_;
     search_job->search_solo_updated(cur_query, topk, ids.data() + i * topk, 50);
   }
   auto recall_after_delete = calc_recall(ids, full_gt, topk);
   LOG_INFO("The recall after delete is {}", recall_after_delete);
 
   auto gt_after_delete =
-      find_exact_gt<>(queries_, data_, dim_, topk, &update_job->job_context_->removed_vertices_);
+      find_exact_gt<>(ds_.queries_, ds_.data_, ds_.dim_, topk,
+                      &update_job->job_context_->removed_vertices_);
 
   auto recall_after_delete_gt = calc_recall(ids, gt_after_delete, topk);
   LOG_INFO("The recall after delete gt is {}", recall_after_delete_gt);

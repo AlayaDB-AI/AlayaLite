@@ -19,106 +19,98 @@
 #include <filesystem>  // NOLINT(build/c++17)
 #include <string>
 #include "utils/io_utils.hpp"
+
 namespace alaya {
-class TestDatasetBase {
- public:
-  TestDatasetBase() = default;
 
-  // Virtual destructor for proper cleanup of derived classes
-  virtual ~TestDatasetBase() = default;
+/**
+ * @brief Loaded dataset containing vectors, queries and ground truth.
+ *
+ * Usage:
+ *   auto ds = load_dataset(sift_small("/path/to/data"));
+ *   space->fit(ds.data_.data(), ds.data_num_);
+ */
+struct Dataset {
+  std::string name_;
+  std::vector<float> data_;
+  std::vector<float> queries_;
+  std::vector<uint32_t> ground_truth_;
+  uint32_t data_num_ = 0;
+  uint32_t query_num_ = 0;
+  uint32_t dim_ = 0;
+  uint32_t gt_dim_ = 0;
+};
 
-  // Check if dataset exists and is complete
-  bool ensure_dataset() {
-    bool files_exist = std::filesystem::exists(dataset_dir_) &&
-                       std::filesystem::exists(data_file_) &&
-                       std::filesystem::exists(query_file_) && std::filesystem::exists(gt_file_);
-
-    if (!files_exist) {
-      if (!std::filesystem::exists(dataset_dir_)) {
-        std::filesystem::create_directories(dataset_dir_);
-      }
-      [[maybe_unused]] int ret1 = std::system(get_download_command().c_str());
-      [[maybe_unused]] int ret2 = std::system(get_extract_command().c_str());
-    }
-
-    uint32_t data_dim;
-    uint32_t query_dim;
-    alaya::load_fvecs(data_file_, data_, data_num_, data_dim);
-    alaya::load_fvecs(query_file_, queries_, query_num_, query_dim);
-    alaya::load_ivecs(gt_file_, answers_, ans_num_, ans_dim_);
-    if (data_dim != query_dim || query_num_ != ans_num_) {
-      LOG_CRITICAL(
-          "The dimension of data, query and ground truth is not the same. data_dim: {}, query_dim: "
-          "{}, query_num: {}, ans_num: {}",
-          data_dim,
-          query_dim,
-          query_num_,
-          ans_num_);
-      exit(-1);
-    }
-    dim_ = data_dim;
-
-    return files_exist;
-  }
-
-  const std::filesystem::path &get_data_file() const noexcept { return data_file_; }
-  const std::filesystem::path &get_query_file() const noexcept { return query_file_; }
-  const std::filesystem::path &get_gt_file() const noexcept { return gt_file_; }
-  const std::filesystem::path &get_dataset_dir() const noexcept { return dataset_dir_; }
-  const std::string &get_dataset_name() const noexcept { return dataset_name_; }
-
-  std::vector<float> &get_data() noexcept { return data_; }
-  std::vector<float> &get_queries() noexcept { return queries_; }
-  std::vector<uint32_t> &get_answers() noexcept { return answers_; }
-  uint32_t get_data_num() const noexcept { return data_num_; }
-  uint32_t get_query_num() const noexcept { return query_num_; }
-  uint32_t get_ans_num() const noexcept { return ans_num_; }
-  uint32_t get_dim() const noexcept { return dim_; }
-  uint32_t get_ans_dim() const noexcept { return ans_dim_; }
-
- protected:
-  virtual std::string get_download_command() const = 0;
-  virtual std::string get_extract_command() const = 0;
-
- protected:
-  std::string dataset_name_;
-
-  std::filesystem::path dataset_dir_;
+/**
+ * @brief Configuration for loading a dataset.
+ */
+struct DatasetConfig {
+  std::string name_;
+  std::filesystem::path dir_;
   std::filesystem::path data_file_;
   std::filesystem::path query_file_;
   std::filesystem::path gt_file_;
-
-  std::vector<float> data_;
-  std::vector<float> queries_;
-  std::vector<uint32_t> answers_;
-  uint32_t data_num_;
-  uint32_t query_num_;
-  uint32_t ans_num_;
-  uint32_t dim_;
-  uint32_t ans_dim_;
+  std::string download_url_;
+  std::string archive_name_ = "data.tar.gz";
+  int strip_components_ = 1;
 };
 
-class SIFTTestData : public TestDatasetBase {
- public:
-  explicit SIFTTestData(const std::string &data_dir) {
-    dataset_name_ = "siftsmall";
-    dataset_dir_ = std::filesystem::path(data_dir) / "siftsmall";
-    data_file_ = dataset_dir_ / "siftsmall_base.fvecs";
-    query_file_ = dataset_dir_ / "siftsmall_query.fvecs";
-    gt_file_ = dataset_dir_ / "siftsmall_groundtruth.ivecs";
+/**
+ * @brief Create config for SIFT small dataset (10K vectors, 128 dim).
+ */
+inline auto sift_small(const std::filesystem::path &data_dir) -> DatasetConfig {
+  auto dir = data_dir / "siftsmall";
+  return DatasetConfig{
+      .name_ = "siftsmall",
+      .dir_ = dir,
+      .data_file_ = dir / "siftsmall_base.fvecs",
+      .query_file_ = dir / "siftsmall_query.fvecs",
+      .gt_file_ = dir / "siftsmall_groundtruth.ivecs",
+      .download_url_ = "ftp://ftp.irisa.fr/local/texmex/corpus/siftsmall.tar.gz",
+  };
+}
+
+/**
+ * @brief Load dataset from config. Downloads if needed.
+ *
+ * Usage:
+ *   auto ds = load_dataset(sift_small("/data"));
+ *   // Use ds.data_, ds.queries_, ds.ground_truth_ directly
+ */
+inline auto load_dataset(const DatasetConfig &config) -> Dataset {
+  // Download if files don't exist
+  bool files_exist = std::filesystem::exists(config.data_file_) &&
+                     std::filesystem::exists(config.query_file_) &&
+                     std::filesystem::exists(config.gt_file_);
+  if (!files_exist) {
+    if (!std::filesystem::exists(config.dir_)) {
+      std::filesystem::create_directories(config.dir_);
+    }
+    auto archive_path = config.dir_ / config.archive_name_;
+    auto download_cmd = "wget " + config.download_url_ + " -O " + archive_path.string();
+    auto extract_cmd = "tar -zxvf " + archive_path.string() +
+                       " --strip-components=" + std::to_string(config.strip_components_) + " -C " +
+                       config.dir_.string();
+    [[maybe_unused]] int ret1 = std::system(download_cmd.c_str());
+    [[maybe_unused]] int ret2 = std::system(extract_cmd.c_str());
   }
 
- private:
-  std::string get_download_command() const override {
-    return "wget ftp://ftp.irisa.fr/local/texmex/corpus/siftsmall.tar.gz -O " +
-           dataset_dir_.string() + "/data.tar.gz";
-  }
+  Dataset ds;
+  ds.name_ = config.name_;
 
-  std::string get_extract_command() const override {
-    return "tar -zxvf " + dataset_dir_.string() + "/data.tar.gz" + " --strip-components=1 -C " +
-           dataset_dir_.string();
+  uint32_t data_dim = 0;
+  uint32_t query_dim = 0;
+  load_fvecs(config.data_file_, ds.data_, ds.data_num_, data_dim);
+  load_fvecs(config.query_file_, ds.queries_, ds.query_num_, query_dim);
+  load_ivecs(config.gt_file_, ds.ground_truth_, ds.query_num_, ds.gt_dim_);
+
+  if (data_dim != query_dim) {
+    LOG_CRITICAL("Dimension mismatch: data_dim={}, query_dim={}", data_dim, query_dim);
+    exit(-1);
   }
-};
+  ds.dim_ = data_dim;
+
+  return ds;
+}
 
 class DEEP1MTestData : public TestDatasetBase {
  public:
