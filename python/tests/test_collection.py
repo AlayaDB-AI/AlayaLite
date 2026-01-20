@@ -58,7 +58,10 @@ class TestCollection(unittest.TestCase):
         self.assertEqual(len(result["id"]), 4)
 
     def test_batch_query(self):
-        items = [(1, "Document 1", np.array([0.1, 0.2, 0.3]), {}), (2, "Document 2", np.array([0.4, 0.5, 0.6]), {})]
+        items = [
+            (1, "Document 1", np.array([0.1, 0.2, 0.3]), {}),
+            (2, "Document 2", np.array([0.4, 0.5, 0.6]), {}),
+        ]
         self.collection.insert(items)
         result = self.collection.batch_query([[0.1, 0.2, 0.3]], limit=1, ef_search=10)
         self.assertEqual(len(result["id"]), 1)
@@ -166,7 +169,6 @@ class TestCollection(unittest.TestCase):
         2. Deleting a large portion of items (90%).
         3. Performing a reindex on the remaining items.
         """
-
         dim = 128
         total = 1000
 
@@ -175,6 +177,10 @@ class TestCollection(unittest.TestCase):
         vectors = np.random.rand(total, dim).astype(np.float32)
         docs = [f"Doc {i}" for i in ids]
         metas = [{} for _ in ids]
+        print(
+            "collection dtype before insert:",
+            self.collection.get_index_params().data_type,
+        )
         self.collection.insert(list(zip(ids, docs, vectors, metas)))
 
         # --- Initial recall check immediately after building the index ---

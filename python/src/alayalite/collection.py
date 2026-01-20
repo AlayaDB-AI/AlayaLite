@@ -35,21 +35,27 @@ class Collection:
     @brief Collection class to manage a collection of documents and their embeddings.
     """
 
-    def __init__(self, name: str, metric: str = "l2"):
+    def __init__(self, name: str, index_params: IndexParams = IndexParams()):
         """
         Initializes the collection.
 
         Args:
             name (str): The name of the collection.
         """
-        self.__metric = metric
+        self.__index_params = index_params
         self.__name = name
         self.__dataframe = pd.DataFrame(columns=["id", "document", "metadata"])
         self.__index_py = None
         self.__outer_inner_map = {}
         self.__inner_outer_map = {}
 
-    def batch_query(self, vectors: List[List[float]], limit: int, ef_search: int = 100, num_threads: int = 1) -> dict:
+    def batch_query(
+        self,
+        vectors: List[List[float]],
+        limit: int,
+        ef_search: int = 100,
+        num_threads: int = 1,
+    ) -> dict:
         """
         Queries the index using a batch of vectors.
         """
@@ -108,9 +114,11 @@ class Collection:
 
         if self.__index_py is None:
             _, _, first_embedding, _ = items[0]
-            params = IndexParams(data_type=np.array(first_embedding).dtype, metric=self.__metric)
-            self.__index_py = Index(self.__name, params)
-            all_embeddings = np.array([item[2] for item in items], dtype=params.data_type)
+            dt = np.array(first_embedding).dtype
+            # explicitly assign data type, otherwise the default data_type would become float64
+            self.__index_params.data_type = dt  # type: ignore
+            self.__index_py = Index(self.__name, self.__index_params)
+            all_embeddings = np.array([item[2] for item in items])
             self.__index_py.fit(all_embeddings, ef_construction=100, num_threads=1)
 
             new_rows = []
@@ -280,4 +288,10 @@ class Collection:
         if self.__index_py is not None:
             raise RuntimeError("Cannot change metric after index is created")
 
-        self.__metric = metric
+        self.__index_params.metric = metric
+
+    def get_index_params(self):
+        """
+        Retrieve the configuration parameters of the index in the collection.
+        """
+        return self.__index_params

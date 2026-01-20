@@ -110,7 +110,7 @@ class Client:
             print(f"Index {name} does not exist")
             return None
 
-    def create_collection(self, name: str = "default", **_kwargs) -> Collection:
+    def create_collection(self, name: str = "default", **kwargs) -> Collection:
         """
         Create a new collection with the given name.
 
@@ -127,7 +127,8 @@ class Client:
         if name in self.__collection_map or name in self.__index_map:
             raise RuntimeError(f"A collection or index with name '{name}' already exists")
 
-        collection = Collection(name)
+        index_params = IndexParams.from_kwargs(**kwargs)
+        collection = Collection(name, index_params)
         self.__collection_map[name] = collection
         return collection
 

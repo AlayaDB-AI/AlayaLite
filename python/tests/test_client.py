@@ -18,6 +18,7 @@ Unit tests for the AlayaLite Client class.
 
 import unittest
 
+import numpy as np
 from alayalite import Client, Collection, Index
 
 
@@ -109,6 +110,31 @@ class TestClient(unittest.TestCase):
         _ = self.client.create_collection("dup")
         with self.assertRaises(RuntimeError):
             _ = self.client.create_index("dup")
+
+    def test_collection_params(self):
+        items = [
+            (
+                1,
+                "Document 1",
+                np.array([0.1, 0.2, 0.3], dtype=float),
+                {"category": "A"},
+            ),
+            (
+                2,
+                "Document 2",
+                np.array([0.4, 0.5, 0.6], dtype=float),
+                {"category": "B"},
+            ),
+        ]
+        col1 = self.client.create_collection("col1")
+        col1.insert(items)
+        params1 = col1.get_index_params()
+        self.assertEqual(params1.quantization_type, "none")
+
+        col2 = self.client.create_collection("col2", quantization_type="sq8")
+        col2.insert(items)
+        params2 = col2.get_index_params()
+        self.assertEqual(params2.quantization_type, "sq8")
 
 
 if __name__ == "__main__":
