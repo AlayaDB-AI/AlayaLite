@@ -34,9 +34,15 @@ jobs:
       env:
         CIBW_ARCHS_LINUX: aarch64, x86_64
         # CIBW_ARCHS_MACOS: x86_64, arm64
+        CIBW_CONTAINER_ENGINE_ARGS: -v /home/runner/.conan2:/root/.conan2
 
     - name: Upload wheels
       uses: actions/upload-artifact@v4
       with:
         name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
         path: ./wheelhouse/*.whl
+
+    - name: Fix cache permissions
+      if: runner.os == 'Linux' && always() # Even if the construction fails, try to fix it to prevent no cache next time.存
+      run: |
+        sudo chown -R $USER:$USER ~/.conan2
