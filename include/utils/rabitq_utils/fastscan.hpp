@@ -16,7 +16,14 @@
 
 #pragma once
 
-#include <immintrin.h>
+// Architecture-specific SIMD headers
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+  #define ALAYA_X86
+  #include <immintrin.h>
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  #define ALAYA_ARM64
+  #include <arm_neon.h>
+#endif
 
 #include <array>
 #include <cassert>
@@ -218,6 +225,40 @@ inline void accumulate(const uint8_t *__restrict__ codes,
   __m256i dis1 = _mm256_add_epi16(_mm256_permute2f128_si256(accu2, accu3, 0x21),
                                   _mm256_blend_epi32(accu2, accu3, 0xF0));
   _mm256_storeu_si256((__m256i *)&result[16], dis1);
+#else
+  // Scalar fallback for non-x86 architectures (ARM, etc.)
+  // This implementation is slower but functionally equivalent to the SIMD versions
+  std::memset(result, 0, 32 * sizeof(uint16_t));
+
+  for (size_t i = 0; i < code_length; i += 32) {
+    // First 16 bytes: upper 4-bit codes (col_0 from pack_codes)
+    for (size_t j = 0; j < 16; ++j) {
+      uint8_t c = codes[i + j];
+      uint8_t lo_code = c & 0x0f;
+      uint8_t hi_code = c >> 4;
+
+      // LUT lookup for upper 4 bits - first 16 bytes of LUT block
+      int8_t val_lo = static_cast<int8_t>(lp_table[i + lo_code]);
+      int8_t val_hi = static_cast<int8_t>(lp_table[i + hi_code]);
+
+      result[kPerm0[j]] += val_lo;       // Vector at kPerm0[j]
+      result[kPerm0[j] + 16] += val_hi;  // Vector at kPerm0[j] + 16
+    }
+
+    // Second 16 bytes: lower 4-bit codes (col_1 from pack_codes)
+    for (size_t j = 0; j < 16; ++j) {
+      uint8_t c = codes[i + 16 + j];
+      uint8_t lo_code = c & 0x0f;
+      uint8_t hi_code = c >> 4;
+
+      // LUT lookup for lower 4 bits - second 16 bytes of LUT block
+      int8_t val_lo = static_cast<int8_t>(lp_table[i + 16 + lo_code]);
+      int8_t val_hi = static_cast<int8_t>(lp_table[i + 16 + hi_code]);
+
+      result[kPerm0[j]] += val_lo;
+      result[kPerm0[j] + 16] += val_hi;
+    }
+  }
 #endif
 }
 // NOLINTEND

@@ -18,47 +18,59 @@
 #include <sys/types.h>
 
 #ifndef NO_MANUAL_VECTORIZATION
-#if (defined(__SSE__) || _M_IX86_FP > 0 || defined(_M_AMD64) || defined(_M_X64))
-#define USE_SSE
-#ifdef __AVX__
-#define USE_AVX
-#ifdef __AVX512F__
-#define USE_AVX512
-#endif
-#endif
-#endif
+  #if (defined(__SSE__) || _M_IX86_FP > 0 || defined(_M_AMD64) || defined(_M_X64))
+    #define USE_SSE
+    #ifdef __AVX__
+      #define USE_AVX
+      #ifdef __AVX512F__
+        #define USE_AVX512
+      #endif
+    #endif
+  #endif
+
+  // ARM NEON detection
+  #if defined(__aarch64__) || defined(_M_ARM64)
+    #define USE_NEON
+  #endif
 #endif
 
 #if defined(USE_AVX) || defined(USE_SSE)
-#ifdef _MSC_VER
-#include <intrin.h>
-#include <stdexcept>
-#else
-#include <cpuid.h>
-#include <x86intrin.h>
+  #ifdef _MSC_VER
+    #include <intrin.h>
+    #include <stdexcept>
+  #else
+    #include <cpuid.h>
+    #include <x86intrin.h>
 
+  #endif
+
+  #if defined(USE_AVX512)
+    #include <immintrin.h>
+  #endif
 #endif
 
-#if defined(USE_AVX512)
-#include <immintrin.h>
+// ARM NEON headers
+#if defined(USE_NEON)
+  #include <arm_neon.h>
 #endif
 
+// Alignment macros (available on all platforms)
 #if defined(__GNUC__) || defined(__clang__)
-#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
-#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
+  #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
+  #define PORTABLE_ALIGN64 __attribute__((aligned(64)))
 #else
-#define PORTABLE_ALIGN32 __declspec(align(32))
-#define PORTABLE_ALIGN64 __declspec(align(64))
-#endif
+  #define PORTABLE_ALIGN32 __declspec(align(32))
+  #define PORTABLE_ALIGN64 __declspec(align(64))
 #endif
 
 #if defined(__GNUC__) && !defined(__clang__)
-#define FAST_BEGIN _Pragma("GCC push_options") _Pragma("GCC optimize (\"unroll-loops,fast-math\")")
-#define FAST_END _Pragma("GCC pop_options")
+  #define FAST_BEGIN \
+    _Pragma("GCC push_options") _Pragma("GCC optimize (\"unroll-loops,fast-math\")")
+  #define FAST_END _Pragma("GCC pop_options")
 #else
-// Clang / MSVC / others: no-op
-#define FAST_BEGIN
-#define FAST_END
+  // Clang / MSVC / others: no-op
+  #define FAST_BEGIN
+  #define FAST_END
 #endif
 
 #define CAST(Type, Ptr) (*reinterpret_cast<const Type *>(Ptr))

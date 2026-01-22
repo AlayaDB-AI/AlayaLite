@@ -321,6 +321,13 @@ template <typename T>
 std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
                                            RotatorType type = RotatorType::FhtKacRotator,
                                            size_t padded_dim = 0) {
+// RaBitQ requires AVX512 for FhtKacRotator, not supported on ARM
+#if defined(__aarch64__) || defined(_M_ARM64)
+  throw std::runtime_error(
+      "RaBitQ is not supported on ARM architecture. "
+      "AVX512 instructions are required for FhtKacRotator.");
+#endif
+
   if (padded_dim == 0) {
     padded_dim = rotator_impl::padding_requirement(dim, type);
     if (padded_dim != dim) {

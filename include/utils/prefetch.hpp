@@ -20,11 +20,11 @@
 #include <cstdio>
 
 #if defined(_MSC_VER)
-#include <intrin.h>
+  #include <intrin.h>
 #elif defined(__SSE2__)
-#include <immintrin.h>
+  #include <immintrin.h>
 #elif defined(__aarch64__)
-#include <arm_neon.h>
+  #include <arm_neon.h>
 #endif
 
 namespace alaya {

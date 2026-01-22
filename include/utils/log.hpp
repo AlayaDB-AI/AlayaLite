@@ -22,7 +22,7 @@
 #include <string>
 
 #ifdef PROJECT_ROOT
-#define RELATIVE_FILE get_relative_path(__FILE__, PROJECT_ROOT)
+  #define RELATIVE_FILE get_relative_path(__FILE__, PROJECT_ROOT)
 auto inline get_relative_path(const std::string &full_path, const std::string &base_path)
     -> std::string {
   std::filesystem::path full(full_path);
@@ -30,7 +30,7 @@ auto inline get_relative_path(const std::string &full_path, const std::string &b
   return std::filesystem::relative(full, base).string();
 }
 #else
-#define RELATIVE_FILE __FILE__
+  #define RELATIVE_FILE __FILE__
 #endif
 
 #define CONCATENATE_STRINGS(a, b) a b

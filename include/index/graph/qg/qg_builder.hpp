@@ -130,7 +130,7 @@ class QGBuilder {
   void search_new_neighbors(bool sup) {
     LOG_INFO("Searching for new neighbor candidates...");
 #if defined(__AVX512F__)
-#pragma omp parallel for schedule(dynamic)
+  #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < num_nodes_; ++i) {
       IDType cur_id = i;
       auto tid = omp_get_thread_num();
@@ -165,7 +165,7 @@ class QGBuilder {
 #if defined(__AVX512F__)
     std::vector<std::mutex> locks(num_nodes_);
     std::vector<CandidateList> reverse_buffer(num_nodes_);
-#pragma omp parallel for schedule(dynamic)
+  #pragma omp parallel for schedule(dynamic)
     for (IDType data_id = 0; data_id < num_nodes_; ++data_id) {  // for every vertex
       for (const auto &nei : new_neighbors_[data_id]) {
         auto dst = nei.id_;
@@ -191,7 +191,7 @@ class QGBuilder {
         }
       }
     }
-#pragma omp parallel for schedule(dynamic)
+  #pragma omp parallel for schedule(dynamic)
     for (IDType data_id = 0; data_id < num_nodes_; ++data_id) {  // prune for every vertex
       CandidateList &tmp_pool = reverse_buffer[data_id];
       tmp_pool.reserve(tmp_pool.size() + degree_bound_);
@@ -214,7 +214,7 @@ class QGBuilder {
   void angle_based_supplement() {
     LOG_INFO("Supplementing edges...");
 #if defined(__AVX512F__)
-#pragma omp parallel for schedule(dynamic)
+  #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < num_nodes_; ++i) {
       CandidateList &cur_neighbors = new_neighbors_[i];
       size_t cur_degree = cur_neighbors.size();

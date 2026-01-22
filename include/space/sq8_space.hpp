@@ -31,7 +31,7 @@
 #include "utils/prefetch.hpp"
 
 #ifdef _MSC_VER
-#include <malloc.h>
+  #include <malloc.h>
 #endif
 
 namespace alaya {

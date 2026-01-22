@@ -17,7 +17,7 @@
 #pragma once
 
 #ifdef __linux__
-#include <sys/mman.h>
+  #include <sys/mman.h>
 #endif
 
 #include <cstdio>
@@ -26,7 +26,7 @@
 #include <type_traits>
 
 #ifdef _MSC_VER
-#include <malloc.h>
+  #include <malloc.h>
 #endif
 
 namespace alaya {

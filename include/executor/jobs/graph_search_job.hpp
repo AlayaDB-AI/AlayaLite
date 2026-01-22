@@ -33,7 +33,7 @@
 #include "utils/rabitq_utils/search_utils/hashset.hpp"
 
 #if defined(__linux__)
-#include "coro/task.hpp"
+  #include "coro/task.hpp"
 #endif
 
 namespace alaya {
