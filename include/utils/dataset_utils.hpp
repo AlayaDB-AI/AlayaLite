@@ -18,6 +18,7 @@
 
 #include <filesystem>  // NOLINT(build/c++17)
 #include <string>
+#include "utils/evaluate.hpp"
 #include "utils/io_utils.hpp"
 
 namespace alaya {
@@ -52,6 +53,8 @@ struct DatasetConfig {
   std::string download_url_;
   std::string archive_name_ = "data.tar.gz";
   int strip_components_ = 1;
+  uint32_t max_data_num_ = 0;   ///< Max vectors to load (0 = all)
+  uint32_t max_query_num_ = 0;  ///< Max queries to load (0 = all)
 };
 
 /**
@@ -66,6 +69,26 @@ inline auto sift_small(const std::filesystem::path &data_dir) -> DatasetConfig {
       .query_file_ = dir / "siftsmall_query.fvecs",
       .gt_file_ = dir / "siftsmall_groundtruth.ivecs",
       .download_url_ = "ftp://ftp.irisa.fr/local/texmex/corpus/siftsmall.tar.gz",
+  };
+}
+
+/**
+ * @brief Create config for SIFT micro dataset (subset of siftsmall: 1K vectors, 128 dim).
+ *
+ * This is a smaller subset for fast CI testing. Uses the same files as siftsmall
+ * but limits the number of vectors loaded.
+ */
+inline auto sift_micro(const std::filesystem::path &data_dir) -> DatasetConfig {
+  auto dir = data_dir / "siftsmall";
+  return DatasetConfig{
+      .name_ = "siftmicro",
+      .dir_ = dir,
+      .data_file_ = dir / "siftsmall_base.fvecs",
+      .query_file_ = dir / "siftsmall_query.fvecs",
+      .gt_file_ = dir / "siftsmall_groundtruth.ivecs",
+      .download_url_ = "ftp://ftp.irisa.fr/local/texmex/corpus/siftsmall.tar.gz",
+      .max_data_num_ = 1000,
+      .max_query_num_ = 50,
   };
 }
 
@@ -124,6 +147,30 @@ inline auto load_dataset(const DatasetConfig &config) -> Dataset {
     exit(-1);
   }
   ds.dim_ = data_dim;
+
+  // Check if we need to truncate data
+  bool data_truncated = config.max_data_num_ > 0 && ds.data_num_ > config.max_data_num_;
+  bool query_truncated = config.max_query_num_ > 0 && ds.query_num_ > config.max_query_num_;
+
+  // Apply data limit
+  if (data_truncated) {
+    ds.data_num_ = config.max_data_num_;
+    ds.data_.resize(ds.data_num_ * ds.dim_);
+  }
+
+  // Apply query limit
+  if (query_truncated) {
+    ds.query_num_ = config.max_query_num_;
+    ds.queries_.resize(ds.query_num_ * ds.dim_);
+  }
+
+  // Recompute ground truth if data was truncated (original GT IDs may be invalid)
+  if (data_truncated) {
+    ds.ground_truth_ = find_exact_gt(ds.queries_, ds.data_, ds.dim_, ds.gt_dim_);
+  } else if (query_truncated) {
+    // Only query truncated, just resize GT
+    ds.ground_truth_.resize(ds.query_num_ * ds.gt_dim_);
+  }
 
   return ds;
 }

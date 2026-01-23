@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <sys/types.h>
 #include <algorithm>
 #include <cstdint>
 #include <unordered_set>
@@ -61,17 +62,43 @@ auto find_exact_gt(const std::vector<DataType> &queries,
 }
 
 template <typename IDType>
-auto calc_recall(std::vector<IDType> &res, std::vector<IDType> &gt, uint32_t topk) -> float {
+auto calc_recall(const IDType *res,
+                 const IDType *gt,
+                 uint32_t query_num,
+                 uint32_t gt_dim,
+                 uint32_t topk) -> float {
   uint32_t cnt = 0;
-  for (uint32_t i = 0; i < res.size(); i++) {
+  for (uint32_t i = 0; i < query_num; i++) {
     for (uint32_t j = 0; j < topk; j++) {
-      if (res[i] == gt[((i / topk) * topk) + j]) {
-        cnt++;
-        break;
+      for (uint32_t k = 0; k < gt_dim; k++) {
+        if (res[i * topk + j] == gt[i * gt_dim + k]) {
+          cnt++;
+          break;
+        }
       }
     }
   }
-  return static_cast<float>(cnt) / res.size();
+  return static_cast<float>(cnt) / (query_num * topk);
+}
+
+template <typename IDType>
+auto calc_recall(const std::vector<std::vector<IDType>> &res,
+                 const IDType *gt,
+                 uint32_t query_num,
+                 uint32_t gt_dim,
+                 uint32_t topk) -> float {
+  uint32_t cnt = 0;
+  for (uint32_t i = 0; i < query_num; i++) {
+    for (uint32_t j = 0; j < topk; j++) {
+      for (uint32_t k = 0; k < gt_dim; k++) {
+        if (res[i][j] == gt[i * gt_dim + k]) {
+          cnt++;
+          break;
+        }
+      }
+    }
+  }
+  return static_cast<float>(cnt) / (query_num * topk);
 }
 
 template <typename T>

@@ -29,54 +29,38 @@
 #include "index/graph/nsg/nsg_builder.hpp"
 #include "space/raw_space.hpp"
 #include "utils/dataset_utils.hpp"
+#include "utils/evaluate.hpp"
 #include "utils/timer.hpp"
 
 namespace alaya {
 
 class FusionGraphTest : public ::testing::Test {
  protected:
-  // NOLINTBEGIN
-  void SetUp() {
-    // TODO: Abstracted into a rand test data class for easy reuse
-    // NOLINTEND
-    max_node_ = 1000;
-    dim_ = 1024;
-    data_ = new float[max_node_ * dim_];
+  void SetUp() override {
+    std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
+    ds_ = load_dataset(sift_micro(data_dir));
 
-    // Init the vector data.
-    srand(time(nullptr));
-    for (uint32_t i = 0; i < max_node_; ++i) {
-      for (uint32_t j = 0; j < dim_; ++j) {
-        data_[i * dim_ + j] = rand() % max_node_;
-      }
-    }
-    // build the unified data manager to compute distance.
-    space_ = std::make_shared<RawSpace<>>(max_node_, dim_, MetricType::L2);
-    space_->fit(data_, max_node_);
+    space_ = std::make_shared<RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
+    space_->fit(ds_.data_.data(), ds_.data_num_);
     nsg_ = std::make_unique<
         alaya::FusionGraphBuilder<alaya::RawSpace<>, alaya::HNSWBuilder<alaya::RawSpace<>>,
                                   alaya::NSGBuilder<alaya::RawSpace<>>>>(space_);
   }
-  // NOLINTBEGIN
-  void TearDown() {
-    // NOLINTEND
-    delete[] data_;
+
+  void TearDown() override {
     if (std::filesystem::exists(filename_)) {
       remove(filename_.data());
     }
   }
 
   uint32_t max_thread_num_ = std::thread::hardware_concurrency();
-  uint32_t max_node_;               ///< The number of vector data.
-  uint32_t dim_;                    ///< The dim of vector data.
-  std::string_view metric_ = "L2";  /// The metric type for building graph.
-  float *data_ = nullptr;           // Store the vector data.
+  Dataset ds_;
   std::unique_ptr<
       alaya::FusionGraphBuilder<alaya::RawSpace<>, alaya::HNSWBuilder<alaya::RawSpace<>>,
                                 alaya::NSGBuilder<alaya::RawSpace<>>>>
       nsg_ = nullptr;
   std::shared_ptr<RawSpace<>> space_ = nullptr;
-  std::string_view filename_ = "nnDescent.graph";
+  std::string_view filename_ = "fusion_graph_test.graph";
 };
 
 TEST_F(FusionGraphTest, BuildGraphTest) {
@@ -88,7 +72,7 @@ class FusionGraphSearchTest : public ::testing::Test {
  protected:
   void SetUp() override {
     std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
-    ds_ = load_dataset(sift_small(data_dir));
+    ds_ = load_dataset(sift_micro(data_dir));
   }
 
   void TearDown() override {}
@@ -138,7 +122,7 @@ TEST_F(FusionGraphSearchTest, SimpleSearchTest) {
 
   Timer timer{};
   std::vector<std::vector<IDType>> res_pool(ds_.query_num_, std::vector<IDType>(topk));
-  const size_t kSearchThreadNum = 16;
+  const size_t kSearchThreadNum = std::min(static_cast<size_t>(16), static_cast<size_t>(ds_.query_num_));
   std::vector<std::thread> tasks(kSearchThreadNum);
 
   auto search_knn = [&](uint32_t i) {
@@ -169,20 +153,7 @@ TEST_F(FusionGraphSearchTest, SimpleSearchTest) {
 
   LOG_INFO("total time: {} s.", timer.elapsed() / 1000000.0);
 
-  // Computing recall;
-  size_t cnt = 0;
-  for (uint32_t i = 0; i < ds_.query_num_; i++) {
-    for (size_t j = 0; j < topk; j++) {
-      for (size_t k = 0; k < topk; k++) {
-        if (res_pool[i][j] == ds_.ground_truth_[i * ds_.gt_dim_ + k]) {
-          cnt++;
-          break;
-        }
-      }
-    }
-  }
-
-  float recall = cnt * 1.0 / ds_.query_num_ / topk;
+  auto recall = calc_recall(res_pool, ds_.ground_truth_.data(), ds_.query_num_, ds_.gt_dim_, topk);
   LOG_INFO("recall is {}.", recall);
   EXPECT_GE(recall, 0.5);
 }

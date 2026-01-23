@@ -13,8 +13,8 @@ rm -rf ${BUILD_DIR} && mkdir -p ${BUILD_DIR} && cd ${BUILD_DIR}
 cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_UNIT_TESTS=ON -DENABLE_COVERAGE=ON -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13
 make -j
 
-# run the tests
-ctest --verbose --output-on-failure
+# run the tests in parallel
+ctest --verbose --output-on-failure -j4
 lcov  --capture \
      --ignore-errors mismatch \
      --directory ${BUILD_DIR} \

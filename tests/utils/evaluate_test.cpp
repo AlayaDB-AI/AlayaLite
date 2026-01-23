@@ -64,7 +64,7 @@ TEST(CalcRecallTest, PerfectMatch) {
   std::vector<uint32_t> res = {0, 1, 2, 3};
   std::vector<uint32_t> gt = {0, 1, 2, 3};
   uint32_t topk = 1;
-  float recall = calc_recall(res, gt, topk);
+  float recall = calc_recall(res.data(), gt.data(), 4, 1, topk);
   EXPECT_FLOAT_EQ(recall, 1.0);
 }
 
@@ -72,7 +72,7 @@ TEST(CalcRecallTest, PartialMatch) {
   std::vector<uint32_t> res = {0, 1, 2, 3};
   std::vector<uint32_t> gt = {1, 2, 3, 4};
   uint32_t topk = 1;
-  float recall = calc_recall(res, gt, topk);
+  float recall = calc_recall(res.data(), gt.data(), 4, 1, topk);
   EXPECT_FLOAT_EQ(recall, 0);
 }
 
@@ -80,8 +80,50 @@ TEST(CalcRecallTest, NoMatch) {
   std::vector<uint32_t> res = {5, 6, 7, 8};
   std::vector<uint32_t> gt = {1, 2, 3, 4};
   uint32_t topk = 1;
-  float recall = calc_recall(res, gt, topk);
+  float recall = calc_recall(res.data(), gt.data(), 4, 1, topk);
   EXPECT_FLOAT_EQ(recall, 0.0);
+}
+
+// Tests for calc_recall with vector<vector<IDType>> overload
+TEST(CalcRecallVectorTest, PerfectMatch) {
+  std::vector<std::vector<uint32_t>> res = {{0, 1}, {2, 3}};
+  std::vector<uint32_t> gt = {0, 1, 2, 3};  // gt_dim = 2
+  uint32_t topk = 2;
+  float recall = calc_recall(res, gt.data(), 2, 2, topk);
+  EXPECT_FLOAT_EQ(recall, 1.0);
+}
+
+TEST(CalcRecallVectorTest, PartialMatch) {
+  std::vector<std::vector<uint32_t>> res = {{0, 5}, {2, 6}};  // 0 and 2 match
+  std::vector<uint32_t> gt = {0, 1, 2, 3};  // gt_dim = 2
+  uint32_t topk = 2;
+  float recall = calc_recall(res, gt.data(), 2, 2, topk);
+  EXPECT_FLOAT_EQ(recall, 0.5);  // 2 out of 4 match
+}
+
+TEST(CalcRecallVectorTest, NoMatch) {
+  std::vector<std::vector<uint32_t>> res = {{10, 11}, {12, 13}};
+  std::vector<uint32_t> gt = {0, 1, 2, 3};
+  uint32_t topk = 2;
+  float recall = calc_recall(res, gt.data(), 2, 2, topk);
+  EXPECT_FLOAT_EQ(recall, 0.0);
+}
+
+TEST(CalcRecallVectorTest, SingleQuery) {
+  std::vector<std::vector<uint32_t>> res = {{0, 1, 2}};
+  std::vector<uint32_t> gt = {0, 1, 2, 3, 4};  // gt_dim = 5
+  uint32_t topk = 3;
+  float recall = calc_recall(res, gt.data(), 1, 5, topk);
+  EXPECT_FLOAT_EQ(recall, 1.0);  // All 3 results are in top-5 GT
+}
+
+TEST(CalcRecallVectorTest, LargerGtDim) {
+  // Test when gt_dim > topk (common case)
+  std::vector<std::vector<uint32_t>> res = {{0}, {5}};  // topk = 1
+  std::vector<uint32_t> gt = {0, 1, 2, 5, 6, 7};  // gt_dim = 3, query_num = 2
+  uint32_t topk = 1;
+  float recall = calc_recall(res, gt.data(), 2, 3, topk);
+  EXPECT_FLOAT_EQ(recall, 1.0);  // Both 0 and 5 are in their respective GT
 }
 
 }  // namespace alaya

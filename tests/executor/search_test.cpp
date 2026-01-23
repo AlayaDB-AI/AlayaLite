@@ -29,6 +29,7 @@
 #include "utils/dataset_utils.hpp"
 #include "utils/log.hpp"
 #include "utils/timer.hpp"
+#include "utils/evaluate.hpp"
 
 namespace alaya {
 
@@ -174,20 +175,7 @@ TEST_F(SearchTest, SearchHNSWTest) {
 
   LOG_INFO("total time: {} s.", timer.elapsed() / 1000000.0);
 
-  // Computing recall;
-  size_t cnt = 0;
-  for (uint32_t i = 0; i < ds_.query_num_; i++) {
-    for (size_t j = 0; j < topk; j++) {
-      for (size_t k = 0; k < topk; k++) {
-        if (res_pool[i][j] == ds_.ground_truth_[i * ds_.gt_dim_ + k]) {
-          cnt++;
-          break;
-        }
-      }
-    }
-  }
-
-  float recall = cnt * 1.0 / ds_.query_num_ / topk;
+  auto recall = calc_recall(res_pool,  ds_.ground_truth_.data(), ds_.query_num_, ds_.gt_dim_, topk);
   LOG_INFO("recall is {}.", recall);
   EXPECT_GE(recall, 0.5);
 }

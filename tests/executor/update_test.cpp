@@ -84,7 +84,7 @@ TEST_F(UpdateTest, HalfInsertTest) {
     search_job->search_solo(cur_query, topk, ids.data() + i * topk, 30);
   }
 
-  auto recall = calc_recall(ids, half_gt, topk);
+  auto recall = calc_recall(ids.data(), half_gt.data(), ds_.query_num_, topk, topk);
   ASSERT_GT(recall, 0.9);
 
   auto update_job = std::make_shared<alaya::GraphUpdateJob<RawSpace<>>>(search_job);
@@ -100,7 +100,7 @@ TEST_F(UpdateTest, HalfInsertTest) {
   }
 
   auto full_gt = find_exact_gt(ds_.queries_, ds_.data_, ds_.dim_, topk);
-  auto full_recall = calc_recall(ids, full_gt, topk);
+  auto full_recall = calc_recall(ids.data(), full_gt.data(), ds_.query_num_, topk, topk);
   ASSERT_GT(full_recall, 0.9);
 
   for (uint32_t i = half_size; i < ds_.data_num_; i++) {
@@ -110,14 +110,14 @@ TEST_F(UpdateTest, HalfInsertTest) {
     auto cur_query = ds_.queries_.data() + i * ds_.dim_;
     search_job->search_solo_updated(cur_query, topk, ids.data() + i * topk, 50);
   }
-  auto recall_after_delete = calc_recall(ids, full_gt, topk);
+  auto recall_after_delete = calc_recall(ids.data(), full_gt.data(), ds_.query_num_, topk, topk);
   LOG_INFO("The recall after delete is {}", recall_after_delete);
 
   auto gt_after_delete =
       find_exact_gt<>(ds_.queries_, ds_.data_, ds_.dim_, topk,
                       &update_job->job_context_->removed_vertices_);
 
-  auto recall_after_delete_gt = calc_recall(ids, gt_after_delete, topk);
+  auto recall_after_delete_gt = calc_recall(ids.data(), gt_after_delete.data(), ds_.query_num_, topk, topk);
   LOG_INFO("The recall after delete gt is {}", recall_after_delete_gt);
 }
 
