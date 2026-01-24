@@ -20,6 +20,7 @@ and querying a single vector index.
 import os
 
 import numpy as np
+from alaya_vis_sdk import notify
 
 from ._alayalitepy import PyIndexInterface as _PyIndexInterface
 from .common import (
@@ -72,11 +73,15 @@ class Index:
         """
         return self.__index.get_data_by_id(vector_id)
 
+    @notify(span_id="index_fit")
     def fit(
         self,
         vectors: VectorLikeBatch,
         ef_construction: int = 100,
         num_threads: int = 1,
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
     ):
         """
         Build the index with the given set of vectors.
@@ -96,6 +101,18 @@ class Index:
         self.__index = _PyIndexInterface(self.__params.to_cpp_params())
         self.__is_initialized = True
 
+        # Prepare monitoring data
+        if payload is None:
+            print("WARNING: payload is None in Index.fit(), monitoring data will not be reported")
+        else:
+            payload.update(
+                {
+                    "vector_dim": int(self.__dim),
+                    "total_vectors": int(vectors.shape[0]),
+                    "index_type": str(self.__params.index_type) if self.__params.index_type else "HNSW",
+                }
+            )
+
         print(
             f"fitting index with the following parameters: \n"
             f"  vectors.shape: {vectors.shape}, num_threads: {num_threads}, ef_construction: {ef_construction}\n"
@@ -103,7 +120,15 @@ class Index:
         )
         self.__index.fit(vectors, ef_construction, num_threads)
 
-    def insert(self, vectors: VectorLike, ef: int = 100):
+    @notify(span_id="index_insert")
+    def insert(
+        self,
+        vectors: VectorLike,
+        ef: int = 100,
+        *,
+        trace_id=None,
+        payload=None,
+    ):  # pylint: disable=unused-argument
         """
         Insert a new vector into the index.
         """
@@ -114,6 +139,18 @@ class Index:
             f"vectors dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, vectors dimension: {vectors.shape[0]}",
         )
+
+        # Prepare monitoring data
+        if payload is None:
+            print("WARNING: payload is None in Index method, monitoring data will not be reported")
+        else:
+            payload.update(
+                {
+                    "vector_dim": int(self.__dim),
+                    "index_type": str(self.__params.index_type) if self.__params.index_type else "HNSW",
+                }
+            )
+
         ret = self.__index.insert(vectors, ef)
         is_full_uint32 = self.__params.id_type == np.uint32 and ret == 4294967295
         is_full_uint64 = self.__params.id_type == np.uint64 and ret == 18446744073709551615
@@ -129,7 +166,16 @@ class Index:
         _assert(self.__index is not None, "Index is not init yet")
         self.__index.remove(vector_id)
 
-    def search(self, query: VectorLike, topk: int, ef_search: int = 100) -> VectorLike:
+    @notify(span_id="index_search")
+    def search(
+        self,
+        query: VectorLike,
+        topk: int,
+        ef_search: int = 100,
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
+    ) -> VectorLike:
         """
         Perform a nearest neighbor search for a given query vector.
         """
@@ -140,14 +186,30 @@ class Index:
             f"query dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, query dimension: {query.shape[0]}",
         )
+
+        # Prepare monitoring data
+        if payload is None:
+            print("WARNING: payload is None in Index method, monitoring data will not be reported")
+        else:
+            payload.update(
+                {
+                    "vector_dim": int(self.__dim),
+                    "index_type": str(self.__params.index_type) if self.__params.index_type else "HNSW",
+                }
+            )
+
         return self.__index.search(query, topk, ef_search)
 
+    @notify(span_id="index_batch_search")
     def batch_search(
         self,
         queries: VectorLikeBatch,
         topk: int,
         ef_search: int = 100,
         num_threads: int = 1,
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
     ) -> VectorLikeBatch:
         """
         Perform a batch search for multiple query vectors.
@@ -159,14 +221,30 @@ class Index:
             f"query dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, query dimension: {queries.shape[1]}",
         )
+
+        # Prepare monitoring data
+        if payload is None:
+            print("WARNING: payload is None in Index method, monitoring data will not be reported")
+        else:
+            payload.update(
+                {
+                    "vector_dim": int(self.__dim),
+                    "index_type": str(self.__params.index_type) if self.__params.index_type else "HNSW",
+                }
+            )
+
         return self.__index.batch_search(queries, topk, ef_search, num_threads)
 
+    @notify(span_id="index_batch_search_with_distance")
     def batch_search_with_distance(
         self,
         queries: VectorLikeBatch,
         topk: int,
         ef_search: int = 100,
         num_threads: int = 1,
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
     ) -> VectorLikeBatch:
         """
         Perform a batch search for multiple query vectors.
@@ -178,6 +256,18 @@ class Index:
             f"query dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, query dimension: {queries.shape[1]}",
         )
+
+        # Prepare monitoring data (latency will be added automatically by decorator)
+        if payload is None:
+            print("WARNING: payload is None in Index method, monitoring data will not be reported")
+        else:
+            payload.update(
+                {
+                    "vector_dim": int(self.__dim),
+                    "index_type": str(self.__params.index_type) if self.__params.index_type else "HNSW",
+                }
+            )
+
         return self.__index.batch_search_with_distance(queries, topk, ef_search, num_threads)
 
     def get_dim(self):
@@ -192,12 +282,30 @@ class Index:
         """
         return self.__params.data_type
 
-    def save(self, url) -> dict:
+    @notify(span_id="index_save")
+    def save(
+        self,
+        url,
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
+    ) -> dict:
         """
         Save the index to a specified directory.
         """
         if not os.path.exists(url):
             os.makedirs(url)
+
+        # Prepare monitoring data
+        if payload is None:
+            print("WARNING: payload is None in Index method, monitoring data will not be reported")
+        else:
+            payload.update(
+                {
+                    "vector_dim": int(self.__dim),
+                    "index_type": str(self.__params.index_type) if self.__params.index_type else "HNSW",
+                }
+            )
 
         index_path = self.__params.index_path(url)
         data_path = self.__params.data_path(url)
@@ -207,7 +315,15 @@ class Index:
         return {"type": "index", "index": self.__params.to_json_dict()}
 
     @classmethod
-    def load(cls, url, name):
+    @notify(span_id="index_load")
+    def load(
+        cls,
+        url,
+        name,
+        *,
+        trace_id=None,
+        payload=None,
+    ):  # pylint: disable=unused-argument
         """
         Load an existing index from disk.
         """
@@ -228,4 +344,16 @@ class Index:
         instance.__index.load(index_path, data_path, quant_path)
         instance.__is_initialized = True
         instance.__dim = instance.__index.get_data_dim()
+
+        # Prepare monitoring data
+        if payload is None:
+            print("WARNING: payload is None in Index.load(), monitoring data will not be reported")
+        else:
+            payload.update(
+                {
+                    "vector_dim": int(instance.__dim),
+                    "index_type": str(params.index_type) if params.index_type else "HNSW",
+                }
+            )
+
         return instance

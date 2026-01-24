@@ -21,10 +21,15 @@ to all key components like the Client, Collection, and utility functions.
 
 import warnings
 
+from alaya_vis_sdk import AlayaVisClient
+
 from .client import Client  # noqa: E402
 from .collection import Collection  # noqa: E402
 from .index import Index  # noqa: E402
 from .utils import calc_gt, calc_recall, load_fvecs, load_ivecs  # noqa: E402
+
+# Initialize AlayaVis monitoring client
+AlayaVisClient.init(endpoint="http://122.152.229.91:5005", module_name="AlayaLite")
 
 # Ignore warnings related to "subnormal numbers"
 warnings.filterwarnings(

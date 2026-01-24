@@ -23,6 +23,7 @@ from typing import List, Optional
 
 import numpy as np
 import pandas as pd
+from alaya_vis_sdk import notify
 
 from .common import _assert
 from .index import Index
@@ -49,12 +50,16 @@ class Collection:
         self.__outer_inner_map = {}
         self.__inner_outer_map = {}
 
+    @notify(span_id="collection_batch_query")
     def batch_query(
         self,
         vectors: List[List[float]],
         limit: int,
         ef_search: int = 100,
         num_threads: int = 1,
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
     ) -> dict:
         """
         Queries the index using a batch of vectors.
@@ -67,6 +72,21 @@ class Collection:
         )
         _assert(num_threads > 0, "num_threads must be greater than 0")
         _assert(ef_search >= limit, "ef_search must be greater than or equal to limit")
+
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.batch_query(), "
+                "monitoring data will not be reported"
+            )
+        else:
+            payload.update(
+                {
+                    "collection_name": str(self.__name),
+                    "vector_dim": int(self.__index_py.get_dim()),
+                    "total_vectors": int(len(self.__dataframe)),
+                }
+            )
 
         all_results, all_distance = self.__index_py.batch_search_with_distance(
             np.array(vectors, dtype=np.float32), limit, ef_search, num_threads
@@ -105,12 +125,32 @@ class Collection:
 
         return filtered_df.to_dict(orient="list")
 
-    def insert(self, items: List[tuple]):
+    @notify(span_id="collection_insert")
+    def insert(
+        self,
+        items: List[tuple],
+        *,
+        trace_id=None,
+        payload=None,
+    ):  # pylint: disable=unused-argument
         """
         Inserts multiple documents and their embeddings into the collection.
         """
         if not items:
             return
+
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.insert(), monitoring data will not be reported"
+            )
+        else:
+            payload.update(
+                {
+                    "collection_name": str(self.__name),
+                    "total_vectors": int(len(self.__dataframe)),
+                }
+            )
 
         if self.__index_py is None:
             _, _, first_embedding, _ = items[0]
@@ -127,6 +167,11 @@ class Collection:
                 self.__outer_inner_map[item_id] = i
                 self.__inner_outer_map[i] = item_id
             self.__dataframe = pd.concat([self.__dataframe, pd.DataFrame(new_rows)], ignore_index=True)
+
+            # Update payload after insertion
+            if payload is not None:
+                payload["vector_dim"] = int(self.__index_py.get_dim())
+                payload["total_vectors"] = int(len(self.__dataframe))
         else:
             new_rows = []
             for item_id, document, embedding, metadata in items:
@@ -136,12 +181,37 @@ class Collection:
                 self.__inner_outer_map[index_id] = item_id
             self.__dataframe = pd.concat([self.__dataframe, pd.DataFrame(new_rows)], ignore_index=True)
 
-    def upsert(self, items: List[tuple]):
+            # Update payload after insertion
+            if payload is not None:
+                payload["vector_dim"] = int(self.__index_py.get_dim())
+                payload["total_vectors"] = int(len(self.__dataframe))
+
+    @notify(span_id="collection_upsert")
+    def upsert(
+        self,
+        items: List[tuple],
+        *,
+        trace_id=None,
+        payload=None,
+    ):  # pylint: disable=unused-argument
         """
         Inserts new items or updates existing ones.
         """
         if not items:
             return
+
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.upsert(), monitoring data will not be reported"
+            )
+        else:
+            payload.update(
+                {
+                    "collection_name": str(self.__name),
+                    "total_vectors": int(len(self.__dataframe)) if self.__index_py else 0,
+                }
+            )
 
         if self.__index_py is None:
             self.insert(items)
@@ -165,12 +235,38 @@ class Collection:
         if new_items_to_insert:
             self.insert(new_items_to_insert)
 
-    def delete_by_id(self, ids: List[str]):
+        # Update payload after upsert
+        if payload is not None:
+            payload["vector_dim"] = int(self.__index_py.get_dim())
+            payload["total_vectors"] = int(len(self.__dataframe))
+
+    @notify(span_id="collection_delete_by_id")
+    def delete_by_id(
+        self,
+        ids: List[str],
+        *,
+        trace_id=None,
+        payload=None,
+    ):  # pylint: disable=unused-argument
         """
         Deletes documents from the collection by their IDs.
         """
         if not ids:
             return
+
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.delete_by_id(), "
+                "monitoring data will not be reported"
+            )
+        else:
+            payload.update(
+                {
+                    "collection_name": str(self.__name),
+                    "total_vectors": int(len(self.__dataframe)),
+                }
+            )
 
         # Remove from DataFrame
         self.__dataframe = self.__dataframe[~self.__dataframe["id"].isin(ids)]
@@ -182,6 +278,10 @@ class Collection:
                 self.__index_py.remove(inner_id)
                 del self.__outer_inner_map[item_id]
                 del self.__inner_outer_map[inner_id]
+
+        # Update payload after deletion
+        if payload is not None:
+            payload["total_vectors"] = int(len(self.__dataframe))
 
     def get_by_id(self, ids: List[str]) -> dict:
         """
@@ -200,7 +300,13 @@ class Collection:
         if ids_to_delete:
             self.delete_by_id(ids_to_delete)
 
-    def reindex(self):
+    @notify(span_id="collection_reindex")
+    def reindex(
+        self,
+        *,
+        trace_id=None,
+        payload=None,
+    ):  # pylint: disable=unused-argument
         """
         Rebuilds the index and remaps internal IDs to external IDs.
 
@@ -210,6 +316,20 @@ class Collection:
         3. Reinitialize the index with the same parameters and fit it on the collected vectors.
         4. Rebuild the inner-to-outer and outer-to-inner ID mappings.
         """
+
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.reindex(), monitoring data will not be reported"
+            )
+        else:
+            payload.update(
+                {
+                    "collection_name": str(self.__name),
+                    "vector_dim": int(self.__index_py.get_dim()),
+                    "total_vectors": int(len(self.__dataframe)),
+                }
+            )
 
         # 1. Keep current index parameters
         params = self.__index_py.get_params()
@@ -234,12 +354,31 @@ class Collection:
         # Replace the old inner-to-outer map
         self.__inner_outer_map = new_inner_outer_map
 
-    def save(self, url):
+    @notify(span_id="collection_save")
+    def save(
+        self,
+        url,
+        *,
+        trace_id=None,
+        payload=None,
+    ):  # pylint: disable=unused-argument
         """
         Saves the collection to disk.
         """
         if not os.path.exists(url):
             os.makedirs(url)
+
+        # Prepare monitoring data
+        if payload is None:
+            print(f"WARNING: payload is None in {self.__class__.__name__}.save(), monitoring data will not be reported")
+        else:
+            payload.update(
+                {
+                    "collection_name": str(self.__name),
+                    "vector_dim": int(self.__index_py.get_dim()) if self.__index_py else 0,
+                    "total_vectors": int(len(self.__dataframe)),
+                }
+            )
 
         data_url = os.path.join(url, "collection.pkl")
         data = {
@@ -255,7 +394,15 @@ class Collection:
         return schema_map
 
     @classmethod
-    def load(cls, url, name):
+    @notify(span_id="collection_load")
+    def load(
+        cls,
+        url,
+        name,
+        *,
+        trace_id=None,
+        payload=None,
+    ):  # pylint: disable=unused-argument
         """
         Loads a collection from disk.
         """
@@ -278,6 +425,19 @@ class Collection:
             instance.__inner_outer_map = collection_data["inner_outer_map"]
 
         instance.__index_py = Index.load(url, name)
+
+        # Prepare monitoring data
+        if payload is None:
+            print("WARNING: payload is None in Collection.load(), monitoring data will not be reported")
+        else:
+            payload.update(
+                {
+                    "collection_name": str(name),
+                    "vector_dim": int(instance.__index_py.get_dim()) if instance.__index_py else 0,
+                    "total_vectors": int(len(instance.__dataframe)),
+                }
+            )
+
         return instance
 
     def set_metric(self, metric: str):
