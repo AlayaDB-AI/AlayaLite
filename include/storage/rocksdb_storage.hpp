@@ -31,7 +31,6 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
-#include <vector>
 
 #include "utils/log.hpp"
 
@@ -196,14 +195,12 @@ class RocksDBStorage {
 
   // Batch operations for better performance
   template <typename Iterator>
-  auto batch_insert(Iterator begin, Iterator end) -> std::vector<IDType> {
+  auto batch_insert(Iterator begin, Iterator end) -> bool {
     rocksdb::WriteBatch batch;
-    std::vector<IDType> ids;
-    ids.reserve(std::distance(begin, end));
+    size_t count = std::distance(begin, end);
 
     for (auto it = begin; it != end; ++it) {
       IDType id = next_id_++;
-      ids.push_back(id);
       std::string key = id_to_key(id);
       rocksdb::Slice value_slice(reinterpret_cast<const char *>(&(*it)), sizeof(DataType));
       batch.Put(key, value_slice);
@@ -212,11 +209,11 @@ class RocksDBStorage {
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
     if (!status.ok()) {
       LOG_ERROR("Batch insert failed: {}", status.ToString());
-      return {};
+      return false;
     }
 
-    cached_count_ += ids.size();
-    return ids;
+    cached_count_ += count;
+    return true;
   }
 
   // Maintenance operations
