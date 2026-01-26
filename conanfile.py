@@ -23,22 +23,29 @@ class AlayaLiteConan(ConanFile):
         self.requires("pybind11/2.13.6")
         self.requires("spdlog/1.14.0")
         self.requires("eigen/3.4.0")
+        self.requires("lz4/1.9.4")
+        self.requires("zstd/1.5.6")
+        # self.requires("snappy/1.1.10")  # Not used in our implementation
+        self.requires("rocksdb/10.5.1")
+        self.requires("libcoro/0.14.1")
+
+        # io_uring support for Linux
+        if self.settings.os == "Linux":
+            self.requires("liburing/2.13")
 
         # OpenMP support
         if self.settings.os == "Linux":
-            if self.settings.compiler == "gcc":
-                # GCC uses built-in libgomp; no Conan package needed
-                pass
-            else:
-                # Clang on Linux needs libomp
+            if self.settings.compiler in ["clang", "apple-clang"]:
                 self.requires("libomp/18.1.8")
-            self.requires("libcoro/0.14.1")
+        # GCC: assume libgomp is system-provided
         elif self.settings.os == "Macos":
-            # Apple Clang needs libomp
             self.requires("libomp/18.1.8")
-        # Windows (MSVC): OpenMP built-in, no extra lib
 
     def configure(self):
+        # Enable compression libraries for RocksDB
+        self.options["rocksdb"].with_lz4 = True
+        self.options["rocksdb"].with_zstd = True
+
         if self.settings.os == "Linux":
             self.options["libcoro"].feature_networking = False
             self.options["libcoro"].feature_tls = False

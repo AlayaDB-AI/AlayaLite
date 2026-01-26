@@ -21,11 +21,15 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include "distance/dist_ip.hpp"
 #include "distance/dist_l2.hpp"
 #include "space/quant/sq8.hpp"
 #include "space_concepts.hpp"
+#include "storage/rocksdb_storage.hpp"
 #include "storage/sequential_storage.hpp"
 #include "utils/metric_type.hpp"
 #include "utils/prefetch.hpp"
@@ -45,12 +49,19 @@ namespace alaya {
  * @tparam DataType The data type for storing raw data points, with the default being float.
  * @tparam DistanceType The data type for storing distances, with the default being float.
  * @tparam IDType The data type for storing IDs, with the default being uint32_t.
+ * @tparam DataStorage The storage backend for vector data, with the default being
+ * SequentialStorage.
+ * @tparam MetaDataType The data type for metadata, with the default being EmptyMetadata.
  */
 template <typename DataType = float,
           typename DistanceType = float,
           typename IDType = uint32_t,
-          typename DataStorage = SequentialStorage<uint8_t, IDType>>
+          typename DataStorage = SequentialStorage<uint8_t, IDType>,
+          typename MetaDataType = EmptyMetadata>
 class SQ8Space {
+ private:
+  static constexpr bool has_metadata = !std::is_same_v<MetaDataType, EmptyMetadata>;  // NOLINT
+
  public:
   using DataTypeAlias = DataType;
   using IDTypeAlias = IDType;
@@ -66,14 +77,22 @@ class SQ8Space {
   SQ8Space() = default;
 
   /**
-   * @brief Construct a new RawSpace object.
+   * @brief Construct a new SQ8Space object.
    *
    * @param capacity The maximum number of data points (nodes)
    * @param dim Dimensionality of each data point
-   * @param metirc Metric type
+   * @param metric Metric type
+   * @param config RocksDB configuration for metadata storage
    */
-  SQ8Space(IDType capacity, size_t dim, MetricType metric)
-      : capacity_(capacity), dim_(dim), metric_(metric), quantizer_(dim) {
+  SQ8Space(IDType capacity,
+           size_t dim,
+           MetricType metric,
+           RocksDBConfig config = RocksDBConfig::default_config())
+      : capacity_(capacity),
+        dim_(dim),
+        metric_(metric),
+        config_(std::move(config)),
+        quantizer_(dim) {
     data_size_ = dim_ * sizeof(uint8_t);
     data_storage_.init(data_size_, capacity);
     set_metric_function();
@@ -113,12 +132,32 @@ class SQ8Space {
    * @brief Fit the data into the space
    * @param data Pointer to the input data array
    * @param item_cnt Number of data points
+   * @param meta_data Pointer to metadata array (optional)
    */
-  void fit(const DataType *data, IDType item_cnt) {
+  void fit(const DataType *data, IDType item_cnt, const MetaDataType *meta_data = nullptr) {
+    if (data == nullptr) {
+      throw std::invalid_argument("Invalid or null vector data pointer.");
+    }
+
     if (item_cnt > capacity_) {
-      throw std::runtime_error("The number of data points exceeds the capacity of the space");
+      throw std::length_error("The number of data points exceeds the capacity of the space");
     }
     item_cnt_ = item_cnt;
+
+    if constexpr (has_metadata) {  // NOLINT
+      if (meta_data == nullptr) {
+        throw std::invalid_argument("Invalid or null metadata pointer.");
+      }
+      if (meta_storage_ == nullptr) {
+        // otherwise existing metadata will lack corresponding vector data.
+        // if you want to open a existing metadata db, try load() and then insert() your new data
+        config_.error_if_exists_ = true;
+        meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
+      }
+      if (!meta_storage_->batch_insert(meta_data, meta_data + item_cnt)) {
+        throw std::runtime_error("Failed to batch insert metadata");
+      }
+    }
 
     quantizer_.fit(data, item_cnt);
     for (IDType i = 0; i < item_cnt; i++) {
@@ -167,6 +206,18 @@ class SQ8Space {
   auto get_dist_func() -> DistFuncSQ<DataType, DistanceType> { return distance_calu_func_; }
 
   /**
+   * @brief Get metadata for a specific ID
+   * @param id The ID of the data point
+   * @return The metadata for the given ID
+   */
+  auto get_metadata(IDType id) const -> MetaDataType {
+    if constexpr (has_metadata) {  // NOLINT
+      return (*meta_storage_)[id];
+    }
+    throw std::runtime_error("No metadata available.");
+  }
+
+  /**
    * @brief Get the dimensionality of the data points
    * @return The dimensionality
    */
@@ -183,15 +234,25 @@ class SQ8Space {
    * space. The ID of the inserted data point will be returned.
    *
    * @param data Pointer to the data point to be inserted
+   * @param meta_data Pointer to metadata (optional, only used when MetaDataType is not
+   * EmptyMetadata)
    * @return IDType The ID of the inserted data point (-1 for failure)
    */
-  auto insert(DataType *data) -> IDType {
+  auto insert(DataType *data, const MetaDataType *meta_data = nullptr) -> IDType {
     auto id = data_storage_.reserve();
     if (id == static_cast<IDType>(-1)) {
       return static_cast<IDType>(-1);
     }
     item_cnt_++;
     quantizer_.encode(data, data_storage_[id]);
+
+    // Insert metadata if provided
+    if constexpr (has_metadata) {  // NOLINT
+      if (meta_data != nullptr && meta_storage_ != nullptr) {
+        meta_storage_->insert(*meta_data);
+      }
+    }
+
     return id;
   }
 
@@ -204,6 +265,14 @@ class SQ8Space {
    */
   auto remove(IDType id) -> IDType {
     delete_cnt_++;
+
+    // Remove metadata if present
+    if constexpr (has_metadata) {  // NOLINT
+      if (meta_storage_ != nullptr) {
+        meta_storage_->remove(id);
+      }
+    }
+
     return data_storage_.remove(id);
   }
 
@@ -224,6 +293,12 @@ class SQ8Space {
     reader.read(reinterpret_cast<char *>(&item_cnt_), sizeof(item_cnt_));
     reader.read(reinterpret_cast<char *>(&delete_cnt_), sizeof(delete_cnt_));
     reader.read(reinterpret_cast<char *>(&capacity_), sizeof(capacity_));
+
+    if constexpr (has_metadata) {  // NOLINT
+      load_meta_config(reader);
+      meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
+    }
+
     data_storage_.load(reader);
     quantizer_.load(reader);
     LOG_INFO("SQ8Space is loaded from {}", filename);
@@ -245,6 +320,10 @@ class SQ8Space {
     writer.write(reinterpret_cast<char *>(&item_cnt_), sizeof(item_cnt_));
     writer.write(reinterpret_cast<char *>(&delete_cnt_), sizeof(delete_cnt_));
     writer.write(reinterpret_cast<char *>(&capacity_), sizeof(capacity_));
+
+    if constexpr (has_metadata) {  // NOLINT
+      save_meta_config(writer);
+    }
 
     data_storage_.save(writer);
     quantizer_.save(writer);
@@ -335,5 +414,62 @@ class SQ8Space {
   IDType delete_cnt_{0};              ///< Number of deleted data points (nodes)
   DataStorage data_storage_;          ///< Data storage for encoded data
   SQ8Quantizer<DataType> quantizer_;  ///< The quantizer used to quantize the data
+
+  RocksDBConfig config_;  ///< Configuration for Meta Data Storage
+  std::unique_ptr<RocksDBStorage<MetaDataType, IDType>> meta_storage_;  ///< Meta Data Storage
+
+  void save_meta_config(std::ofstream &writer) {
+    // Save db_path_ string
+    size_t db_path_size = config_.db_path_.size();
+    writer.write(reinterpret_cast<char *>(&db_path_size), sizeof(db_path_size));
+    writer.write(config_.db_path_.data(), db_path_size);
+
+    // Save POD fields
+    writer.write(reinterpret_cast<char *>(&config_.write_buffer_size_),
+                 sizeof(config_.write_buffer_size_));
+    writer.write(reinterpret_cast<char *>(&config_.max_write_buffer_number_),
+                 sizeof(config_.max_write_buffer_number_));
+    writer.write(reinterpret_cast<char *>(&config_.target_file_size_base_),
+                 sizeof(config_.target_file_size_base_));
+    writer.write(reinterpret_cast<char *>(&config_.max_background_compactions_),
+                 sizeof(config_.max_background_compactions_));
+    writer.write(reinterpret_cast<char *>(&config_.max_background_flushes_),
+                 sizeof(config_.max_background_flushes_));
+    writer.write(reinterpret_cast<char *>(&config_.block_cache_size_mb_),
+                 sizeof(config_.block_cache_size_mb_));
+
+    // Save bool as uint8_t for cross-platform compatibility
+    uint8_t enable_compression = config_.enable_compression_ ? 1 : 0;
+    writer.write(reinterpret_cast<char *>(&enable_compression), sizeof(enable_compression));
+  }
+
+  void load_meta_config(std::ifstream &reader) {
+    config_.create_if_missing_ = false;  // db is missing means something went wrong
+    config_.error_if_exists_ = false;    // Of course db exists
+    // Load db_path_ string
+    size_t db_path_size;
+    reader.read(reinterpret_cast<char *>(&db_path_size), sizeof(db_path_size));
+    config_.db_path_.resize(db_path_size);
+    reader.read(config_.db_path_.data(), db_path_size);
+
+    // Load POD fields
+    reader.read(reinterpret_cast<char *>(&config_.write_buffer_size_),
+                sizeof(config_.write_buffer_size_));
+    reader.read(reinterpret_cast<char *>(&config_.max_write_buffer_number_),
+                sizeof(config_.max_write_buffer_number_));
+    reader.read(reinterpret_cast<char *>(&config_.target_file_size_base_),
+                sizeof(config_.target_file_size_base_));
+    reader.read(reinterpret_cast<char *>(&config_.max_background_compactions_),
+                sizeof(config_.max_background_compactions_));
+    reader.read(reinterpret_cast<char *>(&config_.max_background_flushes_),
+                sizeof(config_.max_background_flushes_));
+    reader.read(reinterpret_cast<char *>(&config_.block_cache_size_mb_),
+                sizeof(config_.block_cache_size_mb_));
+
+    // Load bool from uint8_t for cross-platform compatibility
+    uint8_t enable_compression = 1;  // default to true
+    reader.read(reinterpret_cast<char *>(&enable_compression), sizeof(enable_compression));
+    config_.enable_compression_ = (enable_compression != 0);
+  }
 };
 }  // namespace alaya

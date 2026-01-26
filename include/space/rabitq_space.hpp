@@ -21,12 +21,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include "index/neighbor.hpp"
 #include "space/distance/dist_l2.hpp"
 #include "space/quant/rabitq.hpp"
 #include "space/space_concepts.hpp"
+#include "storage/rocksdb_storage.hpp"
 #include "storage/static_storage.hpp"
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
@@ -37,9 +40,14 @@
 #include "utils/rabitq_utils/roundup.hpp"
 
 namespace alaya {
-template <typename DataType = float, typename DistanceType = float, typename IDType = uint32_t>
+template <typename DataType = float,
+          typename DistanceType = float,
+          typename IDType = uint32_t,
+          typename MetaDataType = EmptyMetadata>
 class RaBitQSpace {
  private:
+  static constexpr bool has_metadata = !std::is_same_v<MetaDataType, EmptyMetadata>;  // NOLINT
+
   IDType capacity_{0};                 ///< The maximum number of data points (nodes)
   uint32_t dim_{0};                    ///< Dimensionality of the data points
   MetricType metric_{MetricType::L2};  ///< Metric type
@@ -54,9 +62,11 @@ class RaBitQSpace {
 
   DistFuncRaBitQ<DataType, DistanceType> distance_cal_func_;  ///< Distance calculation function
 
-  StaticStorage<> storage_;                               ///< Data Storage
-  std::unique_ptr<RaBitQQuantizer<DataType>> quantizer_;  ///< Data Quantizer
-  std::unique_ptr<Rotator<DataType>> rotator_;            ///< Data rotator
+  StaticStorage<> storage_;  ///< Data Storage
+  RocksDBConfig config_;     ///< Configuration for Meta Data Storage
+  std::unique_ptr<RocksDBStorage<MetaDataType, IDType>> meta_storage_;  ///< Meta Data Storage
+  std::unique_ptr<RaBitQQuantizer<DataType>> quantizer_;                ///< Data Quantizer
+  std::unique_ptr<Rotator<DataType>> rotator_;                          ///< Data rotator
 
   IDType ep_;  ///< search entry point
 
@@ -84,6 +94,60 @@ class RaBitQSpace {
     set_metric_function();
   }
 
+  void save_meta_config(std::ofstream &writer) {
+    // Save db_path_ string
+    size_t db_path_size = config_.db_path_.size();
+    writer.write(reinterpret_cast<char *>(&db_path_size), sizeof(db_path_size));
+    writer.write(config_.db_path_.data(), db_path_size);
+
+    // Save POD fields
+    writer.write(reinterpret_cast<char *>(&config_.write_buffer_size_),
+                 sizeof(config_.write_buffer_size_));
+    writer.write(reinterpret_cast<char *>(&config_.max_write_buffer_number_),
+                 sizeof(config_.max_write_buffer_number_));
+    writer.write(reinterpret_cast<char *>(&config_.target_file_size_base_),
+                 sizeof(config_.target_file_size_base_));
+    writer.write(reinterpret_cast<char *>(&config_.max_background_compactions_),
+                 sizeof(config_.max_background_compactions_));
+    writer.write(reinterpret_cast<char *>(&config_.max_background_flushes_),
+                 sizeof(config_.max_background_flushes_));
+    writer.write(reinterpret_cast<char *>(&config_.block_cache_size_mb_),
+                 sizeof(config_.block_cache_size_mb_));
+
+    // Save bool as uint8_t for cross-platform compatibility
+    uint8_t enable_compression = config_.enable_compression_ ? 1 : 0;
+    writer.write(reinterpret_cast<char *>(&enable_compression), sizeof(enable_compression));
+  }
+
+  void load_meta_config(std::ifstream &reader) {
+    config_.create_if_missing_ = false;  // db is missing means something's wrong
+    config_.error_if_exists_ = false;    // Of course db exists
+    // Load db_path_ string
+    size_t db_path_size;
+    reader.read(reinterpret_cast<char *>(&db_path_size), sizeof(db_path_size));
+    config_.db_path_.resize(db_path_size);
+    reader.read(config_.db_path_.data(), db_path_size);
+
+    // Load POD fields
+    reader.read(reinterpret_cast<char *>(&config_.write_buffer_size_),
+                sizeof(config_.write_buffer_size_));
+    reader.read(reinterpret_cast<char *>(&config_.max_write_buffer_number_),
+                sizeof(config_.max_write_buffer_number_));
+    reader.read(reinterpret_cast<char *>(&config_.target_file_size_base_),
+                sizeof(config_.target_file_size_base_));
+    reader.read(reinterpret_cast<char *>(&config_.max_background_compactions_),
+                sizeof(config_.max_background_compactions_));
+    reader.read(reinterpret_cast<char *>(&config_.max_background_flushes_),
+                sizeof(config_.max_background_flushes_));
+    reader.read(reinterpret_cast<char *>(&config_.block_cache_size_mb_),
+                sizeof(config_.block_cache_size_mb_));
+
+    // Load bool from uint8_t for cross-platform compatibility
+    uint8_t enable_compression = 1;  // default to true
+    reader.read(reinterpret_cast<char *>(&enable_compression), sizeof(enable_compression));
+    config_.enable_compression_ = (enable_compression != 0);
+  }
+
  public:
   using DataTypeAlias = DataType;
   using DistanceTypeAlias = DistanceType;
@@ -101,8 +165,9 @@ class RaBitQSpace {
   RaBitQSpace(IDType capacity,
               size_t dim,
               MetricType metric,
+              RocksDBConfig config = RocksDBConfig::default_config(),
               RotatorType type = RotatorType::FhtKacRotator)
-      : capacity_(capacity), dim_(dim), metric_(metric), type_(type) {
+      : capacity_(capacity), dim_(dim), metric_(metric), type_(type), config_(std::move(config)) {
     rotator_ = choose_rotator<DataType>(dim_, type_, round_up_to_multiple_of<size_t>(dim_, 64));
     quantizer_ = std::make_unique<RaBitQQuantizer<DataType>>(dim_, rotator_->size());
     initialize_offsets();
@@ -110,7 +175,7 @@ class RaBitQSpace {
   auto operator=(const RaBitQSpace &) -> RaBitQSpace & = delete;
   auto operator=(RaBitQSpace &&) -> RaBitQSpace & = delete;
 
-  auto insert(DataType *data) -> IDType {
+  auto insert(DataType *data, const MetaDataType *meta_data = nullptr) -> IDType {
     throw std::runtime_error("Insert operation is not supported yet!");
   }
   auto remove(IDType id) -> IDType {
@@ -160,7 +225,11 @@ class RaBitQSpace {
                                get_f_rescale_ptr(c));
   }
 
-  void fit(const DataType *data, IDType item_cnt) {
+  void fit(const DataType *data, IDType item_cnt, const MetaDataType *meta_data = nullptr) {
+    if (data == nullptr) {
+      throw std::invalid_argument("Invalid or null vector data pointer.");
+    }
+
     if constexpr (!std::is_floating_point_v<DataType>) {
       throw std::invalid_argument("Data type must be a floating point type!");
     }
@@ -172,11 +241,27 @@ class RaBitQSpace {
     }
 
     if (item_cnt > capacity_) {
-      throw std::runtime_error("The number of data points exceeds the capacity of the space");
+      throw std::length_error("The number of data points exceeds the capacity of the space");
     }
     item_cnt_ = item_cnt;
-    storage_ = StaticStorage<>(std::vector<size_t>{item_cnt_, data_chunk_size_});
 
+    if constexpr (has_metadata) {
+      if (meta_data == nullptr) {
+        throw std::invalid_argument("Invalid or null metadata pointer.");
+      }
+      if (meta_storage_ == nullptr) {
+        // otherwise existing metadata will lack corresponding vector data.
+        // if you want to open a existing metadata db, try load() and then insert() your new data
+        config_.error_if_exists_ = true;
+        meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
+      }
+      if (!meta_storage_->batch_insert(meta_data, meta_data + item_cnt)) {
+        throw std::runtime_error("Failed to batch insert metadata");
+      }
+    }
+
+    // We don't fit after loading , so loaded storage_ would not be overwritten.
+    storage_ = StaticStorage<>(std::vector<size_t>{item_cnt_, data_chunk_size_});
 #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < item_cnt; i++) {
       const auto *src = data + (dim_ * i);
@@ -234,6 +319,13 @@ class RaBitQSpace {
 
   [[nodiscard]] auto get_edges(IDType id) -> IDType * {
     return reinterpret_cast<IDType *>(&storage_.at((data_chunk_size_ * id) + nei_id_offset_));
+  }
+
+  auto get_metadata(IDType id) const -> MetaDataType {
+    if constexpr (has_metadata) {
+      return (*meta_storage_)[id];
+    }
+    throw std::runtime_error("No metadata available.");
   }
 
   /**
@@ -379,6 +471,10 @@ class RaBitQSpace {
     writer.write(reinterpret_cast<char *>(&ep_), sizeof(ep_));
     // no need to save offsets, we will take care of that in loading
 
+    if constexpr (has_metadata) {
+      save_meta_config(writer);
+    }
+
     rotator_->save(writer);
 
     storage_.save(writer);
@@ -402,6 +498,11 @@ class RaBitQSpace {
     reader.read(reinterpret_cast<char *>(&type_), sizeof(type_));
     reader.read(reinterpret_cast<char *>(&ep_), sizeof(ep_));
 
+    if constexpr (has_metadata) {
+      load_meta_config(reader);
+      meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
+    }
+
     rotator_ = choose_rotator<DataType>(dim_, type_, round_up_to_multiple_of<size_t>(dim_, 64));
     rotator_->load(reader);
 
@@ -420,8 +521,8 @@ class RaBitQSpace {
 template <typename T>
 struct is_rabitq_space : std::false_type {};  // NOLINT
 
-template <typename T, typename U, typename V>
-struct is_rabitq_space<RaBitQSpace<T, U, V>> : std::true_type {};
+template <typename T, typename U, typename V, typename W>
+struct is_rabitq_space<RaBitQSpace<T, U, V, W>> : std::true_type {};
 
 template <typename T>
 inline constexpr bool is_rabitq_space_v = is_rabitq_space<T>::value;  // NOLINT

@@ -110,6 +110,7 @@ find_package(concurrentqueue REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(Eigen3 REQUIRED NO_MODULE)
+find_package(RocksDB REQUIRED)
 
 # OpenMP: only try to find if Conan provided it (i.e., libomp is used) Otherwise, rely on compiler flags and system
 # linker (GCC on Linux)
@@ -124,7 +125,7 @@ else()
 endif()
 
 # Configure common third-party libraries
-set(COMMON_THIRD_PARTY_LIBS spdlog::spdlog concurrentqueue::concurrentqueue Eigen3::Eigen)
+set(COMMON_THIRD_PARTY_LIBS spdlog::spdlog concurrentqueue::concurrentqueue Eigen3::Eigen RocksDB::rocksdb)
 # Add OpenMP target only if available
 if(OPENMP_TARGET)
   list(APPEND COMMON_THIRD_PARTY_LIBS ${OPENMP_TARGET})
@@ -134,7 +135,8 @@ endif()
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   message(STATUS "Adding Linux-specific dependencies...")
   find_package(libcoro REQUIRED)
-  list(APPEND COMMON_THIRD_PARTY_LIBS libcoro::libcoro)
+  find_package(liburing REQUIRED)
+  list(APPEND COMMON_THIRD_PARTY_LIBS libcoro::libcoro liburing::liburing)
 endif()
 
 # Set final third-party libraries list

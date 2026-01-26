@@ -136,4 +136,194 @@ TEST_F(SQ8SpaceTest, HandleFileErrors) {
   EXPECT_THROW(new_space.load(file_name_view), std::runtime_error);
 }
 
+// ============================================================================
+// Metadata Tests
+// ============================================================================
+
+class SQ8SpaceMetadataTest : public ::testing::Test {
+ protected:
+  struct TestMetadata {
+    int category;
+    double timestamp;
+    char description[64];
+  };
+
+  using SpaceType =
+      SQ8Space<float, float, uint32_t, SequentialStorage<uint8_t, uint32_t>, TestMetadata>;
+
+  void SetUp() override {
+    dim_ = 4;
+    capacity_ = 10;
+    metric_ = MetricType::L2;
+    file_name_ = "test_sq8_space_metadata.bin";
+    db_path_ = "./test_sq8_rocksdb";
+    cleanup_test_files();
+  }
+
+  void TearDown() override { cleanup_test_files(); }
+
+  void cleanup_test_files() {
+    if (std::filesystem::exists(file_name_)) {
+      std::filesystem::remove(file_name_);
+    }
+    if (std::filesystem::exists(db_path_)) {
+      std::filesystem::remove_all(db_path_);
+    }
+  }
+
+  std::vector<TestMetadata> make_test_metadata(uint32_t item_cnt) {
+    std::vector<TestMetadata> metadata(item_cnt);
+    for (uint32_t i = 0; i < item_cnt; ++i) {
+      metadata[i].category = static_cast<int>(i % 5);
+      metadata[i].timestamp = static_cast<double>(i) * 100.0;
+      snprintf(metadata[i].description, sizeof(metadata[i].description), "description_%u", i);
+    }
+    return metadata;
+  }
+
+  std::shared_ptr<SpaceType> space_;
+  std::string file_name_;
+  std::string db_path_;
+  size_t dim_;
+  uint32_t capacity_;
+  MetricType metric_;
+};
+
+TEST_F(SQ8SpaceMetadataTest, ConstructionWithMetadata) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  EXPECT_EQ(space_->get_dim(), dim_);
+  EXPECT_EQ(space_->get_capacity(), capacity_);
+}
+
+TEST_F(SQ8SpaceMetadataTest, FitWithMetadata) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  float data[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
+  auto metadata = make_test_metadata(2);
+
+  space_->fit(data, 2, metadata.data());
+
+  EXPECT_EQ(space_->get_data_num(), 2);
+  EXPECT_TRUE(std::filesystem::exists(db_path_));
+}
+
+TEST_F(SQ8SpaceMetadataTest, GetMetadata) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  float data[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
+  auto metadata = make_test_metadata(2);
+
+  space_->fit(data, 2, metadata.data());
+
+  for (uint32_t i = 0; i < 2; ++i) {
+    auto retrieved = space_->get_metadata(i);
+    EXPECT_EQ(retrieved.category, metadata[i].category);
+    EXPECT_DOUBLE_EQ(retrieved.timestamp, metadata[i].timestamp);
+    EXPECT_STREQ(retrieved.description, metadata[i].description);
+  }
+}
+
+TEST_F(SQ8SpaceMetadataTest, SaveAndLoadWithMetadata) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+
+  float data[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
+  auto metadata = make_test_metadata(2);
+  {
+    auto save_space = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+    save_space->fit(data, 2, metadata.data());
+    save_space->save(file_name_);
+  }
+  {
+    space_ = std::make_shared<SpaceType>();
+    space_->load(file_name_);
+
+    EXPECT_EQ(space_->get_data_num(), 2);
+
+    // Verify metadata persisted
+    for (uint32_t i = 0; i < 2; ++i) {
+      auto retrieved = space_->get_metadata(i);
+      EXPECT_EQ(retrieved.category, metadata[i].category);
+      EXPECT_DOUBLE_EQ(retrieved.timestamp, metadata[i].timestamp);
+      EXPECT_STREQ(retrieved.description, metadata[i].description);
+    }
+  }
+}
+
+TEST_F(SQ8SpaceMetadataTest, FitWithNullMetadata) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  float data[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
+
+  EXPECT_THROW(space_->fit(data, 2, nullptr), std::invalid_argument);
+}
+
+TEST_F(SQ8SpaceMetadataTest, FitWithNullVectorData) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  auto metadata = make_test_metadata(2);
+
+  EXPECT_THROW(space_->fit(nullptr, 2, metadata.data()), std::invalid_argument);
+}
+
+TEST_F(SQ8SpaceMetadataTest, GetMetadataWithoutMetadata) {
+  using SpaceWithoutMetadata = SQ8Space<>;
+  auto space_no_meta = std::make_shared<SpaceWithoutMetadata>(capacity_, dim_, metric_);
+
+  float data[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
+  space_no_meta->fit(data, 2);
+
+  EXPECT_THROW(space_no_meta->get_metadata(0), std::runtime_error);
+}
+
+TEST_F(SQ8SpaceMetadataTest, MetadataCorrectness) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  float data[12] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0};
+  auto metadata = make_test_metadata(3);
+
+  space_->fit(data, 3, metadata.data());
+
+  // Verify each metadata entry
+  for (uint32_t i = 0; i < 3; ++i) {
+    auto retrieved = space_->get_metadata(i);
+    EXPECT_EQ(retrieved.category, static_cast<int>(i % 5));
+    EXPECT_DOUBLE_EQ(retrieved.timestamp, static_cast<double>(i) * 100.0);
+
+    char expected_desc[64];
+    snprintf(expected_desc, sizeof(expected_desc), "description_%u", i);
+    EXPECT_STREQ(retrieved.description, expected_desc);
+  }
+}
+
+TEST_F(SQ8SpaceMetadataTest, CustomRocksDBConfig) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.write_buffer_size_ = 16 << 20;  // 16MB
+  config.block_cache_size_mb_ = 128;
+
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  float data[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
+  auto metadata = make_test_metadata(2);
+
+  space_->fit(data, 2, metadata.data());
+
+  EXPECT_EQ(space_->get_data_num(), 2);
+  EXPECT_TRUE(std::filesystem::exists(db_path_));
+}
+
 }  // namespace alaya
