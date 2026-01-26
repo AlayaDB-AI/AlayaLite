@@ -30,11 +30,27 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "utils/log.hpp"
 
 namespace alaya {
+
+struct RocksDBConfig {
+  std::string db_path_ = "./RocksDB/alayalite_rocksdb";
+  size_t write_buffer_size_ = static_cast<size_t>(64) << 20;  // 64MB
+  int max_write_buffer_number_ = 4;
+  size_t target_file_size_base_ = static_cast<size_t>(64) << 20;  // 64MB
+  int max_background_compactions_ = 4;
+  int max_background_flushes_ = 2;
+  bool create_if_missing_ = true;
+  bool error_if_exists_ = false;
+  size_t block_cache_size_mb_ = 512;  // 512MB
+  bool enable_compression_ = true;    // Enable LZ4+ZSTD compression by default
+
+  static auto default_config() -> RocksDBConfig { return RocksDBConfig{}; }
+};
 
 template <typename DataType, typename IDType = uint32_t>
 class RocksDBStorage {
@@ -42,29 +58,20 @@ class RocksDBStorage {
                 "DataType must be trivially copyable for RocksDB storage");
 
  public:
-  struct Config {
-    std::string db_path_ = "./alayalite_rocksdb";
-    size_t write_buffer_size_ = static_cast<size_t>(64) << 20;  // 64MB
-    int max_write_buffer_number_ = 4;
-    size_t target_file_size_base_ = static_cast<size_t>(64) << 20;  // 64MB
-    int max_background_compactions_ = 4;
-    int max_background_flushes_ = 2;
-    bool create_if_missing_ = true;
-    bool error_if_exists_ = false;
-    size_t block_cache_size_mb_ = 512;  // 512MB
-
-    static auto default_config() -> Config { return Config{}; }
-  };
-
-  explicit RocksDBStorage(const Config &config = Config::default_config())
-      : config_(config), next_id_(0), cached_count_(0) {
+  explicit RocksDBStorage(RocksDBConfig config = RocksDBConfig::default_config())
+      : config_(std::move(config)), next_id_(0), cached_count_(0) {
     initialize_db();
   }
 
   ~RocksDBStorage() {
-    flush();
     if (db_ != nullptr) {
-      save_metadata();
+      // Save metadata variables before closing
+      save_variables();
+      // Close() will automatically flush and wait for all background operations
+      rocksdb::Status status = db_->Close();
+      if (!status.ok()) {
+        LOG_ERROR("Failed to close RocksDB: {}", status.ToString());
+      }
       delete db_;
     }
   }
@@ -151,6 +158,7 @@ class RocksDBStorage {
   }
 
   [[nodiscard]] auto remove(IDType id) -> IDType {
+    // todo: recycle empty space
     if (!is_valid(id)) {
       LOG_ERROR("Cannot remove invalid ID: {}", id);
       return static_cast<IDType>(-1);
@@ -216,12 +224,14 @@ class RocksDBStorage {
 
   [[nodiscard]] auto next_id() const -> IDType { return next_id_.load(); }
 
-  auto config() const -> const Config & { return config_; }
+  auto config() const -> const RocksDBConfig & { return config_; }
 
   void flush() const {
     if (db_ != nullptr) {
-      save_metadata();
+      save_variables();
       db_->Flush(rocksdb::FlushOptions());
+    } else {
+      LOG_WARN("db is nullptr.");
     }
   }
 
@@ -282,15 +292,20 @@ class RocksDBStorage {
     options.level_compaction_dynamic_level_bytes = true;
 
     // Configure compression
-    // Use LZ4 for upper levels (best performance for frequently accessed data)
-    options.compression = rocksdb::kLZ4Compression;
-    // Use ZSTD for bottommost level (best compression ratio for cold data)
-    options.bottommost_compression = rocksdb::kZSTD;
+    if (config_.enable_compression_) {
+      // Use LZ4 for upper levels (best performance for frequently accessed data)
+      options.compression = rocksdb::kLZ4Compression;
+      // Use ZSTD for bottommost level (best compression ratio for cold data)
+      options.bottommost_compression = rocksdb::kZSTD;
+    } else {
+      // Disable compression
+      options.compression = rocksdb::kNoCompression;
+      options.bottommost_compression = rocksdb::kNoCompression;
+    }
 
     // Configure block-based table
     rocksdb::BlockBasedTableOptions table_options;
-    table_options.block_cache =
-        rocksdb::NewLRUCache(static_cast<size_t>(config_.block_cache_size_mb_) * 1024 * 1024);
+    table_options.block_cache = rocksdb::NewLRUCache(config_.block_cache_size_mb_ * 1024 * 1024);
     table_options.cache_index_and_filter_blocks = true;
     table_options.cache_index_and_filter_blocks_with_high_priority = true;
     table_options.pin_l0_filter_and_index_blocks_in_cache = true;
@@ -312,18 +327,19 @@ class RocksDBStorage {
       throw std::runtime_error("Failed to open RocksDB: " + status.ToString());
     }
 
-    // Load metadata
-    load_metadata();
+    load_variables();
 
     LOG_INFO("RocksDB initialized at {} with {} items", config_.db_path_, cached_count_.load());
   }
 
-  void load_metadata() {
+  void load_variables() {
     // Load next_id
     std::string next_id_str;
     rocksdb::Status status = db_->Get(rocksdb::ReadOptions(), "__NEXT_ID__", &next_id_str);
     if (status.ok() && !next_id_str.empty() && next_id_str.size() == sizeof(IDType)) {
       next_id_ = *reinterpret_cast<const IDType *>(next_id_str.data());
+    } else {
+      LOG_WARN("Failed to load next_id: {}", status.ToString());
     }
 
     // Load count
@@ -331,10 +347,12 @@ class RocksDBStorage {
     status = db_->Get(rocksdb::ReadOptions(), "__COUNT__", &count_str);
     if (status.ok() && !count_str.empty() && count_str.size() == sizeof(size_t)) {
       cached_count_ = *reinterpret_cast<const size_t *>(count_str.data());
+    } else {
+      LOG_WARN("Failed to load count: {}", status.ToString());
     }
   }
 
-  void save_metadata() const {
+  void save_variables() const {
     rocksdb::WriteOptions sync_options;
     sync_options.sync = true;  // Ensure metadata is persisted to disk
 
@@ -343,7 +361,7 @@ class RocksDBStorage {
     const rocksdb::Status status =  // NOLINT
         db_->Put(sync_options, "__NEXT_ID__", next_id_slice);
     if (!status.ok()) {
-      LOG_ERROR("Failed to save next_id metadata: {}", status.ToString());
+      LOG_ERROR("Failed to save next_id: {}", status.ToString());
     }
 
     // Save count
@@ -352,14 +370,14 @@ class RocksDBStorage {
     const rocksdb::Status status2 =  // NOLINT
         db_->Put(sync_options, "__COUNT__", count_slice);
     if (!status2.ok()) {
-      LOG_ERROR("Failed to save metadata count: {}", status2.ToString());
+      LOG_ERROR("Failed to save count: {}", status2.ToString());
     }
   }
 
   static auto id_to_key(IDType id) -> std::string { return "data_" + std::to_string(id); }
 
   rocksdb::DB *db_;
-  Config config_;
+  RocksDBConfig config_;
   mutable std::atomic<IDType> next_id_;
   mutable std::atomic<size_t> cached_count_;
 };

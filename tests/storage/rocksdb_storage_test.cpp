@@ -56,7 +56,7 @@ class RocksDBStorageTest : public ::testing::Test {
     }
   }
 
-  RocksDBStorage<TestData>::Config config_;
+  RocksDBConfig config_;
   fs::path temp_dir_;
 };
 
@@ -235,7 +235,7 @@ TEST_F(RocksDBStorageTest, SaveCheckpointAndRestore) {
   fs::copy(checkpoint_path, restored_path, fs::copy_options::recursive);
 
   // Open the restored DB
-  RocksDBStorage<TestData>::Config restore_config;
+  RocksDBConfig restore_config;
   restore_config.db_path_ = restored_path.string();
   RocksDBStorage<TestData> restored_storage(restore_config);
 
@@ -254,7 +254,7 @@ TEST_F(RocksDBStorageTest, SaveCheckpointAndRestore) {
 
 TEST_F(RocksDBStorageTest, DatabaseOpenFailure) {
   // Test opening database with invalid configuration
-  RocksDBStorage<TestData>::Config bad_config;
+  RocksDBConfig bad_config;
   bad_config.db_path_ = "/invalid/nonexistent/path/to/db";
   bad_config.create_if_missing_ = false;
 
@@ -295,6 +295,9 @@ TEST_F(RocksDBStorageTest, DataCorruptionThrowsException) {
     status = db->Put(rocksdb::WriteOptions(), "data_0", corrupted_data);
     ASSERT_TRUE(status.ok());
 
+    // Close before delete to release lock properly
+    status = db->Close();
+    ASSERT_TRUE(status.ok());
     delete db;
   }
 
@@ -346,11 +349,11 @@ TEST_F(RocksDBStorageTest, MoveSemantics) {
 
   // Test move assignment
   {
-    RocksDBStorage<TestData>::Config config1 = config_;
+    RocksDBConfig config1 = config_;
     config1.db_path_ = (temp_dir_ / "db1").string();
     fs::create_directories(config1.db_path_);
 
-    RocksDBStorage<TestData>::Config config2 = config_;
+    RocksDBConfig config2 = config_;
     config2.db_path_ = (temp_dir_ / "db2").string();
     fs::create_directories(config2.db_path_);
 
