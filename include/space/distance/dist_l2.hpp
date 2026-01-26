@@ -18,76 +18,105 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "dist_config.hpp"
-#include "utils/rabitq_utils/defines.hpp"
+
+// Include the new SIMD L2 distance implementation
+#include "simd/distance_l2.hpp"
 
 namespace alaya {
-FAST_BEGIN
+
+// ============================================================================
+// L2 Distance Functions (Full Precision)
+// ============================================================================
+
+/**
+ * @brief Compute L2 squared distance between two float vectors.
+ *
+ * This function uses SIMD-optimized implementation when available.
+ *
+ * @tparam DataType Data type (default: float)
+ * @tparam DistanceType Distance type (default: float)
+ * @param x First vector
+ * @param y Second vector
+ * @param dim Vector dimension
+ * @return L2 squared distance
+ */
+template <typename DataType = float, typename DistanceType = float>
+inline auto l2_sqr(const DataType *x, const DataType *y, size_t dim) -> DistanceType {
+  return simd::l2_sqr<DataType, DistanceType>(x, y, dim);
+}
+
+/**
+ * @brief Alias for l2_sqr for RaBitQ compatibility.
+ */
 template <typename DataType = float, typename DistanceType = float>
 inline auto l2_sqr_rabitq(const DataType *__restrict__ x,
                           const DataType *__restrict__ y,
                           size_t dim) -> DistanceType {
-  return l2_sqr(x, y, dim);
+  return l2_sqr<DataType, DistanceType>(x, y, dim);
 }
-FAST_END
 
-FAST_BEGIN
-template <typename DataType = float, typename DistanceType = float>
-inline auto l2_sqr(const DataType *x, const DataType *y, size_t dim) -> DistanceType {
-  DistanceType sum = 0;
-  for (size_t i = 0; i < dim; ++i) {
-    DistanceType diff = static_cast<float>(x[i]) - static_cast<float>(y[i]);
-    sum += diff * diff;
-  }
-  return sum;
-}
-FAST_END
+// ============================================================================
+// SQ4 L2 Distance Functions (4-bit Scalar Quantization)
+// ============================================================================
 
-FAST_BEGIN
+/**
+ * @brief Compute L2 squared distance between two SQ4-encoded vectors.
+ *
+ * SQ4 stores 2 values per byte (4 bits each):
+ *   - Low nibble (bits 0-3) = even index
+ *   - High nibble (bits 4-7) = odd index
+ *
+ * This function uses SIMD-optimized implementation when available.
+ *
+ * @note Parameter order matches legacy API: (x, y, dim, min, max)
+ *       The underlying SIMD function uses: (x, y, min, max, dim)
+ *
+ * @tparam DataType Data type for min/max (default: float)
+ * @tparam DistanceType Distance type (default: float)
+ * @param encoded_x First SQ4-encoded vector
+ * @param encoded_y Second SQ4-encoded vector
+ * @param dim Vector dimension (number of elements, not bytes)
+ * @param min Per-dimension minimum values
+ * @param max Per-dimension maximum values
+ * @return L2 squared distance
+ */
 template <typename DataType = float, typename DistanceType = float>
 inline auto l2_sqr_sq4(const uint8_t *encoded_x,
                        const uint8_t *encoded_y,
                        size_t dim,
                        const DataType *min,
                        const DataType *max) -> DistanceType {
-  DistanceType sum = 0;
-
-  for (size_t i = 0; i < dim; i += 2) {
-    auto x_high = (encoded_x[i / 2] >> 4) & 0x0F;
-    auto y_high = (encoded_y[i / 2] >> 4) & 0x0F;
-    auto diff = (x_high - y_high) * (max[i] - min[i]) / 15.0F;
-    sum += diff * diff;
-
-    if (i + 1 != dim) {
-      auto x_low = encoded_x[i / 2] & 0x0F;
-      auto y_low = encoded_y[i / 2] & 0x0F;
-      auto diff = (x_low - y_low) * (max[i + 1] - min[i + 1]) / 15.0F;
-      sum += diff * diff;
-    }
-  }
-  return sum;
+  return simd::l2_sqr_sq4<DataType, DistanceType>(encoded_x, encoded_y, min, max, dim);
 }
-FAST_END
 
-FAST_BEGIN
+// ============================================================================
+// SQ8 L2 Distance Functions (8-bit Scalar Quantization)
+// ============================================================================
+
+/**
+ * @brief Compute L2 squared distance between two SQ8-encoded vectors.
+ *
+ * This function uses SIMD-optimized implementation when available.
+ *
+ * @note Parameter order matches legacy API: (x, y, dim, min, max)
+ *       The underlying SIMD function uses: (x, y, min, max, dim)
+ *
+ * @tparam DataType Data type for min/max (default: float)
+ * @tparam DistanceType Distance type (default: float)
+ * @param encoded_x First SQ8-encoded vector
+ * @param encoded_y Second SQ8-encoded vector
+ * @param dim Vector dimension
+ * @param min Per-dimension minimum values
+ * @param max Per-dimension maximum values
+ * @return L2 squared distance
+ */
 template <typename DataType = float, typename DistanceType = float>
 inline auto l2_sqr_sq8(const uint8_t *encoded_x,
                        const uint8_t *encoded_y,
                        size_t dim,
                        const DataType *min,
                        const DataType *max) -> DistanceType {
-  DistanceType sum = 0;
-
-  for (uint32_t i = 0; i < dim; i += 1) {
-    auto x = encoded_x[i];
-    auto y = encoded_y[i];
-    auto diff = (max[i] - min[i]) * (x - y) / 255.0F;
-
-    sum += diff * diff;
-  }
-
-  return sum;
+  return simd::l2_sqr_sq8<DataType, DistanceType>(encoded_x, encoded_y, min, max, dim);
 }
-FAST_END
 
 }  // namespace alaya

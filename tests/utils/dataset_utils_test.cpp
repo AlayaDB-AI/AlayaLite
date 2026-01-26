@@ -48,11 +48,8 @@ TEST_F(DatasetTest, LoadSiftSmall) {
   EXPECT_TRUE(std::filesystem::exists(config.gt_file_));
 }
 
-TEST_F(DatasetTest, LoadDeep1M) {
-  // Skip this test in CI environment (too slow due to large dataset download)
-  if (std::getenv("CI") != nullptr) {
-    GTEST_SKIP() << "Skipping LoadDeep1M in CI environment";
-  }
+TEST_F(DatasetTest, DISABLED_LoadDeep1M) {
+  // Disabled: too slow due to large dataset download
 
   auto config = deep1m(data_dir_);
 

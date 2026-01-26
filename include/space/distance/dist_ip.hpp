@@ -18,11 +18,9 @@
 
 #include <cstddef>
 #include <cstdint>
-#include "dist_config.hpp"
 
 namespace alaya {
 
-FAST_BEGIN
 template <typename DataType = float, typename DistanceType = float>
 inline auto ip_sqr(const DataType *x, const DataType *y, size_t dim) -> DistanceType {
   DistanceType sum = 0;
@@ -31,9 +29,7 @@ inline auto ip_sqr(const DataType *x, const DataType *y, size_t dim) -> Distance
   }
   return -sum;
 }
-FAST_END
 
-FAST_BEGIN
 template <typename DataType = float, typename DistanceType = float>
 inline auto ip_sqr_sq4(const uint8_t *encoded_x,
                        const uint8_t *encoded_y,
@@ -57,9 +53,7 @@ inline auto ip_sqr_sq4(const uint8_t *encoded_x,
 
   return -sum;
 }
-FAST_END
 
-FAST_BEGIN
 template <typename DataType = float, typename DistanceType = float>
 inline auto ip_sqr_sq8(const uint8_t *encoded_x,
                        const uint8_t *encoded_y,
@@ -75,6 +69,5 @@ inline auto ip_sqr_sq8(const uint8_t *encoded_x,
 
   return -sum;
 }
-FAST_END
 
 }  // namespace alaya

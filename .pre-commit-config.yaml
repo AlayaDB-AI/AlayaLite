@@ -79,7 +79,7 @@ repos:
   rev: v21.1.8
   hooks:
   - id: clang-format
-    files: ^(include|python/include|python/src)/.*\.(c|cc|cpp|cxx|h|hpp|hxx)$
+    files: ^(include|python/include|python/src)/.*\.(c|cc|cpp|cxx|h|hpp|hxx|ipp)$
 
 #===========================================================================
 #                            CPPLINT HOOK
@@ -88,7 +88,7 @@ repos:
   rev: 2.0.0
   hooks:
   - id: cpplint
-    files: ^(include|python/include|python/src)/.*\.(c|cc|cpp|cxx|h|hpp|hxx)$
+    files: ^(include|python/include|python/src)/.*\.(c|cc|cpp|cxx|h|hpp|hxx|ipp)$
     args:
     - --linelength=100
 
