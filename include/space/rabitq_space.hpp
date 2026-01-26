@@ -175,7 +175,7 @@ class RaBitQSpace {
   auto operator=(const RaBitQSpace &) -> RaBitQSpace & = delete;
   auto operator=(RaBitQSpace &&) -> RaBitQSpace & = delete;
 
-  auto insert(DataType *data) -> IDType {
+  auto insert(DataType *data, const MetaDataType *meta_data = nullptr) -> IDType {
     throw std::runtime_error("Insert operation is not supported yet!");
   }
   auto remove(IDType id) -> IDType {
@@ -255,7 +255,9 @@ class RaBitQSpace {
         config_.error_if_exists_ = true;
         meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
       }
-      meta_storage_->batch_insert(meta_data, meta_data + item_cnt);
+      if (!meta_storage_->batch_insert(meta_data, meta_data + item_cnt)) {
+        throw std::runtime_error("Failed to batch insert metadata");
+      }
     }
 
     // We don't fit after loading , so loaded storage_ would not be overwritten.

@@ -28,7 +28,7 @@ class AlayaLiteConan(ConanFile):
         self.requires("eigen/3.4.0")
         self.requires("lz4/1.9.4")
         self.requires("zstd/1.5.6")
-        self.requires("snappy/1.1.10")
+        # self.requires("snappy/1.1.10")  # Not used in our implementation
         self.requires("rocksdb/10.5.1")
         self.requires("libcoro/0.14.1")
 
@@ -55,7 +55,6 @@ class AlayaLiteConan(ConanFile):
         # Enable compression libraries for RocksDB
         self.options["rocksdb"].with_lz4 = True
         self.options["rocksdb"].with_zstd = True
-        self.options["rocksdb"].with_snappy = True
 
         if self.settings.os == "Linux":
             self.options["libcoro"].feature_networking = False

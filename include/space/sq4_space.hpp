@@ -156,7 +156,9 @@ class SQ4Space {
         config_.error_if_exists_ = true;
         meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
       }
-      meta_storage_->batch_insert(meta_data, meta_data + item_cnt);
+      if (!meta_storage_->batch_insert(meta_data, meta_data + item_cnt)) {
+        throw std::runtime_error("Failed to batch insert metadata");
+      }
     }
 
     quantizer_.fit(data, item_cnt);
@@ -234,15 +236,25 @@ class SQ4Space {
    * space. The ID of the inserted data point will be returned.
    *
    * @param data Pointer to the data point to be inserted
+   * @param meta_data Pointer to metadata (optional, only used when MetaDataType is not
+   * EmptyMetadata)
    * @return IDType The ID of the inserted data point (-1 for failure)
    */
-  auto insert(DataType *data) -> IDType {
+  auto insert(DataType *data, const MetaDataType *meta_data = nullptr) -> IDType {
     auto id = data_storage_.reserve();
     if (id == static_cast<IDType>(-1)) {
       return static_cast<IDType>(-1);
     }
     item_cnt_++;
     quantizer_.encode(data, data_storage_[id]);
+
+    // Insert metadata if provided
+    if constexpr (has_metadata) {  // NOLINT
+      if (meta_data != nullptr && meta_storage_ != nullptr) {
+        meta_storage_->insert(*meta_data);
+      }
+    }
+
     return id;
   }
 
@@ -255,6 +267,14 @@ class SQ4Space {
    */
   auto remove(IDType id) -> IDType {
     delete_cnt_++;
+
+    // Remove metadata if present
+    if constexpr (has_metadata) {  // NOLINT
+      if (meta_storage_ != nullptr) {
+        meta_storage_->remove(id);
+      }
+    }
+
     return data_storage_.remove(id);
   }
 

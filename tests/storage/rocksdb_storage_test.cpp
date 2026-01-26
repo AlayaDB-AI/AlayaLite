@@ -152,14 +152,16 @@ TEST_F(RocksDBStorageTest, RemoveOperations) {
 TEST_F(RocksDBStorageTest, BatchInsert) {
   RocksDBStorage<TestData> storage(config_);
   std::vector<TestData> inputs = {{1, 1.1f}, {2, 2.2f}, {3, 3.3f}};
-  auto ids = storage.batch_insert(inputs.begin(), inputs.end());
 
-  EXPECT_EQ(ids.size(), 3U);
+  bool success = storage.batch_insert(inputs.begin(), inputs.end());
+
+  EXPECT_TRUE(success);
   EXPECT_EQ(storage.count(), 3U);
   EXPECT_EQ(storage.next_id(), 3U);
 
-  for (size_t i = 0; i < ids.size(); ++i) {
-    auto data = storage[ids[i]];
+  // Verify data by ID (IDs start from 0)
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    auto data = storage[i];
     EXPECT_EQ(data.value, inputs[i].value);
     EXPECT_FLOAT_EQ(data.score, inputs[i].score);
   }
@@ -168,9 +170,10 @@ TEST_F(RocksDBStorageTest, BatchInsert) {
 TEST_F(RocksDBStorageTest, EmptyBatchInsert) {
   RocksDBStorage<TestData> storage(config_);
   std::vector<TestData> empty_inputs;
-  auto ids = storage.batch_insert(empty_inputs.begin(), empty_inputs.end());
 
-  EXPECT_EQ(ids.size(), 0U);
+  bool success = storage.batch_insert(empty_inputs.begin(), empty_inputs.end());
+
+  EXPECT_TRUE(success);  // Empty batch is still successful
   EXPECT_EQ(storage.count(), 0U);
 }
 
@@ -387,16 +390,16 @@ TEST_F(RocksDBStorageTest, CompressionDataIntegrity) {
   }
 
   // Batch insert compressible data
-  auto ids = storage.batch_insert(compressible_data.begin(), compressible_data.end());
-  EXPECT_EQ(ids.size(), 500U);
+  bool success = storage.batch_insert(compressible_data.begin(), compressible_data.end());
+  EXPECT_TRUE(success);
   EXPECT_EQ(storage.count(), 500U);
 
   // Force flush to disk (data will be compressed)
   storage.flush();
 
-  // Verify data integrity after compression/decompression
-  for (size_t i = 0; i < ids.size(); ++i) {
-    auto data = storage[ids[i]];
+  // Verify data integrity after compression/decompression (IDs start from 0)
+  for (size_t i = 0; i < compressible_data.size(); ++i) {
+    auto data = storage[i];
     EXPECT_EQ(data.value, static_cast<int>(i % 10));
     EXPECT_FLOAT_EQ(data.score, static_cast<float>(i % 10) * 1.1f);
   }
@@ -447,21 +450,22 @@ TEST_F(RocksDBStorageTest, MixedCompressibleData) {
     mixed_data.push_back({i * 7919, static_cast<float>(i) * 3.14159f});
   }
 
-  auto ids = storage.batch_insert(mixed_data.begin(), mixed_data.end());
-  EXPECT_EQ(ids.size(), 200U);
+  bool success = storage.batch_insert(mixed_data.begin(), mixed_data.end());
+  EXPECT_TRUE(success);
+  EXPECT_EQ(storage.count(), 200U);
 
   storage.flush();
   storage.compact();
 
-  // Verify all data integrity regardless of compressibility
+  // Verify all data integrity regardless of compressibility (IDs start from 0)
   for (size_t i = 0; i < 100; ++i) {
-    auto data = storage[ids[i]];
+    auto data = storage[i];
     EXPECT_EQ(data.value, 42);
     EXPECT_FLOAT_EQ(data.score, 3.14f);
   }
 
   for (size_t i = 100; i < 200; ++i) {
-    auto data = storage[ids[i]];
+    auto data = storage[i];
     int expected_value = static_cast<int>(i - 100) * 7919;
     float expected_score = static_cast<float>(i - 100) * 3.14159f;
     EXPECT_EQ(data.value, expected_value);
