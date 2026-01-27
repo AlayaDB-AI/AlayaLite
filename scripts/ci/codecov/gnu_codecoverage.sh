@@ -10,7 +10,7 @@ BUILD_DIR="${ROOT_DIR}/build"
 
 # rebuild the project
 rm -rf ${BUILD_DIR} && mkdir -p ${BUILD_DIR} && cd ${BUILD_DIR}
-cmake .. -DCMAKE_BUILD_TYPE=Debug -DENABLE_UNIT_TESTS=ON -DENABLE_COVERAGE=ON -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13
+cmake .. -DBUILD_TESTING=COVERAGE -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13
 make -j
 
 # run the tests in parallel

@@ -63,7 +63,7 @@ TEST_F(IpTest, GenericCorrectness) {
 
 TEST_F(IpTest, SimdCorrectness) {
   constexpr size_t kDim = 256;
-  std::vector<float> x(kDim); 
+  std::vector<float> x(kDim);
   std::vector<float> y(kDim);
   fill_random(x);
   fill_random(y);
@@ -121,7 +121,7 @@ TEST_F(IpTest, ParallelVectors) {
 
 TEST_F(IpTest, LargeDimension) {
   constexpr size_t kDim = 1536;
-  std::vector<float> x(kDim); 
+  std::vector<float> x(kDim);
   std::vector<float> y(kDim);
   fill_random(x);
   fill_random(y);

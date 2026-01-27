@@ -27,7 +27,7 @@
 #include <random>
 
 #include "defines.hpp"
-#include "fht_avx.hpp"
+#include "simd/fht.hpp"
 #include "roundup.hpp"
 #include "utils/log.hpp"
 
@@ -175,7 +175,7 @@ static inline void vec_rescale(T *data, size_t dim, T val) {
 class FhtKacRotator : public Rotator<float> {
  private:
   std::vector<uint8_t> flip_;
-  std::function<void(float *)> fht_float_ = helper_float_6;
+  std::function<void(float *)> fht_float_ = simd::helper_float_6;
   size_t trunc_dim_ = 0;
   float fac_ = 0;
 
@@ -202,22 +202,22 @@ class FhtKacRotator : public Rotator<float> {
 
     switch (bottom_log_dim) {
       case 6:
-        this->fht_float_ = helper_float_6;
+        this->fht_float_ = simd::helper_float_6;
         break;
       case 7:
-        this->fht_float_ = helper_float_7;
+        this->fht_float_ = simd::helper_float_7;
         break;
       case 8:
-        this->fht_float_ = helper_float_8;
+        this->fht_float_ = simd::helper_float_8;
         break;
       case 9:
-        this->fht_float_ = helper_float_9;
+        this->fht_float_ = simd::helper_float_9;
         break;
       case 10:
-        this->fht_float_ = helper_float_10;
+        this->fht_float_ = simd::helper_float_10;
         break;
       case 11:
-        this->fht_float_ = helper_float_11;
+        this->fht_float_ = simd::helper_float_11;
         break;
       default:
         throw std::invalid_argument("dimension of vector is too big or too small\n");

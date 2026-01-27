@@ -13,6 +13,7 @@ This module provides optimized SIMD implementations for distance calculations us
   - [Full Precision (FP32)](#ip-full-precision-fp32)
   - [SQ8 Quantized](#ip-sq8-quantized)
   - [SQ4 Quantized](#ip-sq4-quantized)
+- [FHT (Fast Hadamard Transform)](#fht-fast-hadamard-transform)
 
 ---
 
@@ -207,6 +208,31 @@ This module supports multiple SIMD instruction sets:
 
 ---
 
+## FHT (Fast Hadamard Transform)
+
+**Recommended**: AVX-512 provides the best performance for FHT calculations (up to 9.7x speedup).
+
+| Size (2^N) | Generic (baseline) | AVX2 | AVX-512 | AUTO |
+|:---------:|---------:|-----:|--------:|-----:|
+| 2^6 (64) | 221.25 ns (1.00x) | **44.54 ns (4.97x)** | **22.77 ns (9.72x)** | **23.75 ns (9.32x)** |
+| 2^7 (128) | 394.09 ns (1.00x) | **90.67 ns (4.35x)** | **58.25 ns (6.77x)** | **58.27 ns (6.76x)** |
+| 2^8 (256) | 818.75 ns (1.00x) | **195.54 ns (4.19x)** | **130.07 ns (6.29x)** | **130.76 ns (6.26x)** |
+| 2^9 (512) | 1693.59 ns (1.00x) | **441.47 ns (3.84x)** | **242.80 ns (6.98x)** | **242.77 ns (6.98x)** |
+| 2^10 (1024) | 3382.00 ns (1.00x) | **904.82 ns (3.74x)** | **544.25 ns (6.21x)** | **540.78 ns (6.25x)** |
+| 2^11 (2048) | 6983.42 ns (1.00x) | **1850.29 ns (3.77x)** | **986.84 ns (7.08x)** | **987.97 ns (7.07x)** |
+
+<details>
+<summary>Benchmark Details</summary>
+
+- **Function**: `helper_float_N()` with auto dispatch
+- **SIMD Level**: AVX-512 capable CPU
+- **Iterations**: 100,000 per test
+- **Bold** indicates >5% speedup over Generic baseline
+
+</details>
+
+---
+
 ## Performance Summary
 
 | Distance Type | Data Type | Best Implementation | Typical Speedup |
@@ -217,5 +243,6 @@ This module supports multiple SIMD instruction sets:
 | IP | FP32 | AVX2 | 1.1x - 1.3x |
 | IP | SQ8 | AVX-512 | 1.1x - 1.5x |
 | IP | SQ4 | AVX2 | 5x - 6x |
+| FHT | FP32 | AVX-512 | 6x - 10x |
 
 > **Key Insight**: SQ4 quantization with AVX2 provides the most dramatic performance improvement, achieving up to 6x speedup while reducing memory usage by 8x compared to FP32.

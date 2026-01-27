@@ -619,7 +619,7 @@ TEST_F(L2SqrSQ4Test, AVX512Correctness) {
 
   float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(), kDim,
                                                     min_vals.data(), max_vals.data());
-  auto result = alaya::simd::l2_sqr_sq4_avx512(x_packed.data(), y_packed.data(), kDim,min_vals.data(), 
+  auto result = alaya::simd::l2_sqr_sq4_avx512(x_packed.data(), y_packed.data(), kDim,min_vals.data(),
                                                  max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);

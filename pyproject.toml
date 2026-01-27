@@ -44,8 +44,7 @@ cmake.build-type = "Release"
 wheel.packages = ["python/src/alayalite"]
 
 [tool.scikit-build.cmake.define]
-ENABLE_COVERAGE="OFF"
-ENABLE_UNIT_TESTS="OFF"
+BUILD_TESTING="OFF"
 
 [tool.cibuildwheel]
 # build = "cp38-*"

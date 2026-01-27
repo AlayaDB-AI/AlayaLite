@@ -28,9 +28,9 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "simd/distance_l2.hpp"
-#include "simd/distance_ip.hpp"
 #include "quant/sq4.hpp"
+#include "simd/distance_ip.hpp"
+#include "simd/distance_l2.hpp"
 #include "space_concepts.hpp"
 #include "storage/sequential_storage.hpp"
 #include "storage/storage_concept.hpp"

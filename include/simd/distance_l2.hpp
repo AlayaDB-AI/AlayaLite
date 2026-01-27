@@ -88,9 +88,9 @@ auto get_l2_sqr_sq4_func() -> L2SqrSq4Func;
 // Public API
 /**
  * @brief Compute L2 squared distance between two vectors.
- * 
+ *
  * Returns sum((x[i] - y[i])^2).
- * 
+ *
  * @tparam DataType Type of input vectors (float).
  * @tparam DistanceType Type of the returned distance (float).
  * @param x Pointer to first input vector.

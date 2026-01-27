@@ -32,17 +32,17 @@ using IpSqrFunc = float (*)(const float *__restrict, const float *__restrict, si
 
 /// Function pointer type for SQ8-encoded IP distance
 using IpSqrSq8Func = float (*)(const uint8_t *__restrict,
-                            const uint8_t *__restrict,
-                            size_t,
-                            const float *,
-                            const float *);
+                               const uint8_t *__restrict,
+                               size_t,
+                               const float *,
+                               const float *);
 
 /// Function pointer type for SQ4-encoded IP distance
 using IpSqrSq4Func = float (*)(const uint8_t *__restrict,
-                            const uint8_t *__restrict,
-                            size_t,
-                            const float *,
-                            const float *);
+                               const uint8_t *__restrict,
+                               size_t,
+                               const float *,
+                               const float *);
 
 // ============================================================================
 // Full Precision IP Distance Declarations
@@ -60,22 +60,22 @@ auto ip_sqr_avx512(const float *__restrict x, const float *__restrict y, size_t 
 // ============================================================================
 
 auto ip_sqr_sq8_generic(const uint8_t *__restrict x,
-                    const uint8_t *__restrict y,
-                    size_t dim,
-                    const float *min,
-                    const float *max) -> float;
+                        const uint8_t *__restrict y,
+                        size_t dim,
+                        const float *min,
+                        const float *max) -> float;
 
 #ifdef ALAYA_X86
 auto ip_sqr_sq8_avx2(const uint8_t *__restrict x,
-                 const uint8_t *__restrict y,
-                 size_t dim,
-                 const float *min,
-                 const float *max) -> float;
+                     const uint8_t *__restrict y,
+                     size_t dim,
+                     const float *min,
+                     const float *max) -> float;
 auto ip_sqr_sq8_avx512(const uint8_t *__restrict x,
-                   const uint8_t *__restrict y,
-                   size_t dim,
-                   const float *min,
-                   const float *max) -> float;
+                       const uint8_t *__restrict y,
+                       size_t dim,
+                       const float *min,
+                       const float *max) -> float;
 #endif
 
 // ============================================================================
@@ -83,22 +83,22 @@ auto ip_sqr_sq8_avx512(const uint8_t *__restrict x,
 // ============================================================================
 
 auto ip_sqr_sq4_generic(const uint8_t *__restrict x,
-                    const uint8_t *__restrict y,
-                    size_t dim,
-                    const float *min,
-                    const float *max) -> float;
+                        const uint8_t *__restrict y,
+                        size_t dim,
+                        const float *min,
+                        const float *max) -> float;
 
 #ifdef ALAYA_X86
 auto ip_sqr_sq4_avx2(const uint8_t *__restrict x,
-                 const uint8_t *__restrict y,
-                 size_t dim,
-                 const float *min,
-                 const float *max) -> float;
+                     const uint8_t *__restrict y,
+                     size_t dim,
+                     const float *min,
+                     const float *max) -> float;
 auto ip_sqr_sq4_avx512(const uint8_t *__restrict x,
-                   const uint8_t *__restrict y,
-                   size_t dim,
-                   const float *min,
-                   const float *max) -> float;
+                       const uint8_t *__restrict y,
+                       size_t dim,
+                       const float *min,
+                       const float *max) -> float;
 #endif
 
 // ============================================================================
@@ -142,10 +142,10 @@ auto ip_sqr(const DataType *__restrict x, const DataType *__restrict y, size_t d
  */
 template <typename DataType = float, typename DistanceType = float>
 auto ip_sqr_sq8(const uint8_t *__restrict x,
-            const uint8_t *__restrict y,
-            size_t dim,
-            const DataType *min,
-            const DataType *max) -> DistanceType;
+                const uint8_t *__restrict y,
+                size_t dim,
+                const DataType *min,
+                const DataType *max) -> DistanceType;
 
 /**
  * @brief Compute negative inner product between two SQ4-encoded vectors.
@@ -165,10 +165,10 @@ auto ip_sqr_sq8(const uint8_t *__restrict x,
  */
 template <typename DataType = float, typename DistanceType = float>
 auto ip_sqr_sq4(const uint8_t *__restrict x,
-            const uint8_t *__restrict y,
-            size_t dim,
-            const DataType *min,
-            const DataType *max) -> DistanceType;
+                const uint8_t *__restrict y,
+                size_t dim,
+                const DataType *min,
+                const DataType *max) -> DistanceType;
 
 }  // namespace alaya::simd
 

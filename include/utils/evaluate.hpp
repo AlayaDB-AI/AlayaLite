@@ -47,8 +47,8 @@ auto find_exact_gt(const std::vector<DataType> &queries,
         continue;
       }
       float dist = simd::l2_sqr<DataType, DistanceType>(queries.data() + (i * dim),
-                                                  data_view.data() + (j * dim),
-                                                  dim);
+                                                        data_view.data() + (j * dim),
+                                                        dim);
       dists.emplace_back(j, dist);
     }
     std::sort(dists.begin(), dists.end(), [](const auto &lhs, const auto &rhs) -> auto {

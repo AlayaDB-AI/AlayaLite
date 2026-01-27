@@ -26,15 +26,15 @@ namespace alaya::simd {
 // Type alias for function pointer (needed for IDE analysis)
 using IpSqrFunc = float (*)(const float *__restrict, const float *__restrict, size_t);
 using IpSqrSq8Func = float (*)(const uint8_t *__restrict,
-                            const uint8_t *__restrict,
-                            size_t,
-                            const float *,
-                            const float *);
+                               const uint8_t *__restrict,
+                               size_t,
+                               const float *,
+                               const float *);
 using IpSqrSq4Func = float (*)(const uint8_t *__restrict,
-                            const uint8_t *__restrict,
-                            size_t,
-                            const float *,
-                            const float *);
+                               const uint8_t *__restrict,
+                               size_t,
+                               const float *,
+                               const float *);
 
 // ============================================================================
 // Full Precision IP Distance Implementations
@@ -43,7 +43,8 @@ using IpSqrSq4Func = float (*)(const uint8_t *__restrict,
 // Generic Implementation
 ALAYA_NOINLINE
 ALAYA_TARGET_SSE2
-inline auto ip_sqr_generic(const float *__restrict x, const float *__restrict y, size_t dim) -> float {
+inline auto ip_sqr_generic(const float *__restrict x, const float *__restrict y, size_t dim)
+    -> float {
   float sum = 0.0F;
   for (size_t i = 0; i < dim; ++i) {
     sum += x[i] * y[i];
@@ -113,7 +114,8 @@ inline auto ip_sqr_avx2(const float *__restrict x, const float *__restrict y, si
 // AVX-512 Implementation
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX512
-inline auto ip_sqr_avx512(const float *__restrict x, const float *__restrict y, size_t dim) -> float {
+inline auto ip_sqr_avx512(const float *__restrict x, const float *__restrict y, size_t dim)
+    -> float {
   // Use 4 accumulators to hide latency and improve ILP
   __m512 sum0 = _mm512_setzero_ps();
   __m512 sum1 = _mm512_setzero_ps();
@@ -174,10 +176,10 @@ inline auto ip_sqr_avx512(const float *__restrict x, const float *__restrict y, 
 ALAYA_NOINLINE
 ALAYA_TARGET_SSE2
 inline auto ip_sqr_sq8_generic(const uint8_t *__restrict x,
-                           const uint8_t *__restrict y,
-                           size_t dim,
-                           const float *min,
-                           const float *max) -> float {
+                               const uint8_t *__restrict y,
+                               size_t dim,
+                               const float *min,
+                               const float *max) -> float {
   constexpr float kInv255 = 1.0F / 255.0F;
   float sum = 0.0F;
   for (size_t i = 0; i < dim; ++i) {
@@ -195,10 +197,10 @@ inline auto ip_sqr_sq8_generic(const uint8_t *__restrict x,
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX2
 inline auto ip_sqr_sq8_avx2(const uint8_t *__restrict x,
-                        const uint8_t *__restrict y,
-                        size_t dim,
-                        const float *min,
-                        const float *max) -> float {
+                            const uint8_t *__restrict y,
+                            size_t dim,
+                            const float *min,
+                            const float *max) -> float {
   const __m256 kInv255 = _mm256_set1_ps(1.0F / 255.0F);
   __m256 sum0 = _mm256_setzero_ps();
   __m256 sum1 = _mm256_setzero_ps();
@@ -289,10 +291,10 @@ inline auto ip_sqr_sq8_avx2(const uint8_t *__restrict x,
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX512
 inline auto ip_sqr_sq8_avx512(const uint8_t *__restrict x,
-                          const uint8_t *__restrict y,
-                          size_t dim,
-                          const float *min,
-                          const float *max) -> float {
+                              const uint8_t *__restrict y,
+                              size_t dim,
+                              const float *min,
+                              const float *max) -> float {
   const __m512 kInv255 = _mm512_set1_ps(1.0F / 255.0F);
   __m512 sum0 = _mm512_setzero_ps();
   __m512 sum1 = _mm512_setzero_ps();
@@ -377,10 +379,10 @@ inline auto ip_sqr_sq8_avx512(const uint8_t *__restrict x,
 ALAYA_NOINLINE
 ALAYA_TARGET_SSE2
 inline auto ip_sqr_sq4_generic(const uint8_t *__restrict x,
-                           const uint8_t *__restrict y,
-                           size_t dim,
-                           const float *min,
-                           const float *max) -> float {
+                               const uint8_t *__restrict y,
+                               size_t dim,
+                               const float *min,
+                               const float *max) -> float {
   constexpr float kInv15 = 1.0F / 15.0F;
   float sum = 0.0F;
   size_t byte_idx = 0;
@@ -412,10 +414,10 @@ inline auto ip_sqr_sq4_generic(const uint8_t *__restrict x,
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX2
 inline auto ip_sqr_sq4_avx2(const uint8_t *__restrict x,
-                        const uint8_t *__restrict y,
-                        size_t dim,
-                        const float *min,
-                        const float *max) -> float {
+                            const uint8_t *__restrict y,
+                            size_t dim,
+                            const float *min,
+                            const float *max) -> float {
   const __m256 kInv15 = _mm256_set1_ps(1.0F / 15.0F);
   __m256 sum0 = _mm256_setzero_ps();
   __m256 sum1 = _mm256_setzero_ps();
@@ -447,14 +449,38 @@ inline auto ip_sqr_sq4_avx2(const uint8_t *__restrict x,
     __m256 y_hi_f0 = _mm256_cvtepi32_ps(y_hi_i32_0);
 
     // Load min/max for even and odd indices
-    __m256 min_lo_0 = _mm256_set_ps(min[i + 14], min[i + 12], min[i + 10], min[i + 8],
-                                    min[i + 6], min[i + 4], min[i + 2], min[i + 0]);
-    __m256 max_lo_0 = _mm256_set_ps(max[i + 14], max[i + 12], max[i + 10], max[i + 8],
-                                    max[i + 6], max[i + 4], max[i + 2], max[i + 0]);
-    __m256 min_hi_0 = _mm256_set_ps(min[i + 15], min[i + 13], min[i + 11], min[i + 9],
-                                    min[i + 7], min[i + 5], min[i + 3], min[i + 1]);
-    __m256 max_hi_0 = _mm256_set_ps(max[i + 15], max[i + 13], max[i + 11], max[i + 9],
-                                    max[i + 7], max[i + 5], max[i + 3], max[i + 1]);
+    __m256 min_lo_0 = _mm256_set_ps(min[i + 14],
+                                    min[i + 12],
+                                    min[i + 10],
+                                    min[i + 8],
+                                    min[i + 6],
+                                    min[i + 4],
+                                    min[i + 2],
+                                    min[i + 0]);
+    __m256 max_lo_0 = _mm256_set_ps(max[i + 14],
+                                    max[i + 12],
+                                    max[i + 10],
+                                    max[i + 8],
+                                    max[i + 6],
+                                    max[i + 4],
+                                    max[i + 2],
+                                    max[i + 0]);
+    __m256 min_hi_0 = _mm256_set_ps(min[i + 15],
+                                    min[i + 13],
+                                    min[i + 11],
+                                    min[i + 9],
+                                    min[i + 7],
+                                    min[i + 5],
+                                    min[i + 3],
+                                    min[i + 1]);
+    __m256 max_hi_0 = _mm256_set_ps(max[i + 15],
+                                    max[i + 13],
+                                    max[i + 11],
+                                    max[i + 9],
+                                    max[i + 7],
+                                    max[i + 5],
+                                    max[i + 3],
+                                    max[i + 1]);
 
     __m256 scale_lo_0 = _mm256_mul_ps(_mm256_sub_ps(max_lo_0, min_lo_0), kInv15);
     __m256 scale_hi_0 = _mm256_mul_ps(_mm256_sub_ps(max_hi_0, min_hi_0), kInv15);
@@ -484,14 +510,38 @@ inline auto ip_sqr_sq4_avx2(const uint8_t *__restrict x,
     __m256 x_hi_f1 = _mm256_cvtepi32_ps(x_hi_i32_1);
     __m256 y_hi_f1 = _mm256_cvtepi32_ps(y_hi_i32_1);
 
-    __m256 min_lo_1 = _mm256_set_ps(min[i + 30], min[i + 28], min[i + 26], min[i + 24],
-                                    min[i + 22], min[i + 20], min[i + 18], min[i + 16]);
-    __m256 max_lo_1 = _mm256_set_ps(max[i + 30], max[i + 28], max[i + 26], max[i + 24],
-                                    max[i + 22], max[i + 20], max[i + 18], max[i + 16]);
-    __m256 min_hi_1 = _mm256_set_ps(min[i + 31], min[i + 29], min[i + 27], min[i + 25],
-                                    min[i + 23], min[i + 21], min[i + 19], min[i + 17]);
-    __m256 max_hi_1 = _mm256_set_ps(max[i + 31], max[i + 29], max[i + 27], max[i + 25],
-                                    max[i + 23], max[i + 21], max[i + 19], max[i + 17]);
+    __m256 min_lo_1 = _mm256_set_ps(min[i + 30],
+                                    min[i + 28],
+                                    min[i + 26],
+                                    min[i + 24],
+                                    min[i + 22],
+                                    min[i + 20],
+                                    min[i + 18],
+                                    min[i + 16]);
+    __m256 max_lo_1 = _mm256_set_ps(max[i + 30],
+                                    max[i + 28],
+                                    max[i + 26],
+                                    max[i + 24],
+                                    max[i + 22],
+                                    max[i + 20],
+                                    max[i + 18],
+                                    max[i + 16]);
+    __m256 min_hi_1 = _mm256_set_ps(min[i + 31],
+                                    min[i + 29],
+                                    min[i + 27],
+                                    min[i + 25],
+                                    min[i + 23],
+                                    min[i + 21],
+                                    min[i + 19],
+                                    min[i + 17]);
+    __m256 max_hi_1 = _mm256_set_ps(max[i + 31],
+                                    max[i + 29],
+                                    max[i + 27],
+                                    max[i + 25],
+                                    max[i + 23],
+                                    max[i + 21],
+                                    max[i + 19],
+                                    max[i + 17]);
 
     __m256 scale_lo_1 = _mm256_mul_ps(_mm256_sub_ps(max_lo_1, min_lo_1), kInv15);
     __m256 scale_hi_1 = _mm256_mul_ps(_mm256_sub_ps(max_hi_1, min_hi_1), kInv15);
@@ -545,10 +595,10 @@ inline auto ip_sqr_sq4_avx2(const uint8_t *__restrict x,
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX512
 inline auto ip_sqr_sq4_avx512(const uint8_t *__restrict x,
-                          const uint8_t *__restrict y,
-                          size_t dim,
-                          const float *min,
-                          const float *max) -> float {
+                              const uint8_t *__restrict y,
+                              size_t dim,
+                              const float *min,
+                              const float *max) -> float {
   const __m512 kInv15 = _mm512_set1_ps(1.0F / 15.0F);
   __m512 sum0 = _mm512_setzero_ps();
   __m512 sum1 = _mm512_setzero_ps();
@@ -703,10 +753,10 @@ inline auto ip_sqr(const DataType *__restrict x, const DataType *__restrict y, s
 
 template <typename DataType, typename DistanceType>
 inline auto ip_sqr_sq8(const uint8_t *__restrict x,
-                   const uint8_t *__restrict y,
-                   size_t dim,
-                   const DataType *min,
-                   const DataType *max) -> DistanceType {
+                       const uint8_t *__restrict y,
+                       size_t dim,
+                       const DataType *min,
+                       const DataType *max) -> DistanceType {
   if constexpr (std::is_same_v<DataType, float>) {
     return static_cast<DistanceType>(get_ip_sqr_sq8_func()(x, y, dim, min, max));
   } else {
@@ -726,10 +776,10 @@ inline auto ip_sqr_sq8(const uint8_t *__restrict x,
 
 template <typename DataType, typename DistanceType>
 inline auto ip_sqr_sq4(const uint8_t *__restrict x,
-                   const uint8_t *__restrict y,
-                   size_t dim,
-                   const DataType *min,
-                   const DataType *max) -> DistanceType {
+                       const uint8_t *__restrict y,
+                       size_t dim,
+                       const DataType *min,
+                       const DataType *max) -> DistanceType {
   if constexpr (std::is_same_v<DataType, float>) {
     return static_cast<DistanceType>(get_ip_sqr_sq4_func()(x, y, dim, min, max));
   } else {
