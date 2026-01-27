@@ -18,6 +18,7 @@
 #pragma once
 #include <chrono>
 
+namespace alaya {
 class Timer {
   using clock_ = std::chrono::high_resolution_clock;
   std::chrono::time_point<clock_> m_beg_;
@@ -28,7 +29,22 @@ class Timer {
   void reset() { m_beg_ = clock_::now(); }
 
   // returns elapsed time in `us`
-  auto elapsed() const -> uint64_t {
+  [[nodiscard]] auto elapsed() const -> uint64_t {
     return std::chrono::duration_cast<std::chrono::microseconds>(clock_::now() - m_beg_).count();
   }
+
+  [[nodiscard]] auto elapsed_us() const -> double {
+    return static_cast<double>(elapsed());
+  }
+
+  [[nodiscard]] auto elapsed_ms() const -> double {
+    return static_cast<double>(elapsed()) / 1000.0;
+  }
+
+  [[nodiscard]] auto elapsed_s() const -> double {
+    return static_cast<double>(elapsed()) / 1'000'000.0;
+  }
+
 };
+
+}  // namespace alaya

@@ -30,7 +30,7 @@
 #include "utils/dataset_utils.hpp"
 #include "utils/evaluate.hpp"
 #include "utils/log.hpp"
-#include "utils/rabitq_utils/search_utils/stopw.hpp"
+#include "utils/timer.hpp"
 
 namespace alaya {
 class RaBitQSiftSmallTest : public ::testing::Test {
@@ -85,7 +85,7 @@ TEST_F(RaBitQSiftSmallTest, SiftSmallQGTest) {  // for code coverage
                              190, 200, 250, 300, 400, 500, 600, 800, 1500};
   size_t test_round = 1;
   size_t topk = 10;
-  alaya::StopW timer;
+  alaya::Timer timer;
   std::vector<std::vector<float>> all_qps(test_round, std::vector<float>(efs.size()));
   std::vector<std::vector<float>> all_recall(test_round, std::vector<float>(efs.size()));
 
@@ -109,7 +109,7 @@ TEST_F(RaBitQSiftSmallTest, SiftSmallQGTest) {  // for code coverage
         return;
 #endif
 
-        total_time += timer.get_elapsed_micro();
+        total_time += timer.elapsed_us();
         // recall
         for (size_t k = 0; k < topk; ++k) {
           for (size_t j = 0; j < topk; ++j) {
