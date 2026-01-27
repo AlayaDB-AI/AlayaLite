@@ -304,7 +304,7 @@ TEST_F(L2SqrSQ8Test, QuantizationExtremes) {
   EXPECT_NEAR(result, expected, 1e-3F);
 }
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 TEST_F(L2SqrSQ8Test, AVX2Correctness) {
   const auto& features = alaya::simd::get_cpu_features();
   if (!features.avx2_ || !features.fma_) {
@@ -568,7 +568,7 @@ TEST_F(L2SqrSQ4Test, QuantizationExtremes) {
   EXPECT_NEAR(result, expected, 1e-3F);
 }
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 TEST_F(L2SqrSQ4Test, AVX2Correctness) {
   const auto& features = alaya::simd::get_cpu_features();
   if (!features.avx2_ || !features.fma_) {

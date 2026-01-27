@@ -40,7 +40,7 @@ class OverlayGraph {
   NodeIDType ep_;        ///< The entry point of the graph.
 
   std::vector<uint32_t> levels_;  ///< Each entry stores the highest layer of each node.
-  std::vector<std::vector<EdgeIDType, AlignAlloc<EdgeIDType>>>
+  std::vector<std::vector<EdgeIDType, AlignedAlloc<EdgeIDType>>>
       lists_;  ///< Each entry stores the edges (of all levels) of each node.
 
   OverlayGraph() = delete;

@@ -19,7 +19,6 @@
 #include <cstddef>
 #include <type_traits>
 #include "cpu_features.hpp"
-#include "platform.hpp"
 
 namespace alaya::simd {
 
@@ -52,7 +51,7 @@ inline auto ip_sqr_generic(const float *__restrict x, const float *__restrict y,
   return -sum;  // Negative for distance metric (smaller = more similar)
 }
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 
 // AVX2 + FMA Implementation
 ALAYA_NOINLINE
@@ -164,7 +163,7 @@ inline auto ip_sqr_avx512(const float *__restrict x, const float *__restrict y, 
   return -result;
 }
 
-#endif  // ALAYA_X86
+#endif  // ALAYA_ARCH_X86
 
 // ============================================================================
 // SQ8 IP Distance Implementations
@@ -191,7 +190,7 @@ inline auto ip_sqr_sq8_generic(const uint8_t *__restrict x,
   return -sum;
 }
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 
 // AVX2 SQ8 implementation
 ALAYA_NOINLINE
@@ -366,7 +365,7 @@ inline auto ip_sqr_sq8_avx512(const uint8_t *__restrict x,
   return -result;
 }
 
-#endif  // ALAYA_X86
+#endif  // ALAYA_ARCH_X86
 
 // ============================================================================
 // SQ4 IP Distance Implementations
@@ -408,7 +407,7 @@ inline auto ip_sqr_sq4_generic(const uint8_t *__restrict x,
   return -sum;
 }
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 
 // AVX2 SQ4 implementation
 ALAYA_NOINLINE
@@ -679,7 +678,7 @@ inline auto ip_sqr_sq4_avx512(const uint8_t *__restrict x,
   return -result;
 }
 
-#endif  // ALAYA_X86
+#endif  // ALAYA_ARCH_X86
 
 // ============================================================================
 // Runtime Dispatch
@@ -687,7 +686,7 @@ inline auto ip_sqr_sq4_avx512(const uint8_t *__restrict x,
 
 inline auto get_ip_sqr_func() -> IpSqrFunc {
   static const IpSqrFunc kFunc = []() -> IpSqrFunc {
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
     const auto &f = get_cpu_features();
     if (f.avx512f_) {
       return ip_sqr_avx2;
@@ -703,7 +702,7 @@ inline auto get_ip_sqr_func() -> IpSqrFunc {
 
 inline auto get_ip_sqr_sq8_func() -> IpSqrSq8Func {
   static const IpSqrSq8Func kFunc = []() -> IpSqrSq8Func {
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
     const auto &f = get_cpu_features();
     if (f.avx512f_) {
       return ip_sqr_sq8_avx512;
@@ -719,7 +718,7 @@ inline auto get_ip_sqr_sq8_func() -> IpSqrSq8Func {
 
 inline auto get_ip_sqr_sq4_func() -> IpSqrSq4Func {
   static const IpSqrSq4Func kFunc = []() -> IpSqrSq4Func {
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
     const auto &f = get_cpu_features();
     if (f.avx512f_) {
       return ip_sqr_sq4_avx2;  // AVX2 often performs better due to gather latency

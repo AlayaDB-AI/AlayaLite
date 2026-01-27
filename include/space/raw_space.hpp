@@ -30,11 +30,10 @@
 #include "storage/sequential_storage.hpp"
 #include "utils/data_utils.hpp"
 #include "utils/log.hpp"
+#include "utils/math.hpp"
 #include "utils/metric_type.hpp"
-
-#ifdef _MSC_VER
-  #include <malloc.h>
-#endif
+#include "utils/platform.hpp"
+#include "utils/prefetch.hpp"
 
 namespace alaya {
 
@@ -269,23 +268,15 @@ class RawSpace {
         normalize(const_cast<DataType *>(query), distance_space_.dim_);
       }
 
-      size_t aligned_size = (distance_space_.data_size_ + kAlignment - 1) & ~(kAlignment - 1);
-#ifdef _MSC_VER
-      query_ = static_cast<DataType *>(_aligned_malloc(aligned_size, kAlignment));
-#else
-      query_ = static_cast<DataType *>(std::aligned_alloc(kAlignment, aligned_size));
-#endif
+      auto aligned_size = math::round_up_pow2(distance_space_.data_size_, kAlignment);
+      query_ = static_cast<DataType *>(alaya_aligned_alloc_impl(aligned_size, kAlignment));
       std::memcpy(query_, query, distance_space.data_size_);
     }
 
     QueryComputer(const RawSpace &distance_space, const IDType id)
         : distance_space_(distance_space) {
-      size_t aligned_size = (distance_space_.data_size_ + kAlignment - 1) & ~(kAlignment - 1);
-#ifdef _MSC_VER
-      query_ = static_cast<DataType *>(_aligned_malloc(aligned_size, kAlignment));
-#else
-      query_ = static_cast<DataType *>(std::aligned_alloc(kAlignment, aligned_size));
-#endif
+      size_t aligned_size = math::round_up_pow2(distance_space_.data_size_, kAlignment);
+      query_ = static_cast<DataType *>(alaya_aligned_alloc_impl(aligned_size, kAlignment));
       std::memcpy(query_, distance_space.get_data_by_id(id), distance_space.data_size_);
     }
 
@@ -293,11 +284,9 @@ class RawSpace {
      * @brief Destructor
      */
     ~QueryComputer() {
-#ifdef _MSC_VER
-      _aligned_free(query_);
-#else
-      std::free(query_);
-#endif
+      if (query_ != nullptr) {
+        alaya_aligned_free_impl(query_);
+      }
     }
 
     /**

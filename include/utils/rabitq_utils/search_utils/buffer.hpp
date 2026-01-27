@@ -19,8 +19,8 @@
 #include <cstddef>
 #include <vector>
 
-#include "allocator.hpp"
 #include "index/neighbor.hpp"
+#include "utils/memory.hpp"
 
 namespace alaya {
 /**
@@ -34,7 +34,7 @@ class SearchBuffer {
   using ANNCand = Neighbor<PID, T>;
 
  private:
-  std::vector<ANNCand, AlignedAllocator<ANNCand>> data_;
+  std::vector<ANNCand, AlignedAlloc<ANNCand>> data_;
   size_t size_ = 0, cur_ = 0, capacity_;
 
   [[nodiscard]] auto binary_search(T dist) const {
@@ -97,7 +97,7 @@ class SearchBuffer {
 
   void resize(size_t new_size) {
     this->capacity_ = new_size;
-    data_ = std::vector<ANNCand, AlignedAllocator<ANNCand>>(capacity_ + 1);
+    data_ = std::vector<ANNCand, AlignedAlloc<ANNCand>>(capacity_ + 1);
   }
 
   void copy_results_to(PID *knn) const {
@@ -115,7 +115,7 @@ class SearchBuffer {
   // judge if dist can be inserted into buffer
   [[nodiscard]] auto is_full(T dist) const -> bool { return dist > top_dist(); }
 
-  auto data() -> const std::vector<ANNCand, AlignedAllocator<ANNCand>> & { return data_; }
+  auto data() -> const std::vector<ANNCand, AlignedAlloc<ANNCand>> & { return data_; }
 
   auto size() -> size_t { return size_; }
 };

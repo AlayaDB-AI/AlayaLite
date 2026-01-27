@@ -265,7 +265,7 @@ TEST_F(FHTTest, GenericTemplateVariousSizes) {
   test_size(std::integral_constant<size_t, 10>{});  // 1024
 }
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 TEST_F(FHTTest, AVX2Correctness) {
   const auto& features = alaya::simd::get_cpu_features();
   if (!features.avx2_) {

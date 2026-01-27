@@ -17,7 +17,7 @@
 #pragma once
 
 #include <cstdint>
-#include "platform.hpp"
+#include "utils/platform.hpp"
 
 namespace alaya::simd {
 
@@ -33,7 +33,7 @@ struct CpuFeatures {
   static auto detect() -> CpuFeatures {
     CpuFeatures features;
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
   #if defined(__GNUC__) || defined(__clang__)
     if (__builtin_cpu_supports("avx512f")) {
       features.avx512f_ = true;
@@ -80,7 +80,7 @@ inline auto get_cpu_features() -> const CpuFeatures & {
 enum class SimdLevel : std::uint8_t { kGeneric, kSse4, kAvx2, kAvx512 };
 
 inline auto get_simd_level() -> SimdLevel {
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
   const auto &f = get_cpu_features();
   if (f.avx512f_) {
     return SimdLevel::kAvx512;

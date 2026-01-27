@@ -21,12 +21,10 @@
 #include <utility>
 #include <vector>
 
-#include "utils/rabitq_utils/search_utils/allocator.hpp"
+#include "utils/memory.hpp"
 
 namespace alaya {
-template <typename T = char,
-          typename Dims = std::vector<size_t>,
-          typename Alloc = AlignedAllocator<T, 1 << 22, true>>
+template <typename T = char, typename Dims = std::vector<size_t>, typename Alloc = AlignedAlloc<T>>
 class StaticStorage {
  private:
   static_assert(std::is_trivial_v<T>);  // only handle trivial types
@@ -87,7 +85,7 @@ class StaticStorage {
   [[nodiscard]] constexpr auto size() const -> size_t {
     // i.e, dims_: std::vector<size_t>{num_points_, data_chunk_size}
     size_t res = 1;
-    std::for_each(dims_.begin(), dims_.end(), [&](auto cur_d) {
+    std::for_each(dims_.begin(), dims_.end(), [&](auto cur_d) -> void {
       res *= cur_d;
     });
     return res;

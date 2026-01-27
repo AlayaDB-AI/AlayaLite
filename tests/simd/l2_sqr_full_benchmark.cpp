@@ -87,7 +87,7 @@ auto run_benchmarks_for_dim(size_t dim) -> DimResults {
   results.generic_.speedup_ = 1.0;
   double baseline_ns = results.generic_.ns_per_call_;
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
   const auto& features = alaya::simd::get_cpu_features();
 
   // AVX2

@@ -22,14 +22,13 @@
 #include <cstdlib>
 #include <fstream>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <random>
 
 #include "defines.hpp"
 #include "simd/fht.hpp"
-#include "roundup.hpp"
 #include "utils/log.hpp"
+#include "utils/math.hpp"
 
 namespace alaya {
 // NOLINTBEGIN
@@ -60,7 +59,7 @@ inline size_t padding_requirement(size_t dim, RotatorType type) {
     return dim;
   }
   if (type == RotatorType::FhtKacRotator) {
-    return round_up_to_multiple_of<size_t>(dim, 64);
+    return alaya::math::round_up_pow2(dim, 64);
   }
   ALAYA_UNREACHABLE;
   // throw std::invalid_argument("Invalid rotator type in padding_requirement()\n");
@@ -196,7 +195,7 @@ class FhtKacRotator : public Rotator<float> {
     }
 
     // TODO(lib): is it portable?
-    size_t bottom_log_dim = floor_log2(dim);
+    size_t bottom_log_dim = alaya::math::floor_log2(dim);
     trunc_dim_ = 1 << bottom_log_dim;
     fac_ = 1.0F / std::sqrt(static_cast<float>(trunc_dim_));
 

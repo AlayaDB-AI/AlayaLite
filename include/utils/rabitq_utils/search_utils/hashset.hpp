@@ -24,7 +24,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include "allocator.hpp"
+#include "utils/memory.hpp"
 
 namespace alaya {
 // NOLINTBEGIN
@@ -39,7 +39,7 @@ class HashBasedBooleanSet {
   static constexpr uint32_t kEmptyHashId = 0xFFFFFFFF;
   size_t table_size_ = 0;
   PID mask_ = 0;
-  std::vector<PID, AlignedAllocator<PID>> table_;
+  std::vector<PID, AlignedAlloc<PID>> table_;
   std::unordered_set<PID> stl_hash_;
 
   [[nodiscard]] auto hash1(const PID value) const { return value & mask_; }
@@ -86,7 +86,7 @@ class HashBasedBooleanSet {
       std::cerr << "[WARN] table size is not 2^N :  " << table_size << '\n';
     }
 
-    table_ = std::vector<PID, AlignedAllocator<PID>>(table_size);
+    table_ = std::vector<PID, AlignedAlloc<PID>>(table_size);
     std::fill(table_.begin(), table_.end(), kEmptyHashId);
     stl_hash_.clear();
   }

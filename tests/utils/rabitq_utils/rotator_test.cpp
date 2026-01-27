@@ -206,7 +206,7 @@ TEST_F(RotatorTest, FhtKacRotator_Padding) {
   rot->rotate(input.data(), output.data());
 
   // Last 28 elements should be non-zero due to kacs_walk
-  bool all_zero = true;
+  [[maybe_unused]] bool all_zero = true;
   for (size_t i = dim; i < 128; ++i) {
     if (std::abs(output[i]) > 1e-6f) {
       all_zero = false;

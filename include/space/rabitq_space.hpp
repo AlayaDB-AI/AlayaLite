@@ -29,12 +29,12 @@
 #include "space/space_concepts.hpp"
 #include "storage/static_storage.hpp"
 #include "utils/log.hpp"
+#include "utils/math.hpp"
 #include "utils/metric_type.hpp"
 #include "utils/prefetch.hpp"
 #include "utils/rabitq_utils/fastscan.hpp"
 #include "utils/rabitq_utils/lut.hpp"
 #include "utils/rabitq_utils/rotator.hpp"
-#include "utils/rabitq_utils/roundup.hpp"
 
 namespace alaya {
 template <typename DataType = float, typename DistanceType = float, typename IDType = uint32_t>
@@ -103,7 +103,7 @@ class RaBitQSpace {
               MetricType metric,
               RotatorType type = RotatorType::FhtKacRotator)
       : capacity_(capacity), dim_(dim), metric_(metric), type_(type) {
-    rotator_ = choose_rotator<DataType>(dim_, type_, round_up_to_multiple_of<size_t>(dim_, 64));
+    rotator_ = choose_rotator<DataType>(dim_, type_, alaya::math::round_up_pow2<size_t>(dim_, 64));
     quantizer_ = std::make_unique<RaBitQQuantizer<DataType>>(dim_, rotator_->size());
     initialize_offsets();
   }
@@ -402,7 +402,7 @@ class RaBitQSpace {
     reader.read(reinterpret_cast<char *>(&type_), sizeof(type_));
     reader.read(reinterpret_cast<char *>(&ep_), sizeof(ep_));
 
-    rotator_ = choose_rotator<DataType>(dim_, type_, round_up_to_multiple_of<size_t>(dim_, 64));
+    rotator_ = choose_rotator<DataType>(dim_, type_, alaya::math::round_up_pow2<size_t>(dim_, 64));
     rotator_->load(reader);
 
     this->initialize_offsets();

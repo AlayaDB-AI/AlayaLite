@@ -16,86 +16,108 @@
 
 #pragma once
 
-#ifdef __linux__
-  #include <sys/mman.h>
-#endif
-
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <new>
 #include <type_traits>
-
-#ifdef _MSC_VER
-  #include <malloc.h>
-#endif
+#include "utils/math.hpp"
+#include "utils/platform.hpp"
 
 namespace alaya {
 
-/**
- * @brief Aligned memory allocator.
- *
- * @tparam ValueType The type of value to allocate memory.
- */
-template <typename ValueType>
-  requires std::is_trivial_v<ValueType>
-struct AlignAlloc {
-  using value_type = ValueType;
-  ValueType *ptr_ = nullptr;
-  auto allocate(int n) -> ValueType * {
-    if (n <= 1 << 14) {
-      int sz = (n * sizeof(ValueType) + 63) >> 6 << 6;
-#ifdef _MSC_VER
-      return ptr_ = static_cast<ValueType *>(_aligned_malloc(sz, 64));
-#else
-      return ptr_ = static_cast<ValueType *>(std::aligned_alloc(64, sz));
-#endif
-    }
-    int sz = (n * sizeof(ValueType) + (1 << 21) - 1) >> 21 << 21;
-#ifdef _MSC_VER
-    ptr_ = static_cast<ValueType *>(_aligned_malloc(sz, 1 << 21));
-#else
-    ptr_ = static_cast<ValueType *>(std::aligned_alloc(1 << 21, sz));
-#endif
+template <typename T>
+class AlignedAlloc {
+ private:
+  static constexpr size_t kAlignSmall = 64;
+  static constexpr size_t kAlignLarge = 2 * 1024 * 1024;   // 2MB
+  static constexpr size_t kHugePageThreshold = 16 * 1024;  // 16KB
 
-#if defined(__linux__)
-    madvise(ptr_, sz, MADV_HUGEPAGE);
-#endif
-    return ptr_;
-  }
+ public:
+  using value_type = T;
+  using size_type = std::size_t;
+  using difference_type = std::ptrdiff_t;
+  using propagate_on_container_move_assignment = std::true_type;
+  using is_always_equal = std::true_type;
 
-  void deallocate(ValueType * /*unused*/, int /*unused*/) {
-#ifdef _MSC_VER
-    _aligned_free(ptr_);
-#else
-    free(ptr_);
-#endif
-  }
+  template <class U>
+  struct rebind {  // NOLINT
+    using other = AlignedAlloc<U>;
+  };
+
+  constexpr AlignedAlloc() noexcept = default;
+  constexpr AlignedAlloc(const AlignedAlloc &) noexcept = default;
 
   template <typename U>
-  struct Rebind {
-    using other = AlignAlloc<U>;
-  };
-  auto operator!=(const AlignAlloc &rhs) -> bool { return ptr_ != rhs.ptr_; }
+  constexpr explicit AlignedAlloc(const AlignedAlloc<U> & /*unused*/) noexcept {}
+
+  /**
+   * @brief Allocate aligned memory
+   *
+   * @param n Number of elements to allocate
+   * @return Pointer to allocated memory
+   * @throws std::bad_alloc on allocation failure
+   * @throws std::bad_array_new_length if n is too large
+   */
+  [[nodiscard]] auto allocate(std::size_t n) -> T * {
+    if (n == 0) {
+      return nullptr;
+    }
+    if (n > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
+      throw std::bad_array_new_length();
+    }
+
+    size_t raw_size = n * sizeof(T);
+    size_t align = (raw_size >= kHugePageThreshold) ? kAlignLarge : kAlignSmall;
+    bool use_huge_page = raw_size >= kHugePageThreshold;
+
+    const auto kNbytes = math::round_up_pow2(raw_size, align);
+    void *ptr = alaya_aligned_alloc_impl(kNbytes, align);
+    if (ALAYA_UNLIKELY(!ptr)) {
+      throw std::bad_alloc();
+    }
+
+#ifdef ALAYA_OS_LINUX
+    if (use_huge_page) {
+      // Suggest using THP (Transparent Huge Pages) for the kernel)
+      madvise(ptr, kNbytes, MADV_HUGEPAGE);
+    }
+#endif
+    return reinterpret_cast<T *>(ptr);
+  }
+
+  /**
+   * @brief Deallocate aligned memory
+   * @param ptr Pointer to memory to deallocate
+   * @param n Number of elements (not used)
+   */
+  void deallocate(T *ptr, [[maybe_unused]] std::size_t n) noexcept {
+    if (ptr) {
+      alaya_aligned_free_impl(ptr);
+    }
+  }
 };
+template <typename T, typename U>
+auto operator==(const AlignedAlloc<T> & /*unused*/, const AlignedAlloc<U> & /*unused*/) noexcept
+    -> bool {
+  return true;
+}
+
+template <typename T, typename U>
+auto operator!=(const AlignedAlloc<T> & /*unused*/, const AlignedAlloc<U> & /*unused*/) noexcept
+    -> bool {
+  return false;
+}
 
 inline auto alloc_2m(size_t nbytes) -> void * {
-  size_t len = (nbytes + (1 << 21) - 1) >> 21 << 21;
-#ifdef _MSC_VER
-  auto p = _aligned_malloc(len, 1 << 21);
-#else
-  auto p = std::aligned_alloc(1 << 21, len);
-#endif
+  auto len = math::round_up_pow2(nbytes, 1 << 21);
+  auto p = alaya_aligned_alloc_impl(len, 1 << 21);
   std::memset(p, 0, len);
   return p;
 }
 
 inline auto alloc_64b(size_t nbytes) -> void * {
-  size_t len = (nbytes + (1 << 6) - 1) >> 6 << 6;
-#ifdef _MSC_VER
-  auto p = _aligned_malloc(len, 1 << 6);
-#else
-  auto p = std::aligned_alloc(1 << 6, len);
-#endif
+  auto len = math::round_up_pow2(nbytes, 1 << 6);
+  auto p = alaya_aligned_alloc_impl(len, 1 << 6);
   std::memset(p, 0, len);
   return p;
 }

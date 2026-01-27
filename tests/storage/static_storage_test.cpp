@@ -129,7 +129,7 @@ TEST(StaticStorageTest, SaveAndLoad) {
 
 TEST(StaticStorageTest, AllocatorThrowsOnExcessiveSize) {
   using T = float;  // sizeof = 4
-  using Alloc = AlignedAllocator<T, 64>;
+  using Alloc = AlignedAlloc<T>;
   using Storage = StaticStorage<T, std::vector<size_t>, Alloc>;
 
   size_t max_n = std::numeric_limits<size_t>::max() / sizeof(T);

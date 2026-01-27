@@ -18,10 +18,10 @@
 
 // Architecture-specific SIMD headers
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-  #define ALAYA_X86
+  #define ALAYA_ARCH_X86
   #include <immintrin.h>
 #elif defined(__aarch64__) || defined(_M_ARM64)
-  #define ALAYA_ARM64
+  #define ALAYA_ARCH_ARM64
   #include <arm_neon.h>
 #endif
 

@@ -255,7 +255,7 @@ TEST_F(IpSQ8Test, IdenticalVectors) {
   EXPECT_LT(result, 0.0F);
 }
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 TEST_F(IpSQ8Test, AVX2Correctness) {
   constexpr size_t kDim = 128;
   std::vector<uint8_t> x(kDim);
@@ -431,7 +431,7 @@ TEST_F(IpSQ4Test, IdenticalVectors) {
   EXPECT_LT(result, 0.0F);
 }
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 TEST_F(IpSQ4Test, AVX2Correctness) {
   constexpr size_t kDim = 128;
   std::vector<uint8_t> x_packed;

@@ -19,7 +19,6 @@
 #include <cstddef>
 #include <type_traits>
 #include "cpu_features.hpp"
-#include "platform.hpp"
 
 namespace alaya::simd {
 
@@ -28,7 +27,7 @@ using FHT_Helper_Func = void (*)(float *a);
 template <size_t N>
 auto fwht_generic_template(float *buf) -> void;
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 auto helper_float_6_avx2(float *buf) -> void;
 auto helper_float_7_avx2(float *buf) -> void;
 auto helper_float_8_avx2(float *buf) -> void;

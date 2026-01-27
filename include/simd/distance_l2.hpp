@@ -19,7 +19,6 @@
 #include <cstddef>
 #include <type_traits>
 #include "cpu_features.hpp"
-#include "platform.hpp"
 
 namespace alaya::simd {
 
@@ -37,7 +36,7 @@ using L2SqrSq4Func = float (*)(const uint8_t *__restrict,
                                const float *);
 
 auto l2_sqr_generic(const float *__restrict x, const float *__restrict y, size_t dim) -> float;
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 auto l2_sqr_avx2(const float *__restrict x, const float *__restrict y, size_t dim) -> float;
 auto l2_sqr_avx512(const float *__restrict x, const float *__restrict y, size_t dim) -> float;
 #endif
@@ -48,7 +47,7 @@ auto l2_sqr_sq8_generic(const uint8_t *__restrict x,
                         const float *min,
                         const float *max) -> float;
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 auto l2_sqr_sq8_avx2(const uint8_t *__restrict x,
                      const uint8_t *__restrict y,
                      size_t dim,
@@ -67,7 +66,7 @@ auto l2_sqr_sq4_generic(const uint8_t *__restrict x,
                         const float *min,
                         const float *max) -> float;
 
-#ifdef ALAYA_X86
+#ifdef ALAYA_ARCH_X86
 auto l2_sqr_sq4_avx2(const uint8_t *__restrict x,
                      const uint8_t *__restrict y,
                      size_t dim,

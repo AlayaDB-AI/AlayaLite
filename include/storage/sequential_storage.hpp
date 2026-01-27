@@ -16,22 +16,14 @@
 
 #pragma once
 
+#include <sys/types.h>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <iostream>
-#include <memory>
-#include <streambuf>
-#include <vector>
-#include "storage_concept.hpp"
-#include "utils/log.hpp"
-#include "utils/types.hpp"
-
-#ifdef _MSC_VER
-  #include <malloc.h>
-#endif
+#include "utils/math.hpp"
+#include "utils/platform.hpp"
 
 namespace alaya {
 
@@ -54,41 +46,22 @@ struct SequentialStorage {
 
   SequentialStorage() = default;
   ~SequentialStorage() {
-    if (data_ != nullptr) {
-#ifdef _MSC_VER
-      _aligned_free(data_);
-#else
-      std::free(data_);  // NOLINT
-#endif
-    }
-    if (bitmap_ != nullptr) {
-#ifdef _MSC_VER
-      _aligned_free(bitmap_);
-#else
-      std::free(bitmap_);  // NOLINT
-#endif
-    }
+    alaya_aligned_free_impl(data_);
+    alaya_aligned_free_impl(bitmap_);
   }
 
   auto init(size_t item_size, size_t capacity, char fill = 0, size_t alignment = 64) -> void {
     item_size_ = item_size;
     capacity_ = capacity;
     alignment_ = alignment;
-    aligned_item_size_ = do_align(item_size_, alignment);
-#ifdef _MSC_VER
-    data_ = static_cast<DataType *>(_aligned_malloc(aligned_item_size_ * capacity_, alignment));
-#else
-    data_ = static_cast<DataType *>(std::aligned_alloc(alignment, aligned_item_size_ * capacity_));
-#endif
-
+    aligned_item_size_ = math::round_up_pow2(item_size_, alignment);
+    data_ = static_cast<DataType *>(
+        alaya_aligned_alloc_impl(aligned_item_size_ * capacity_, alignment));
     std::memset(data_, fill, aligned_item_size_ * capacity_);
-    auto bitmap_size = do_align((capacity_ + kBitEveryByte - 1) / kBitEveryByte, alignment);
+    auto bitmap_size =
+        math::round_up_pow2((capacity_ + kBitEveryByte - 1) / kBitEveryByte, alignment);
 
-#ifdef _MSC_VER
-    bitmap_ = static_cast<uint8_t *>(_aligned_malloc(bitmap_size, alignment));
-#else
-    bitmap_ = static_cast<uint8_t *>(std::aligned_alloc(alignment, bitmap_size));
-#endif
+    bitmap_ = static_cast<uint8_t *>(alaya_aligned_alloc_impl(bitmap_size, alignment_));
     std::memset(bitmap_, 0, bitmap_size);
   }
 
@@ -147,36 +120,24 @@ struct SequentialStorage {
 
   auto load(std::ifstream &reader) -> void {
     if (data_ != nullptr) {
-#ifdef _MSC_VER
-      _aligned_free(data_);
-#else
-      std::free(data_);  // NOLINT
-#endif
+      alaya_aligned_free_impl(data_);
     }
     if (bitmap_ != nullptr) {
-#ifdef _MSC_VER
-      _aligned_free(bitmap_);
-#else
-      std::free(bitmap_);  // NOLINT
-#endif
+      alaya_aligned_free_impl(bitmap_);
     }
     reader.read(reinterpret_cast<char *>(&item_size_), sizeof(item_size_));
     reader.read(reinterpret_cast<char *>(&aligned_item_size_), sizeof(aligned_item_size_));
     reader.read(reinterpret_cast<char *>(&capacity_), sizeof(capacity_));
     reader.read(reinterpret_cast<char *>(&pos_), sizeof(pos_));
     reader.read(reinterpret_cast<char *>(&alignment_), sizeof(alignment_));
-#ifdef _MSC_VER
-    data_ = static_cast<DataType *>(_aligned_malloc(aligned_item_size_ * capacity_, alignment_));
-#else
-    data_ = static_cast<DataType *>(std::aligned_alloc(alignment_, aligned_item_size_ * capacity_));
-#endif
+
+    data_ = static_cast<DataType *>(
+        alaya_aligned_alloc_impl(aligned_item_size_ * capacity_, alignment_));
     reader.read(reinterpret_cast<char *>(data_), aligned_item_size_ * capacity_);
-    auto bitmap_size = do_align((capacity_ + kBitEveryByte - 1) / kBitEveryByte, alignment_);
-#ifdef _MSC_VER
-    bitmap_ = static_cast<uint8_t *>(_aligned_malloc(bitmap_size, alignment_));
-#else
-    bitmap_ = static_cast<uint8_t *>(std::aligned_alloc(alignment_, bitmap_size));
-#endif
+
+    auto bitmap_size =
+        math::round_up_pow2((capacity_ + kBitEveryByte - 1) / kBitEveryByte, alignment_);
+    bitmap_ = static_cast<uint8_t *>(alaya_aligned_alloc_impl(bitmap_size, alignment_));
     reader.read(reinterpret_cast<char *>(bitmap_), (capacity_ + kBitEveryByte - 1) / kBitEveryByte);
   }
 };

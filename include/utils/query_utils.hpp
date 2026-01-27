@@ -68,8 +68,8 @@ inline auto count_trailing_zeros(uint64_t x) -> int {
  */
 class DynamicBitset {
  private:
-  std::vector<uint64_t, AlignAlloc<uint64_t>> data_;
-  size_t size_;
+  std::vector<uint64_t, AlignedAlloc<uint64_t>> data_;
+  [[maybe_unused]] size_t size_;
 
  public:
   /**
@@ -144,7 +144,7 @@ class SparseBitset {
    * @param pos The position of the bit to get
    * @return true if the bit is set, false otherwise
    */
-  auto get(size_t pos) const -> bool { return set_bits_.find(pos) != set_bits_.end(); }
+  auto get(size_t pos) const -> bool { return set_bits_.contains(pos); }
 
   /**
    * @brief Reset the bit at the specified position
@@ -170,7 +170,7 @@ class HierarchicalBitset {
  private:
   std::vector<uint64_t> data_;
   std::vector<uint64_t> summary_;
-  size_t size_;
+  [[maybe_unused]] size_t size_;
   static const size_t kBitsPerBlock = 512;
   static const size_t kSummaryBlockSize = 64;
 
@@ -307,7 +307,7 @@ struct LinearPool {
   auto is_full() -> bool { return size_ == capacity_; }
 
   size_t nb_, size_ = 0, cur_ = 0, capacity_;
-  std::vector<Neighbor<IDType, DistanceType>, AlignAlloc<Neighbor<IDType, DistanceType>>> data_;
+  std::vector<Neighbor<IDType, DistanceType>, AlignedAlloc<Neighbor<IDType, DistanceType>>> data_;
   DynamicBitset vis_;
 };
 

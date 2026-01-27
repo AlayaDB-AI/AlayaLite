@@ -19,14 +19,7 @@
 #include <array>
 #include <string_view>
 #include <tuple>
-
-#if defined(_MSC_VER)
-  #define ALAYA_UNREACHABLE __assume(0)
-#elif defined(__GNUC__) || defined(__clang__)
-  #define ALAYA_UNREACHABLE __builtin_unreachable()
-#else
-  #define ALAYA_UNREACHABLE
-#endif
+#include "utils/platform.hpp"
 
 namespace alaya {
 
