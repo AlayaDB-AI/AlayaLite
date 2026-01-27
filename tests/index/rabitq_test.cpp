@@ -136,4 +136,39 @@ TEST_F(RaBitQSiftSmallTest, SiftSmallQGTest) {  // for code coverage
     std::cout << efs[i] << '\t' << avg_qps[i] << '\t' << avg_recall[i] << '\n';
   }
 }
+
+TEST_F(RaBitQSiftSmallTest, InvalidParameterTest) {
+  std::filesystem::path index_file =
+      fmt::format("{}_rabitq.qg", config_.dir_.string() + "/siftsmall");
+  std::string_view path = index_file.native();
+
+  if (!std::filesystem::exists(index_file)) {
+    std::shared_ptr<alaya::RaBitQSpace<>> space =
+        std::make_shared<alaya::RaBitQSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
+    space->fit(ds_.data_.data(), ds_.data_num_);
+
+    auto qg = alaya::QGBuilder<RaBitQSpace<>>(space);
+    qg.build_graph();
+    space->save(path);
+  }
+
+  auto load_space = std::make_shared<alaya::RaBitQSpace<>>();
+  load_space->load(path);
+  auto search_job = std::make_unique<alaya::GraphSearchJob<RaBitQSpace<>>>(load_space, nullptr);
+
+  size_t topk = 10;
+  size_t ef = 5;  // ef < k, should throw exception
+  std::vector<IDType> results(topk);
+  auto query = ds_.queries_.data();
+
+#if defined(__AVX512F__)
+  // Should throw invalid_argument exception when ef < k
+  EXPECT_THROW(search_job->rabitq_search_solo(query, topk, results.data(), ef),
+               std::invalid_argument);
+#else
+  // On non-AVX512 platforms, should throw runtime_error
+  EXPECT_THROW(search_job->rabitq_search_solo(query, topk, results.data(), ef),
+               std::runtime_error);
+#endif
+}
 }  // namespace alaya

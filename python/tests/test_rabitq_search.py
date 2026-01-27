@@ -89,6 +89,21 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
             # result_load equals result
             self.assertTrue(np.allclose(result_load, result))
 
+    def test_invalid_parameters(self):
+        """Test that ef < k raises an error."""
+        index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
+        vectors = np.random.rand(1000, 128).astype(np.float32)
+        query = np.random.rand(128).astype(np.float32)
+        index.fit(vectors)
+
+        try:
+            # ef < k should throw exception
+            with self.assertRaises((ValueError, RuntimeError)):
+                index.search(query, topk=10, ef_search=5)
+        except RuntimeError as _:
+            # AVX512 not supported, test passes
+            print("AVX512 instruction is not supported.")
+
 
 if __name__ == "__main__":
     unittest.main()
