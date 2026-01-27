@@ -24,8 +24,8 @@
 #include <string>
 #include <string_view>
 #include "../utils/prefetch.hpp"
-#include "distance/dist_ip.hpp"
-#include "distance/dist_l2.hpp"
+#include "simd/distance_ip.hpp"
+#include "simd/distance_l2.hpp"
 #include "space_concepts.hpp"
 #include "storage/sequential_storage.hpp"
 #include "utils/data_utils.hpp"
@@ -82,7 +82,7 @@ class RawSpace {
   RawSpace(IDType capacity, size_t dim, MetricType metric)
       : capacity_(capacity), dim_(dim), metric_(metric) {
     data_size_ = dim * sizeof(DataType);
-    distance_calu_func_ = l2_sqr<DataType, DistanceType>;  // Assign the distance function
+    distance_calu_func_ = simd::l2_sqr<DataType, DistanceType>;  // Assign the distance function
 
     data_storage_.init(data_size_, capacity);
 
@@ -113,11 +113,11 @@ class RawSpace {
   void set_metric_function() {
     switch (metric_) {
       case MetricType::L2:
-        distance_calu_func_ = l2_sqr<DataType, DistanceType>;
+        distance_calu_func_ = simd::l2_sqr<DataType, DistanceType>;
         break;
       case MetricType::IP:
       case MetricType::COS:
-        distance_calu_func_ = ip_sqr<DataType, DistanceType>;
+        distance_calu_func_ = simd::ip_sqr<DataType, DistanceType>;
         break;
       default:
         break;

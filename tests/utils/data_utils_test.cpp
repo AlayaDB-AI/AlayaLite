@@ -16,7 +16,7 @@
 
 #include "utils/data_utils.hpp"
 #include <gtest/gtest.h>
-#include "space/distance/dist_ip.hpp"
+#include "simd/distance_ip.hpp"
 
 namespace alaya {
 
@@ -28,7 +28,7 @@ TEST(NormalizationTest, simple) {
 
   alaya::normalize(x.data(), x.size());
   alaya::normalize(y.data(), y.size());
-  auto dist = alaya::ip_sqr<float, float>(x.data(), y.data(), x.size());
+  auto dist = simd::ip_sqr<float, float>(x.data(), y.data(), x.size());
 
   EXPECT_FLOAT_EQ(actual, dist);
 }

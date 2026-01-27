@@ -22,7 +22,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "space/distance/dist_l2.hpp"
+#include "simd/distance_l2.hpp"
 #include "utils/log.hpp"
 namespace alaya {
 
@@ -46,7 +46,7 @@ auto find_exact_gt(const std::vector<DataType> &queries,
       if (deleted && deleted->find(j) != deleted->end()) {
         continue;
       }
-      float dist = l2_sqr<DataType, DistanceType>(queries.data() + (i * dim),
+      float dist = simd::l2_sqr<DataType, DistanceType>(queries.data() + (i * dim),
                                                   data_view.data() + (j * dim),
                                                   dim);
       dists.emplace_back(j, dist);

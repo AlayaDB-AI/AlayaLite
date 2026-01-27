@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+/**
+ * SQ8 IP SIMD Distance Benchmark
+ *
+ * Usage: ./ip_sq8_benchmark [dim1 dim2 ...]
+ * Default dimensions: 96, 128, 256, 384, 512, 768, 960, 1024, 1536
+ */
+
 #include <chrono>
 #include <iomanip>
 #include <iostream>
@@ -21,47 +28,26 @@
 #include <string>
 #include <vector>
 
-#include "simd/distance_l2.hpp"
+#include "simd/distance_ip.hpp"
 
-/**
- * @brief Benchmark for L2 SQ4 SIMD distance functions
- *
- * SQ4 stores 2 values per byte (4 bits each):
- *   - Low nibble (bits 0-3) = even index
- *   - High nibble (bits 4-7) = odd index
- *
- * Usage: ./l2_sqr_sq4_benchmark [dim1 dim2 ...]
- * If no dimensions are provided, defaults to common ANN dataset dimensions.
- */
 namespace {
 
 constexpr size_t kWarmupIterations = 1000;
 constexpr size_t kBenchmarkIterations = 100000;
 
-// Pack 4-bit values into bytes: low nibble = even index, high nibble = odd index
-void pack_sq4(std::vector<uint8_t>& packed, size_t dim, unsigned seed) {
+void fill_random_sq8(std::vector<uint8_t>& v, unsigned seed) {
   std::mt19937 rng(seed);
-  std::uniform_int_distribution<int> dist(0, 15);
-
-  size_t num_bytes = (dim + 1) / 2;
-  packed.resize(num_bytes);
-
-  for (size_t i = 0; i < dim; i += 2) {
-    auto lo = static_cast<uint8_t>(dist(rng));
-    uint8_t hi = (i + 1 < dim) ? static_cast<uint8_t>(dist(rng)) : 0;
-    packed[i / 2] = lo | (hi << 4);
+  std::uniform_int_distribution<int> dist(0, 255);
+  for (auto& x : v) {
+    x = static_cast<uint8_t>(dist(rng));
   }
 }
 
-void fill_min_max(std::vector<float>& min_vals,
-                  std::vector<float>& max_vals,
-                  size_t dim,
+void fill_min_max(std::vector<float>& min_vals, std::vector<float>& max_vals,
                   unsigned seed) {
   std::mt19937 rng(seed);
   std::uniform_real_distribution<float> dist(-10.0F, 10.0F);
-  min_vals.resize(dim);
-  max_vals.resize(dim);
-  for (size_t i = 0; i < dim; ++i) {
+  for (size_t i = 0; i < min_vals.size(); ++i) {
     float a = dist(rng);
     float b = dist(rng);
     min_vals[i] = std::min(a, b);
@@ -85,22 +71,18 @@ struct DimResults {
 };
 
 template <typename Func>
-auto run_benchmark(Func func,
-                   const uint8_t* x,
-                   const uint8_t* y,
-                   const float* min,
-                   const float* max,
-                   size_t dim,
+auto run_benchmark(Func func, const uint8_t* x, const uint8_t* y,
+                   const float* min_vals, const float* max_vals, size_t dim,
                    size_t iterations) -> double {
   volatile float sink = 0;
   for (size_t i = 0; i < kWarmupIterations; ++i) {
-    sink = func(x, y, dim, min, max);
+    sink = func(x, y, dim, min_vals, max_vals);
   }
   (void)sink;
 
   auto start = std::chrono::high_resolution_clock::now();
   for (size_t i = 0; i < iterations; ++i) {
-    sink = func(x, y, dim, min, max);
+    sink = func(x, y, dim, min_vals, max_vals);
   }
   auto end = std::chrono::high_resolution_clock::now();
 
@@ -113,18 +95,17 @@ auto run_benchmarks_for_dim(size_t dim) -> DimResults {
   DimResults results;
   results.dim_ = dim;
 
-  std::vector<uint8_t> x;
-  std::vector<uint8_t> y;
-  std::vector<float> min_vals;
-  std::vector<float> max_vals;
-
-  pack_sq4(x, dim, 42);
-  pack_sq4(y, dim, 123);
-  fill_min_max(min_vals, max_vals, dim, 456);
+  std::vector<uint8_t> x(dim);
+  std::vector<uint8_t> y(dim);
+  std::vector<float> min_vals(dim);
+  std::vector<float> max_vals(dim);
+  fill_random_sq8(x, 42);
+  fill_random_sq8(y, 123);
+  fill_min_max(min_vals, max_vals, 456);
 
   // Generic (baseline)
   results.generic_.ns_per_call_ =
-      run_benchmark(alaya::simd::l2_sqr_sq4_generic, x.data(), y.data(),
+      run_benchmark(alaya::simd::ip_sqr_sq8_generic, x.data(), y.data(),
                     min_vals.data(), max_vals.data(), dim, kBenchmarkIterations);
   results.generic_.speedup_ = 1.0;
   double baseline_ns = results.generic_.ns_per_call_;
@@ -136,7 +117,7 @@ auto run_benchmarks_for_dim(size_t dim) -> DimResults {
   if (features.avx2_ && features.fma_) {
     results.has_avx2_ = true;
     results.avx2_.ns_per_call_ =
-        run_benchmark(alaya::simd::l2_sqr_sq4_avx2, x.data(), y.data(),
+        run_benchmark(alaya::simd::ip_sqr_sq8_avx2, x.data(), y.data(),
                       min_vals.data(), max_vals.data(), dim, kBenchmarkIterations);
     results.avx2_.speedup_ = baseline_ns / results.avx2_.ns_per_call_;
   }
@@ -145,15 +126,15 @@ auto run_benchmarks_for_dim(size_t dim) -> DimResults {
   if (features.avx512f_) {
     results.has_avx512_ = true;
     results.avx512_.ns_per_call_ =
-        run_benchmark(alaya::simd::l2_sqr_sq4_avx512, x.data(), y.data(),
+        run_benchmark(alaya::simd::ip_sqr_sq8_avx512, x.data(), y.data(),
                       min_vals.data(), max_vals.data(), dim, kBenchmarkIterations);
     results.avx512_.speedup_ = baseline_ns / results.avx512_.ns_per_call_;
   }
 #endif
 
-  // Best (get_l2_sqr_sq4_func with auto dispatch)
+  // Best (get_ip_sq8_func with auto dispatch)
   results.best_.ns_per_call_ =
-      run_benchmark(alaya::simd::get_l2_sqr_sq4_func(), x.data(), y.data(),
+      run_benchmark(alaya::simd::get_ip_sqr_sq8_func(), x.data(), y.data(),
                     min_vals.data(), max_vals.data(), dim, kBenchmarkIterations);
   results.best_.speedup_ = baseline_ns / results.best_.ns_per_call_;
 
@@ -161,7 +142,7 @@ auto run_benchmarks_for_dim(size_t dim) -> DimResults {
 }
 
 void print_comparison_table(const std::vector<DimResults>& all_results) {
-  std::cout << "\n## SQ4 L2 SIMD Distance Performance Comparison\n\n";
+  std::cout << "\n## SQ8 IP SIMD Distance Performance Comparison\n\n";
   std::cout << "| Dimension | Generic (baseline) | AVX2 | AVX-512 | AUTO |\n";
   std::cout << "|-----------|-------------------|------|---------|------|\n";
 
@@ -198,7 +179,7 @@ void print_comparison_table(const std::vector<DimResults>& all_results) {
       std::cout << "N/A | ";
     }
 
-    // Best (get_l2_sqr_sq4_func with dispatch)
+    // Best (get_ip_sq8_func with dispatch)
     if (r.best_.speedup_ > 1.05) {
       std::cout << "**" << r.best_.ns_per_call_ << " ns (" << r.best_.speedup_
                 << "x)** |";
@@ -212,8 +193,7 @@ void print_comparison_table(const std::vector<DimResults>& all_results) {
   // Print summary
   std::cout << "\n## Summary\n\n";
   std::cout << "- **Bold** indicates >5% speedup over Generic baseline\n";
-  std::cout << "- **AUTO** = get_l2_sqr_sq4_func() with auto dispatch\n";
-  std::cout << "- SQ4 packs 2 values per byte (4 bits each)\n";
+  std::cout << "- **AUTO** = get_ip_sq8_func() with auto dispatch\n";
   std::cout << "- SIMD Level: " << alaya::simd::get_simd_level_name() << '\n';
   std::cout << "- Iterations per test: " << kBenchmarkIterations << '\n';
 }
@@ -221,7 +201,7 @@ void print_comparison_table(const std::vector<DimResults>& all_results) {
 }  // namespace
 
 auto main(int argc, char* argv[]) -> int {
-  std::cout << "# SQ4 L2 SIMD Distance Benchmark\n\n";
+  std::cout << "# SQ8 IP SIMD Distance Benchmark\n\n";
 
   // Default: ANN mainstream dataset dimensions
   std::vector<size_t> dims = {96, 128, 256, 384, 512, 768, 960, 1024, 1536};

@@ -24,7 +24,7 @@
 #include <vector>
 
 #include "index/neighbor.hpp"
-#include "space/distance/dist_l2.hpp"
+#include "simd/distance_l2.hpp"
 #include "space/quant/rabitq.hpp"
 #include "space/space_concepts.hpp"
 #include "storage/static_storage.hpp"
@@ -123,7 +123,7 @@ class RaBitQSpace {
   void set_metric_function() {
     switch (metric_) {
       case MetricType::L2:
-        distance_cal_func_ = l2_sqr_rabitq;
+        distance_cal_func_ = simd::l2_sqr<DataType, DistanceType>;
         break;
       case MetricType::COS:
       case MetricType::IP:

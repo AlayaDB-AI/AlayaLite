@@ -22,8 +22,8 @@
 #include <fstream>
 #include <iostream>
 #include <string>
-#include "distance/dist_ip.hpp"
-#include "distance/dist_l2.hpp"
+#include "simd/distance_ip.hpp"
+#include "simd/distance_l2.hpp"
 #include "space/quant/sq8.hpp"
 #include "space_concepts.hpp"
 #include "storage/sequential_storage.hpp"
@@ -92,11 +92,11 @@ class SQ8Space {
   void set_metric_function() {
     switch (metric_) {
       case MetricType::L2:
-        distance_calu_func_ = l2_sqr_sq8;
+        distance_calu_func_ = simd::l2_sqr_sq8<DataType, DistanceType>;
         break;
       case MetricType::COS:
       case MetricType::IP:
-        distance_calu_func_ = ip_sqr_sq8;
+        distance_calu_func_ = simd::ip_sqr_sq8<DataType, DistanceType>;
         break;
       default:
         break;

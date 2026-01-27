@@ -83,13 +83,13 @@ auto run_benchmark(Func func,
                    size_t iterations) -> double {
   volatile float sink = 0;
   for (size_t i = 0; i < kWarmupIterations; ++i) {
-    sink = func(x, y, min, max, dim);
+    sink = func(x, y, dim, min, max);
   }
   (void)sink;
 
   auto start = std::chrono::high_resolution_clock::now();
   for (size_t i = 0; i < iterations; ++i) {
-    sink = func(x, y, min, max, dim);
+    sink = func(x, y, dim, min, max);
   }
   auto end = std::chrono::high_resolution_clock::now();
 

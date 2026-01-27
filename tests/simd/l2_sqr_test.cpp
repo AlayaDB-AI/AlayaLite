@@ -167,9 +167,9 @@ class L2SqrSQ8Test : public ::testing::Test {
   // Reference implementation for validation
   static auto reference_l2_sqr_sq8(const uint8_t* x,
                                    const uint8_t* y,
+                                   size_t dim,
                                    const float* min,
-                                   const float* max,
-                                   size_t dim) -> float {
+                                   const float* max) -> float {
     constexpr float kInv255 = 1.0F / 255.0F;
     float sum = 0.0F;
     for (size_t i = 0; i < dim; ++i) {
@@ -194,9 +194,9 @@ TEST_F(L2SqrSQ8Test, GenericCorrectness) {
   fill_min_max(min_vals, max_vals, kDim, 3);
 
   float expected =
-      reference_l2_sqr_sq8(x.data(), y.data(), min_vals.data(), max_vals.data(), kDim);
-  float result = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), min_vals.data(),
-                                                  max_vals.data(), kDim);
+      reference_l2_sqr_sq8(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
+  float result = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(),
+                                                  max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-4F);
 }
@@ -212,10 +212,10 @@ TEST_F(L2SqrSQ8Test, SimdCorrectness) {
   fill_random_uint8(y, 2);
   fill_min_max(min_vals, max_vals, kDim, 3);
 
-  float expected = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), min_vals.data(),
-                                                    max_vals.data(), kDim);
-  auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), y.data(), min_vals.data(),
-                                                        max_vals.data(), kDim);
+  float expected = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(),
+                                                    max_vals.data());
+  auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), y.data(), kDim, min_vals.data(),
+                                                        max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }
@@ -233,10 +233,10 @@ TEST_F(L2SqrSQ8Test, TailHandling) {
     fill_random_uint8(y, dim + 100);
     fill_min_max(min_vals, max_vals, dim, dim + 200);
 
-    float expected = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), min_vals.data(),
-                                                      max_vals.data(), dim);
-    auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), y.data(), min_vals.data(),
-                                                                            max_vals.data(), dim);
+    float expected = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), dim, min_vals.data(),
+                                                      max_vals.data());
+    auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), y.data(), dim, min_vals.data(),
+                                                                            max_vals.data());
 
     EXPECT_NEAR(result, expected, 1e-3F) << "Failed for dim=" << dim;
   }
@@ -251,8 +251,8 @@ TEST_F(L2SqrSQ8Test, ZeroVector) {
 
   fill_min_max(min_vals, max_vals, kDim, 42);
 
-  auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), y.data(), min_vals.data(),
-                                                        max_vals.data(), kDim);
+  auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), y.data(), kDim, min_vals.data(),
+                                                        max_vals.data());
   EXPECT_FLOAT_EQ(result, 0.0F);
 }
 
@@ -265,8 +265,8 @@ TEST_F(L2SqrSQ8Test, IdenticalVectors) {
   fill_random_uint8(x, 42);
   fill_min_max(min_vals, max_vals, kDim, 43);
 
-  auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), x.data(), min_vals.data(),
-                                                        max_vals.data(), kDim);
+  auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), x.data(), kDim, min_vals.data(),
+                                                        max_vals.data());
   EXPECT_FLOAT_EQ(result, 0.0F);
 }
 
@@ -281,10 +281,10 @@ TEST_F(L2SqrSQ8Test, LargeDimension) {
   fill_random_uint8(y, 2);
   fill_min_max(min_vals, max_vals, kDim, 3);
 
-  float expected = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), min_vals.data(),
-                                                    max_vals.data(), kDim);
-  auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), y.data(), min_vals.data(),
-                                                        max_vals.data(), kDim);
+  float expected = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(),
+                                                    max_vals.data());
+  auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), y.data(), kDim, min_vals.data(),
+                                                        max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-2F);
 }
@@ -298,8 +298,8 @@ TEST_F(L2SqrSQ8Test, QuantizationExtremes) {
 
   // Expected: each dimension contributes ((0 - 255) * (2.0 / 255))^2 = 4.0
   float expected = static_cast<float>(kDim) * 4.0F;
-  auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), y.data(), min_vals.data(),
-                                                        max_vals.data(), kDim);
+  auto result = alaya::simd::l2_sqr_sq8<float, float>(x.data(), y.data(), kDim, min_vals.data(),
+                                                        max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }
@@ -321,10 +321,10 @@ TEST_F(L2SqrSQ8Test, AVX2Correctness) {
   fill_random_uint8(y, 2);
   fill_min_max(min_vals, max_vals, kDim, 3);
 
-  float expected = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), min_vals.data(),
-                                                    max_vals.data(), kDim);
+  float expected = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(),
+                                                    max_vals.data());
   auto result =
-      alaya::simd::l2_sqr_sq8_avx2(x.data(), y.data(), min_vals.data(), max_vals.data(), kDim);
+      alaya::simd::l2_sqr_sq8_avx2(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }
@@ -345,10 +345,10 @@ TEST_F(L2SqrSQ8Test, AVX512Correctness) {
   fill_random_uint8(y, 2);
   fill_min_max(min_vals, max_vals, kDim, 3);
 
-  float expected = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), min_vals.data(),
-                                                    max_vals.data(), kDim);
+  float expected = alaya::simd::l2_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(),
+                                                    max_vals.data());
   auto result =
-      alaya::simd::l2_sqr_sq8_avx512(x.data(), y.data(), min_vals.data(), max_vals.data(), kDim);
+      alaya::simd::l2_sqr_sq8_avx512(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }
@@ -400,9 +400,10 @@ class L2SqrSQ4Test : public ::testing::Test {
   // Reference implementation for validation
   static auto reference_l2_sqr_sq4(const uint8_t* x,
                                    const uint8_t* y,
+                                   size_t dim,
                                    const float* min,
-                                   const float* max,
-                                   size_t dim) -> float {
+                                   const float* max
+                                   ) -> float {
     constexpr float kInv15 = 1.0F / 15.0F;
     float sum = 0.0F;
     size_t byte_idx = 0;
@@ -441,9 +442,9 @@ TEST_F(L2SqrSQ4Test, GenericCorrectness) {
   fill_min_max(min_vals, max_vals, kDim, 3);
 
   float expected =
-      reference_l2_sqr_sq4(x_packed.data(), y_packed.data(), min_vals.data(), max_vals.data(), kDim);
-  float result = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(), min_vals.data(),
-                                                  max_vals.data(), kDim);
+      reference_l2_sqr_sq4(x_packed.data(), y_packed.data(), kDim, min_vals.data(), max_vals.data());
+  float result = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(), kDim, min_vals.data(),
+                                                  max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }
@@ -463,10 +464,10 @@ TEST_F(L2SqrSQ4Test, SimdCorrectness) {
   pack_sq4(y_packed, y_vals);
   fill_min_max(min_vals, max_vals, kDim, 3);
 
-  float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(),
-                                                    min_vals.data(), max_vals.data(), kDim);
-  auto result = alaya::simd::l2_sqr_sq4<float, float>(x_packed.data(), y_packed.data(),
-                                                        min_vals.data(), max_vals.data(), kDim);
+  float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(), kDim,
+                                                    min_vals.data(), max_vals.data());
+  auto result = alaya::simd::l2_sqr_sq4<float, float>(x_packed.data(), y_packed.data(), kDim,
+                                                        min_vals.data(), max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }
@@ -488,10 +489,10 @@ TEST_F(L2SqrSQ4Test, TailHandling) {
     pack_sq4(y_packed, y_vals);
     fill_min_max(min_vals, max_vals, dim, dim + 200);
 
-    float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(),
-                                                      min_vals.data(), max_vals.data(), dim);
-    auto result = alaya::simd::l2_sqr_sq4<float, float>(x_packed.data(), y_packed.data(),
-                                                          min_vals.data(), max_vals.data(), dim);
+    float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(), dim,
+                                                      min_vals.data(), max_vals.data());
+    auto result = alaya::simd::l2_sqr_sq4<float, float>(x_packed.data(), y_packed.data(), dim,
+                                                          min_vals.data(), max_vals.data());
 
     EXPECT_NEAR(result, expected, 1e-3F) << "Failed for dim=" << dim;
   }
@@ -507,8 +508,8 @@ TEST_F(L2SqrSQ4Test, ZeroVector) {
 
   fill_min_max(min_vals, max_vals, kDim, 42);
 
-  auto result = alaya::simd::l2_sqr_sq4<float, float>(x.data(), y.data(), min_vals.data(),
-                                                        max_vals.data(), kDim);
+  auto result = alaya::simd::l2_sqr_sq4<float, float>(x.data(), y.data(), kDim,
+                                                        min_vals.data(), max_vals.data());
   EXPECT_FLOAT_EQ(result, 0.0F);
 }
 
@@ -523,8 +524,8 @@ TEST_F(L2SqrSQ4Test, IdenticalVectors) {
   pack_sq4(x_packed, x_vals);
   fill_min_max(min_vals, max_vals, kDim, 43);
 
-  auto result = alaya::simd::l2_sqr_sq4<float, float>(x_packed.data(), x_packed.data(),
-                                                        min_vals.data(), max_vals.data(), kDim);
+  auto result = alaya::simd::l2_sqr_sq4<float, float>(x_packed.data(), x_packed.data(), kDim,
+                                                        min_vals.data(), max_vals.data());
   EXPECT_FLOAT_EQ(result, 0.0F);
 }
 
@@ -543,10 +544,10 @@ TEST_F(L2SqrSQ4Test, LargeDimension) {
   pack_sq4(y_packed, y_vals);
   fill_min_max(min_vals, max_vals, kDim, 3);
 
-  float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(),
-                                                    min_vals.data(), max_vals.data(), kDim);
-  auto result = alaya::simd::l2_sqr_sq4<float, float>(x_packed.data(), y_packed.data(),
-                                                        min_vals.data(), max_vals.data(), kDim);
+  float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(), kDim,
+                                                    min_vals.data(), max_vals.data());
+  auto result = alaya::simd::l2_sqr_sq4<float, float>(x_packed.data(), y_packed.data(), kDim,
+                                                        min_vals.data(), max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-2F);
 }
@@ -561,8 +562,8 @@ TEST_F(L2SqrSQ4Test, QuantizationExtremes) {
 
   // Expected: each dimension contributes ((0 - 15) * (2.0 / 15))^2 = 4.0
   float expected = static_cast<float>(kDim) * 4.0F;
-  auto result = alaya::simd::l2_sqr_sq4<float, float>(x.data(), y.data(), min_vals.data(),
-                                                        max_vals.data(), kDim);
+  auto result = alaya::simd::l2_sqr_sq4<float, float>(x.data(), y.data(), kDim, min_vals.data(),
+                                                        max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }
@@ -588,10 +589,10 @@ TEST_F(L2SqrSQ4Test, AVX2Correctness) {
   pack_sq4(y_packed, y_vals);
   fill_min_max(min_vals, max_vals, kDim, 3);
 
-  float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(),
-                                                    min_vals.data(), max_vals.data(), kDim);
-  auto result = alaya::simd::l2_sqr_sq4_avx2(x_packed.data(), y_packed.data(), min_vals.data(),
-                                               max_vals.data(), kDim);
+  float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(), kDim,
+                                                    min_vals.data(), max_vals.data());
+  auto result = alaya::simd::l2_sqr_sq4_avx2(x_packed.data(), y_packed.data(), kDim, min_vals.data(),
+                                               max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }
@@ -616,10 +617,10 @@ TEST_F(L2SqrSQ4Test, AVX512Correctness) {
   pack_sq4(y_packed, y_vals);
   fill_min_max(min_vals, max_vals, kDim, 3);
 
-  float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(),
-                                                    min_vals.data(), max_vals.data(), kDim);
-  auto result = alaya::simd::l2_sqr_sq4_avx512(x_packed.data(), y_packed.data(), min_vals.data(),
-                                                 max_vals.data(), kDim);
+  float expected = alaya::simd::l2_sqr_sq4_generic(x_packed.data(), y_packed.data(), kDim,
+                                                    min_vals.data(), max_vals.data());
+  auto result = alaya::simd::l2_sqr_sq4_avx512(x_packed.data(), y_packed.data(), kDim,min_vals.data(), 
+                                                 max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }

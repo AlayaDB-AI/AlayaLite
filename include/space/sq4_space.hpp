@@ -28,9 +28,9 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include "distance/dist_l2.hpp"
+#include "simd/distance_l2.hpp"
+#include "simd/distance_ip.hpp"
 #include "quant/sq4.hpp"
-#include "space/distance/dist_ip.hpp"
 #include "space_concepts.hpp"
 #include "storage/sequential_storage.hpp"
 #include "storage/storage_concept.hpp"
@@ -99,11 +99,11 @@ class SQ4Space {
   void set_metric_function() {
     switch (metric_) {
       case MetricType::L2:
-        distance_calu_func_ = l2_sqr_sq4;
+        distance_calu_func_ = simd::l2_sqr_sq4<DataType, DistanceType>;
         break;
       case MetricType::COS:
       case MetricType::IP:
-        distance_calu_func_ = ip_sqr_sq4;
+        distance_calu_func_ = simd::ip_sqr_sq4<DataType, DistanceType>;
         break;
       default:
         break;
