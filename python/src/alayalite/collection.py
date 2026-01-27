@@ -130,13 +130,14 @@ class Collection:
         self,
         items: List[tuple],
         *,
-        trace_id=None,
+        trace_id=None,  # pylint: disable=unused-argument
         payload=None,
-    ):  # pylint: disable=unused-argument
+    ):
         """
         Inserts multiple documents and their embeddings into the collection.
         """
         if not items:
+            print(f"WARNING: Empty items list in {self.__class__.__name__}.insert(), nothing to insert")
             return
 
         # Prepare monitoring data
@@ -159,7 +160,7 @@ class Collection:
             self.__index_params.data_type = dt  # type: ignore
             self.__index_py = Index(self.__name, self.__index_params)
             all_embeddings = np.array([item[2] for item in items])
-            self.__index_py.fit(all_embeddings, ef_construction=100, num_threads=1)
+            self.__index_py.fit(all_embeddings, ef_construction=100, num_threads=1, payload=payload)
 
             new_rows = []
             for i, (item_id, document, _, metadata) in enumerate(items):
@@ -168,10 +169,6 @@ class Collection:
                 self.__inner_outer_map[i] = item_id
             self.__dataframe = pd.concat([self.__dataframe, pd.DataFrame(new_rows)], ignore_index=True)
 
-            # Update payload after insertion
-            if payload is not None:
-                payload["vector_dim"] = int(self.__index_py.get_dim())
-                payload["total_vectors"] = int(len(self.__dataframe))
         else:
             new_rows = []
             for item_id, document, embedding, metadata in items:
@@ -181,23 +178,24 @@ class Collection:
                 self.__inner_outer_map[index_id] = item_id
             self.__dataframe = pd.concat([self.__dataframe, pd.DataFrame(new_rows)], ignore_index=True)
 
-            # Update payload after insertion
-            if payload is not None:
-                payload["vector_dim"] = int(self.__index_py.get_dim())
-                payload["total_vectors"] = int(len(self.__dataframe))
+        # Update payload after insertion
+        if payload is not None:
+            payload["vector_dim"] = int(self.__index_py.get_dim())
+            payload["total_vectors"] = int(len(self.__dataframe))
 
     @notify(span_id="collection_upsert")
     def upsert(
         self,
         items: List[tuple],
         *,
-        trace_id=None,
+        trace_id=None,  # pylint: disable=unused-argument
         payload=None,
-    ):  # pylint: disable=unused-argument
+    ):
         """
         Inserts new items or updates existing ones.
         """
         if not items:
+            print(f"WARNING: Empty items list in {self.__class__.__name__}.upsert(), nothing to upsert")
             return
 
         # Prepare monitoring data
@@ -214,7 +212,7 @@ class Collection:
             )
 
         if self.__index_py is None:
-            self.insert(items)
+            self.insert(items, payload=payload)
             return
 
         new_items_to_insert = []
@@ -233,7 +231,7 @@ class Collection:
                 new_items_to_insert.append((item_id, document, embedding, metadata))
 
         if new_items_to_insert:
-            self.insert(new_items_to_insert)
+            self.insert(new_items_to_insert, payload=payload)
 
         # Update payload after upsert
         if payload is not None:
@@ -245,13 +243,14 @@ class Collection:
         self,
         ids: List[str],
         *,
-        trace_id=None,
+        trace_id=None,  # pylint: disable=unused-argument
         payload=None,
-    ):  # pylint: disable=unused-argument
+    ):
         """
         Deletes documents from the collection by their IDs.
         """
         if not ids:
+            print(f"WARNING: Empty ids list in {self.__class__.__name__}.delete_by_id(), nothing to delete")
             return
 
         # Prepare monitoring data

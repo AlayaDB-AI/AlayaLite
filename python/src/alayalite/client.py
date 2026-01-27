@@ -236,9 +236,9 @@ class Client:
         collection_name: str,
         delete_on_disk: bool = False,
         *,
-        trace_id=None,
+        trace_id=None,  # pylint: disable=unused-argument
         payload=None,
-    ):  # pylint: disable=unused-argument
+    ):
         """
         Delete a collection by name.
 
@@ -280,9 +280,9 @@ class Client:
         index_name: str,
         delete_on_disk: bool = False,
         *,
-        trace_id=None,
+        trace_id=None,  # pylint: disable=unused-argument
         payload=None,
-    ):  # pylint: disable=unused-argument
+    ):
         """
         Delete an index by name.
 
@@ -342,9 +342,9 @@ class Client:
         self,
         index_name: str,
         *,
-        trace_id=None,
+        trace_id=None,  # pylint: disable=unused-argument
         payload=None,
-    ):  # pylint: disable=unused-argument
+    ):
         """
         Save an index to disk.
 
@@ -374,7 +374,7 @@ class Client:
             )
 
         index_url = os.path.join(self.__url, index_name)
-        schema_map = self.__index_map[index_name].save(index_url)
+        schema_map = self.__index_map[index_name].save(index_url, payload=payload)
         index_schema_url = os.path.join(index_url, "schema.json")
         with open(index_schema_url, "w", encoding="utf-8") as f:
             json.dump(schema_map, f, indent=4)
@@ -416,7 +416,7 @@ class Client:
             )
 
         collection_url = os.path.join(self.__url, collection_name)
-        schema_map = self.__collection_map[collection_name].save(collection_url)
+        schema_map = self.__collection_map[collection_name].save(collection_url, payload=payload)
         collection_schema_url = os.path.join(collection_url, "schema.json")
 
         with open(collection_schema_url, "w", encoding="utf-8") as f:
