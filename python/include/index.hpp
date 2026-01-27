@@ -241,7 +241,7 @@ class PyIndex : public BasePyIndex {
     if constexpr (is_rabitq_space_v<SearchSpaceType>) {
       search_job_->rabitq_search_solo(query_ptr, topk, res_pool.data(), ef);
     } else {
-      search_job_->search_solo(query_ptr, topk, res_pool.data(), ef);
+      search_job_->search_solo(query_ptr, res_pool.data(), ef);
     }
 
     auto ret = py::array_t<IDType>(static_cast<size_t>(topk));
@@ -264,7 +264,7 @@ class PyIndex : public BasePyIndex {
     std::vector<IDType> res_pool(ef);
     std::vector<DistanceType> dist_pool(ef);
 
-    search_job_->search_solo(query_ptr, topk, res_pool.data(), dist_pool.data(), ef);
+    search_job_->search_solo(query_ptr, res_pool.data(), dist_pool.data(), ef);
 
     auto ret_ids = py::array_t<IDType>(static_cast<size_t>(topk));
     auto ret_id_ptr = static_cast<IDType *>(ret_ids.request().ptr);
@@ -316,7 +316,7 @@ class PyIndex : public BasePyIndex {
       if constexpr (is_rabitq_space_v<SearchSpaceType>) {
         coros.emplace_back(search_job_->rabitq_search(cur_query, topk, res_pool[i].data(), ef));
       } else {
-        coros.emplace_back(search_job_->search(cur_query, topk, res_pool[i].data(), ef));
+        coros.emplace_back(search_job_->search(cur_query, res_pool[i].data(), ef));
       }
 
       scheduler->schedule(coros.back().handle());
@@ -354,7 +354,7 @@ class PyIndex : public BasePyIndex {
       if constexpr (is_rabitq_space_v<SearchSpaceType>) {
         search_job_->rabitq_search_solo(cur_query, topk, res_pool.data(), ef);
       } else {
-        search_job_->search_solo(cur_query, topk, res_pool.data(), ef);
+        search_job_->search_solo(cur_query, res_pool.data(), ef);
       }
 
       if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value ||
@@ -382,6 +382,10 @@ class PyIndex : public BasePyIndex {
     std::vector<std::vector<IDType>> res_pool(query_size, std::vector<IDType>(ef));
     std::vector<std::vector<DistanceType>> dist_pool;
 
+    // Arrays to store topk results (after rerank or direct copy)
+    std::vector<std::vector<IDType>> topk_ids(query_size, std::vector<IDType>(topk));
+    std::vector<std::vector<DistanceType>> topk_dists(query_size, std::vector<DistanceType>(topk));
+
     std::vector<CpuID> worker_cpus;
     std::vector<coro::task<>> coros;
 
@@ -400,9 +404,9 @@ class PyIndex : public BasePyIndex {
       if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::
                         value) {  // don't need rerank and need to get distance
         coros.emplace_back(
-            search_job_->search(cur_query, topk, res_pool[i].data(), dist_pool[i].data(), ef));
+            search_job_->search(cur_query, res_pool[i].data(), dist_pool[i].data(), ef));
       } else {
-        coros.emplace_back(search_job_->search(cur_query, topk, res_pool[i].data(), ef));
+        coros.emplace_back(search_job_->search(cur_query, res_pool[i].data(), ef));
       }
 
       scheduler->schedule(coros.back().handle());
@@ -413,8 +417,25 @@ class PyIndex : public BasePyIndex {
 
     // LOG_INFO("Total time: {} s.", timer.elapsed() / 1000000.0);
 
-    auto ret_id = get_topk_array(res_pool, topk);
-    auto ret_dist = get_topk_array(dist_pool, topk);
+    // Rerank or direct copy
+    if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
+      for (size_t i = 0; i < query_size; i++) {
+        std::copy(res_pool[i].begin(), res_pool[i].begin() + topk, topk_ids[i].begin());
+        std::copy(dist_pool[i].begin(), dist_pool[i].begin() + topk, topk_dists[i].begin());
+      }
+    } else {
+      for (size_t i = 0; i < query_size; i++) {
+        rerank(res_pool[i],
+               topk_ids[i].data(),
+               topk_dists[i].data(),
+               build_space_->get_query_computer(query_ptr + i * query_dim),
+               ef,
+               topk);
+      }
+    }
+
+    auto ret_id = get_topk_array(topk_ids, topk);
+    auto ret_dist = get_topk_array(topk_dists, topk);
     return py::make_tuple(ret_id, ret_dist);
 #else
     auto ret_id = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
@@ -428,7 +449,7 @@ class PyIndex : public BasePyIndex {
       std::vector<DistanceType> dist_pool(ef);
       auto cur_query = query_ptr + i * query_dim;
 
-      search_job_->search_solo(cur_query, topk, res_pool.data(), dist_pool.data(), ef);
+      search_job_->search_solo(cur_query, res_pool.data(), dist_pool.data(), ef);
 
       if constexpr (std::is_same<SearchSpaceType, BuildSpaceType>::value) {
         std::copy(res_pool.begin(), res_pool.begin() + topk, ret_id_ptr + i * topk);

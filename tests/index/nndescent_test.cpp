@@ -117,17 +117,19 @@ TEST_F(NnDescentSearchTest, SimpleSearchTest) {
 
   auto search_knn = [&](uint32_t i) {
     for (; i < ds_.query_num_; i += kSearchThreadNum) {
-      std::vector<uint32_t> ids(topk);
+      std::vector<uint32_t> ids(ef);
       auto cur_query = ds_.queries_.data() + i * ds_.dim_;
-      task_generator->search_solo(cur_query, topk, ids.data(), ef);
+      task_generator->search_solo(cur_query, ids.data(), ef);
 
-      auto id_set = std::set(ids.begin(), ids.end());
+      // Extract topk results from ef candidates
+      std::vector<uint32_t> topk_ids(ids.begin(), ids.begin() + topk);
+      auto id_set = std::set(topk_ids.begin(), topk_ids.end());
 
       if (id_set.size() < topk) {
         fmt::println("i id: {}", i);
         fmt::println("ids size: {}", id_set.size());
       }
-      res_pool[i] = ids;
+      res_pool[i] = topk_ids;
     }
   };
 

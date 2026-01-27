@@ -47,9 +47,10 @@ class GraphUpdateJob {
         job_context_(search_job->job_context_) {}
 
   auto insert(DataType *query, IDType *ids, uint32_t ef) -> IDType {
-    std::vector<IDType> search_results(graph_->max_nbrs_, -1);
+    uint32_t search_size = std::max(ef, static_cast<uint32_t>(graph_->max_nbrs_));
+    std::vector<IDType> search_results(search_size, -1);
 
-    search_job_->search_solo(query, graph_->max_nbrs_, search_results.data(), ef);
+    search_job_->search_solo(query, search_results.data(), search_size);
     auto node_id = graph_->insert(search_results.data());
     space_->insert(query);
 
@@ -58,15 +59,17 @@ class GraphUpdateJob {
 
       if (invert_node != static_cast<IDType>(-1)) {
         job_context_->inserted_edges_[invert_node].push_back(node_id);
+        *(ids + i) = invert_node;
       }
     }
     return node_id;
   }
 
   auto insert_and_update(DataType *query, uint32_t ef) -> IDType {
-    std::vector<IDType> search_results(graph_->max_nbrs_, -1);
+    uint32_t search_size = std::max(ef, static_cast<uint32_t>(graph_->max_nbrs_));
+    std::vector<IDType> search_results(search_size, static_cast<IDType>(-1));
 
-    search_job_->search_solo(query, graph_->max_nbrs_, search_results.data(), ef);
+    search_job_->search_solo(query, search_results.data(), search_size);
     auto node_id = graph_->insert(search_results.data());
     if (node_id == static_cast<IDType>(-1)) {
       assert(space_->insert(query) == static_cast<IDType>(-1));
