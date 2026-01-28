@@ -36,6 +36,9 @@ class AlayaLiteConan(ConanFile):
             self.requires("llvm-openmp/18.1.8")
 
     def configure(self):
+        # Use header-only spdlog to avoid ABI compatibility issues on Windows
+        self.options["spdlog"].header_only = True
+
         if self.settings.os == "Linux":
             self.options["libcoro"].feature_networking = False
             self.options["libcoro"].feature_tls = False
