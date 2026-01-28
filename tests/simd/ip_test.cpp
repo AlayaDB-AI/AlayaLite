@@ -18,6 +18,7 @@
 #include <cmath>
 #include <random>
 #include <vector>
+#include "simd/cpu_features.hpp"
 #include "simd/distance_ip.hpp"
 
 namespace {
@@ -257,6 +258,11 @@ TEST_F(IpSQ8Test, IdenticalVectors) {
 
 #ifdef ALAYA_ARCH_X86
 TEST_F(IpSQ8Test, AVX2Correctness) {
+  const auto& features = alaya::simd::get_cpu_features();
+  if (!features.avx2_ || !features.fma_) {
+    GTEST_SKIP() << "AVX2 + FMA not available";
+  }
+
   constexpr size_t kDim = 128;
   std::vector<uint8_t> x(kDim);
   std::vector<uint8_t> y(kDim);
@@ -275,6 +281,11 @@ TEST_F(IpSQ8Test, AVX2Correctness) {
 }
 
 TEST_F(IpSQ8Test, AVX512Correctness) {
+  const auto& features = alaya::simd::get_cpu_features();
+  if (!features.avx512f_) {
+    GTEST_SKIP() << "AVX-512 not available";
+  }
+
   constexpr size_t kDim = 128;
   std::vector<uint8_t> x(kDim);
   std::vector<uint8_t> y(kDim);
@@ -433,6 +444,11 @@ TEST_F(IpSQ4Test, IdenticalVectors) {
 
 #ifdef ALAYA_ARCH_X86
 TEST_F(IpSQ4Test, AVX2Correctness) {
+  const auto& features = alaya::simd::get_cpu_features();
+  if (!features.avx2_ || !features.fma_) {
+    GTEST_SKIP() << "AVX2 + FMA not available";
+  }
+
   constexpr size_t kDim = 128;
   std::vector<uint8_t> x_packed;
   std::vector<uint8_t> y_packed;
@@ -451,6 +467,11 @@ TEST_F(IpSQ4Test, AVX2Correctness) {
 }
 
 TEST_F(IpSQ4Test, AVX512Correctness) {
+  const auto& features = alaya::simd::get_cpu_features();
+  if (!features.avx512f_) {
+    GTEST_SKIP() << "AVX-512 not available";
+  }
+
   constexpr size_t kDim = 128;
   std::vector<uint8_t> x_packed;
   std::vector<uint8_t> y_packed;
