@@ -160,7 +160,7 @@ class Collection:
             self.__index_params.data_type = dt  # type: ignore
             self.__index_py = Index(self.__name, self.__index_params)
             all_embeddings = np.array([item[2] for item in items])
-            self.__index_py.fit(all_embeddings, ef_construction=100, num_threads=1, payload=payload)
+            self.__index_py.fit(all_embeddings, ef_construction=100, num_threads=1, payload={})
 
             new_rows = []
             for i, (item_id, document, _, metadata) in enumerate(items):
@@ -212,7 +212,11 @@ class Collection:
             )
 
         if self.__index_py is None:
-            self.insert(items, payload=payload)
+            self.insert(items, payload={})
+            # Update payload after insert
+            if payload is not None:
+                payload["vector_dim"] = int(self.__index_py.get_dim())
+                payload["total_vectors"] = int(len(self.__dataframe))
             return
 
         new_items_to_insert = []
@@ -231,7 +235,7 @@ class Collection:
                 new_items_to_insert.append((item_id, document, embedding, metadata))
 
         if new_items_to_insert:
-            self.insert(new_items_to_insert, payload=payload)
+            self.insert(new_items_to_insert, payload={})
 
         # Update payload after upsert
         if payload is not None:
