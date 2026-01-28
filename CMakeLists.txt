@@ -37,14 +37,7 @@ find_package(spdlog REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenMP REQUIRED)
 
-# Use spdlog_header_only target (header-only mode for better compatibility)
-if(TARGET spdlog::spdlog_header_only)
-  set(SPDLOG_TARGET spdlog::spdlog_header_only)
-else()
-  set(SPDLOG_TARGET spdlog::spdlog)
-endif()
-
-set(THIRD_PARTY_LIBS ${SPDLOG_TARGET} concurrentqueue::concurrentqueue Eigen3::Eigen OpenMP::OpenMP_CXX)
+set(THIRD_PARTY_LIBS spdlog::spdlog_header_only concurrentqueue::concurrentqueue Eigen3::Eigen OpenMP::OpenMP_CXX)
 
 if(UNIX AND NOT APPLE)
   find_package(libcoro REQUIRED)
