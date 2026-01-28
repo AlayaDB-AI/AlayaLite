@@ -301,7 +301,7 @@ class RaBitQSpace {
       // look up, get sum(nth_segment)
       fastscan::accumulate(qc_ptr, lookup_table_.lut(), accu_res_.data(), padded_dim);
 
-      ConstRowMajorArrayMap<u_int16_t> n_th_segment_arr(accu_res_.data(), 1, fastscan::kBatchSize);
+      ConstRowMajorArrayMap<uint16_t> n_th_segment_arr(accu_res_.data(), 1, fastscan::kBatchSize);
       ConstRowMajorArrayMap<DataType> f_add_arr(f_add_ptr, 1, fastscan::kBatchSize);
       ConstRowMajorArrayMap<DataType> f_rescale_arr(f_rescale_ptr, 1, fastscan::kBatchSize);
 

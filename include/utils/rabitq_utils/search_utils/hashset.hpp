@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <sys/mman.h>
 #include <climits>
 #include <cstdint>
 #include <cstring>

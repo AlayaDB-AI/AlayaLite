@@ -16,9 +16,17 @@
 
 #pragma once
 
-#include <fcntl.h>
-#include <sys/file.h>
-#include <unistd.h>
+#ifdef _WIN32
+  #ifndef NOMINMAX
+    #define NOMINMAX  // Prevent Windows.h from defining min/max macros
+  #endif
+  #include <windows.h>
+#else
+  #include <fcntl.h>
+  #include <sys/file.h>
+  #include <unistd.h>
+#endif
+
 #include <atomic>
 #include <cassert>
 #include <filesystem>  // NOLINT(build/c++17)
@@ -27,23 +35,41 @@ namespace alaya {
 /**
  * @brief RAII file lock for cross-process synchronization.
  *
- * Uses flock() to acquire an exclusive lock on a lock file.
+ * Uses flock() on POSIX or LockFileEx() on Windows to acquire an exclusive lock.
  * The lock is automatically released when the object is destroyed.
  */
 class FileLock {
  public:
   explicit FileLock(std::filesystem::path lock_file) : lock_file_(std::move(lock_file)) {
+#ifdef _WIN32
+    handle_ = CreateFileW(lock_file_.wstring().c_str(), GENERIC_READ | GENERIC_WRITE,
+                          FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+                          FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle_ != INVALID_HANDLE_VALUE) {
+      OVERLAPPED overlapped = {0};
+      LockFileEx(handle_, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlapped);
+    }
+#else
     fd_ = open(lock_file_.c_str(), O_CREAT | O_RDWR, 0666);
     if (fd_ >= 0) {
       flock(fd_, LOCK_EX);  // Acquire exclusive lock (blocking)
     }
+#endif
   }
 
   ~FileLock() {
+#ifdef _WIN32
+    if (handle_ != INVALID_HANDLE_VALUE) {
+      OVERLAPPED overlapped = {0};
+      UnlockFileEx(handle_, 0, MAXDWORD, MAXDWORD, &overlapped);
+      CloseHandle(handle_);
+    }
+#else
     if (fd_ >= 0) {
       flock(fd_, LOCK_UN);  // Release lock
       close(fd_);
     }
+#endif
   }
 
   FileLock(const FileLock &) = delete;
@@ -51,7 +77,11 @@ class FileLock {
 
  private:
   std::filesystem::path lock_file_;
+#ifdef _WIN32
+  HANDLE handle_ = INVALID_HANDLE_VALUE;
+#else
   int fd_ = -1;
+#endif
 };
 
 class SpinLock {
