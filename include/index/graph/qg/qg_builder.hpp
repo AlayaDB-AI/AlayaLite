@@ -119,7 +119,7 @@ class QGBuilder {
 
 // update result with space and graph in the end of every iteration
 #pragma omp parallel for schedule(dynamic)
-    for (size_t i = 0; i < num_nodes_; ++i) {
+    for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
       if (sup && new_neighbors_[i].size() < degree_bound_) {
         LOG_ERROR("After supplement, node_{} only has {} neighbors.", i, new_neighbors_[i].size());
       }
@@ -131,8 +131,8 @@ class QGBuilder {
     LOG_INFO("Searching for new neighbor candidates...");
 #if defined(__AVX512F__)
   #pragma omp parallel for schedule(dynamic)
-    for (size_t i = 0; i < num_nodes_; ++i) {
-      IDType cur_id = i;
+    for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
+      IDType cur_id = static_cast<IDType>(i);
       auto tid = omp_get_thread_num();
       CandidateList candidates;
       HashBasedBooleanSet &vis = visited_list_[tid];
@@ -166,7 +166,7 @@ class QGBuilder {
     std::vector<std::mutex> locks(num_nodes_);
     std::vector<CandidateList> reverse_buffer(num_nodes_);
   #pragma omp parallel for schedule(dynamic)
-    for (IDType data_id = 0; data_id < num_nodes_; ++data_id) {  // for every vertex
+    for (int64_t data_id = 0; data_id < static_cast<int64_t>(num_nodes_); ++data_id) {  // for every vertex
       for (const auto &nei : new_neighbors_[data_id]) {
         auto dst = nei.id_;
         bool dup = false;
@@ -192,7 +192,7 @@ class QGBuilder {
       }
     }
   #pragma omp parallel for schedule(dynamic)
-    for (IDType data_id = 0; data_id < num_nodes_; ++data_id) {  // prune for every vertex
+    for (int64_t data_id = 0; data_id < static_cast<int64_t>(num_nodes_); ++data_id) {  // prune for every vertex
       CandidateList &tmp_pool = reverse_buffer[data_id];
       tmp_pool.reserve(tmp_pool.size() + degree_bound_);
       // add current neighbors
@@ -215,7 +215,7 @@ class QGBuilder {
     LOG_INFO("Supplementing edges...");
 #if defined(__AVX512F__)
   #pragma omp parallel for schedule(dynamic)
-    for (size_t i = 0; i < num_nodes_; ++i) {
+    for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
       CandidateList &cur_neighbors = new_neighbors_[i];
       size_t cur_degree = cur_neighbors.size();
 
@@ -444,7 +444,7 @@ class QGBuilder {
     // compute centroid
     std::vector<std::vector<DataType>> all_results(num_threads_, std::vector<DataType>(dim_, 0));
 #pragma omp parallel for schedule(dynamic)
-    for (size_t i = 0; i < num_nodes_; ++i) {
+    for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
       auto tid = omp_get_thread_num();
       std::vector<DataType> &cur_results = all_results[tid];
       auto cur_data = space_->get_data_by_id(i);
@@ -468,7 +468,7 @@ class QGBuilder {
         best_entries(num_threads_,
                      Neighbor<IDType, DistanceType>{0, std::numeric_limits<DistanceType>::max()});
 #pragma omp parallel for schedule(dynamic)
-    for (size_t i = 0; i < num_nodes_; ++i) {
+    for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
       auto tid = omp_get_thread_num();
       Neighbor<IDType, DistanceType> &cur_entry = best_entries[tid];
       auto cur_data = space_->get_data_by_id(i);
@@ -495,7 +495,7 @@ class QGBuilder {
 
   void random_init() {
 #pragma omp parallel for schedule(dynamic)
-    for (size_t i = 0; i < num_nodes_; ++i) {
+    for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
       // generate random neighbors
       std::unordered_set<IDType> neighbor_set;
       neighbor_set.reserve(degree_bound_);

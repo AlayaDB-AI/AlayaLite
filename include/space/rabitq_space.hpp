@@ -178,7 +178,7 @@ class RaBitQSpace {
     storage_ = StaticStorage<>(std::vector<size_t>{item_cnt_, data_chunk_size_});
 
 #pragma omp parallel for schedule(dynamic)
-    for (size_t i = 0; i < item_cnt; i++) {
+    for (int64_t i = 0; i < static_cast<int64_t>(item_cnt); i++) {
       const auto *src = data + (dim_ * i);
       auto *dst = get_data_by_id(i);
       std::copy(src, src + dim_, dst);
