@@ -369,12 +369,13 @@ class Client:
             index = self.__index_map[index_name]
             payload.update(
                 {
+                    "vector_dim": int(index.get_dim()),
                     "index_type": str(index.get_params().index_type) if index.get_params().index_type else "HNSW",
                 }
             )
 
         index_url = os.path.join(self.__url, index_name)
-        schema_map = self.__index_map[index_name].save(index_url, payload=payload)
+        schema_map = self.__index_map[index_name].save(index_url, payload={})
         index_schema_url = os.path.join(index_url, "schema.json")
         with open(index_schema_url, "w", encoding="utf-8") as f:
             json.dump(schema_map, f, indent=4)
@@ -409,14 +410,17 @@ class Client:
                 "monitoring data will not be reported"
             )
         else:
+            collection = self.__collection_map[collection_name]
             payload.update(
                 {
                     "collection_name": str(collection_name),
+                    "vector_dim": int(collection.get_dim()),
+                    "total_vectors": int(collection.get_total_vectors()),
                 }
             )
 
         collection_url = os.path.join(self.__url, collection_name)
-        schema_map = self.__collection_map[collection_name].save(collection_url, payload=payload)
+        schema_map = self.__collection_map[collection_name].save(collection_url, payload={})
         collection_schema_url = os.path.join(collection_url, "schema.json")
 
         with open(collection_schema_url, "w", encoding="utf-8") as f:

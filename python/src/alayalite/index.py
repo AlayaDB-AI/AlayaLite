@@ -126,9 +126,9 @@ class Index:
         vectors: VectorLike,
         ef: int = 100,
         *,
-        trace_id=None,
+        trace_id=None,  # pylint: disable=unused-argument
         payload=None,
-    ):  # pylint: disable=unused-argument
+    ):
         """
         Insert a new vector into the index.
         """
