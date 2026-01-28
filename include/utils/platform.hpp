@@ -65,7 +65,11 @@
   #endif
 
   #define ALAYA_NOINLINE __attribute__((noinline))
-  #define ALAYA_ALWAYS_INLINE __attribute__((always_inline)) inline
+  #ifdef __OPTIMIZE__
+    #define ALAYA_ALWAYS_INLINE __attribute__((always_inline)) inline
+  #else
+    #define ALAYA_ALWAYS_INLINE inline
+  #endif
 
   #define ALAYA_LIKELY(x) __builtin_expect(!!(x), 1)  // Branch Prediction
   #define ALAYA_UNLIKELY(x) __builtin_expect(!!(x), 0)
