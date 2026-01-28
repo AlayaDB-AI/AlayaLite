@@ -53,7 +53,7 @@ template <typename T>
   }
   // MSVC
   #elif defined(_MSC_VER)
-  unsigned long index;
+  unsigned long index;  // NOLINT(runtime/int) - MSVC _BitScanReverse requires unsigned long*
   if constexpr (sizeof(T) <= 4) {
     _BitScanReverse(&index, x);
   } else {

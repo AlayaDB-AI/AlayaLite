@@ -277,7 +277,7 @@ with section("markup"):
 # ----------------------------
 with section("lint"):
     # a list of lint codes to disable
-    disabled_codes = ["C0113"]
+    disabled_codes = ["C0111", "C0113"]
 
     # regular expression pattern describing valid function names
     function_pattern = "[0-9a-z_]+"

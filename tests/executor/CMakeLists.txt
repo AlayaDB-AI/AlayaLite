@@ -15,6 +15,13 @@ target_link_libraries(mutex_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 target_link_libraries(scheduler_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 target_link_libraries(task_queue_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 target_link_libraries(worker_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+add_coverage_to_target(coro_test)
+add_coverage_to_target(search_test)
+add_coverage_to_target(update_test)
+add_coverage_to_target(mutex_test)
+add_coverage_to_target(scheduler_test)
+add_coverage_to_target(task_queue_test)
+add_coverage_to_target(worker_test)
 
 # Generator expressions ensure cross-platform compatibility.
 add_test(NAME executor_test_coro COMMAND $<TARGET_FILE:coro_test>)

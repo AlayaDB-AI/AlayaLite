@@ -1,21 +1,24 @@
+import os
+
 from conan import ConanFile
-from conan.tools.cmake import CMakeDeps, CMakeToolchain
+from conan.tools.cmake import CMakeDeps, CMakeToolchain, cmake_layout
+from conan.tools.files import copy
 
 
 class AlayaLiteConan(ConanFile):
+    name = "AlayaLite"
+    version = "0.2.0a1"
     settings = "os", "compiler", "build_type", "arch"
     package_type = "header-library"
     exports_sources = "include/*"
     platform_tool_requires = "cmake/3.23.5"  # cmake version
 
-    def generate(self):
-        tc = CMakeToolchain(self)
-        tc.user_presets_path = False
-
-        tc.variables["CONAN_USER_MARCH_FLAGS"] = self._get_march_flags()
-        tc.generate()
-        cmake = CMakeDeps(self)
-        cmake.generate()
+    def layout(self):
+        """
+        Let Conan automatically handle the build directory structure
+        Resolve output conflicts between different compilers across platforms
+        """
+        cmake_layout(self)
 
     def requirements(self):
         self.requires("gtest/1.16.0")
@@ -26,17 +29,11 @@ class AlayaLiteConan(ConanFile):
 
         # OpenMP support
         if self.settings.os == "Linux":
-            if self.settings.compiler == "gcc":
-                # GCC uses built-in libgomp; no Conan package needed
-                pass
-            else:
-                # Clang on Linux needs libomp
-                self.requires("libomp/18.1.8")
+            if self.settings.compiler != "gcc":
+                self.requires("llvm-openmp/18.1.8")
             self.requires("libcoro/0.14.1")
         elif self.settings.os == "Macos":
-            # Apple Clang needs libomp
-            self.requires("libomp/18.1.8")
-        # Windows (MSVC): OpenMP built-in, no extra lib
+            self.requires("llvm-openmp/18.1.8")
 
     def configure(self):
         if self.settings.os == "Linux":
@@ -45,23 +42,26 @@ class AlayaLiteConan(ConanFile):
             self.options["libcoro"].build_examples = False
             self.options["libcoro"].build_tests = False
 
+    def generate(self):
+        tc = CMakeToolchain(self)
+        tc.generate()
+        cmake = CMakeDeps(self)
+        cmake.generate()
+
     def package(self):
-        self.copy("*.h", dst="include", src="include")
-        self.copy("*.hpp", dst="include", src="include")
+        copy(
+            self,
+            "*.h",
+            src=os.path.join(self.export_sources_folder, "include"),
+            dst=os.path.join(self.package_folder, "include"),
+        )
+        copy(
+            self,
+            "*.hpp",
+            src=os.path.join(self.export_sources_folder, "include"),
+            dst=os.path.join(self.package_folder, "include"),
+        )
 
-    def _get_march_flags(self):
-        os = self.settings.os
-        arch = self.settings.arch
-        compiler = self.settings.compiler
-
-        if compiler == "msvc":
-            if arch == "x86_64":
-                return "/arch:AVX2"
-            elif arch == "armv8":
-                return "/ARM64"
-        elif os in ["Linux", "Macos"]:
-            if arch == "x86_64":
-                return "-march=x86-64"
-            elif arch == "armv8":
-                return "-march=armv8-a"
-        return ""
+    def package_info(self):
+        self.cpp_info.bindirs = []
+        self.cpp_info.libdirs = []

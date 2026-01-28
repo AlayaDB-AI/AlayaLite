@@ -10,7 +10,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "alayalite"
-version = "0.1.0a3"
+version = "0.2.0a1"
 authors = [{ name = "AlayaDB.AI", email = "dev@alayadb.ai" }]
 
 description = "AlayaLite Python extension module"
