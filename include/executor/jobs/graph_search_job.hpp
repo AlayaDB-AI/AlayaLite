@@ -152,6 +152,7 @@ struct GraphSearchJob {
 #endif
   }
 
+#if defined(__linux__)
   auto rabitq_search([[maybe_unused]] const DataType *query,
                      [[maybe_unused]] uint32_t k,
                      [[maybe_unused]] IDType *ids,
@@ -217,8 +218,6 @@ struct GraphSearchJob {
     throw std::runtime_error("Avx512 instruction is not supported!");
 #endif
   }
-
-#if defined(__linux__)
   auto search(DataType *query, uint32_t k, IDType *ids, uint32_t ef) -> coro::task<> {
     auto query_computer = space_->get_query_computer(query);
     LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);

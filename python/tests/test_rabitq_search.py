@@ -14,6 +14,7 @@
 
 """Test cases for RaBitQ search functionality."""
 
+import platform
 import tempfile
 import unittest
 
@@ -22,6 +23,10 @@ from alayalite import Client
 from alayalite.index import Index
 from alayalite.utils import calc_gt, calc_recall
 
+# Skip RaBitQ tests on non-x86 platforms (AVX512 required)
+SKIP_RABITQ = platform.machine() not in ("x86_64", "AMD64")
+SKIP_REASON = "RaBitQ requires AVX512 instructions (x86_64 only)"
+
 
 class TestAlayaLiteRaBitQSearch(unittest.TestCase):
     """Test cases for RaBitQ implementation."""
@@ -29,6 +34,7 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
     def setUp(self):
         self.client = Client()
 
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_search_solo(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
         vectors = np.random.rand(1000, 128).astype(np.float32)
@@ -43,6 +49,7 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         recall = calc_recall(result, gt)
         self.assertGreaterEqual(recall, 0.95)
 
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_batch_search(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
         vectors = np.random.rand(1000, 128).astype(np.float32)
@@ -57,6 +64,7 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         recall = calc_recall(result, gt)
         self.assertGreaterEqual(recall, 0.95)
 
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_save_load(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.client = Client(url=temp_dir)

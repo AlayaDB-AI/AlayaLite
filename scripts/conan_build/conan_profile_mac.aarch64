@@ -1,8 +1,11 @@
 [settings]
 arch=armv8
 build_type=Release
-compiler=gcc
+compiler=apple-clang
 compiler.cppstd=20
-compiler.libcxx=libstdc++11
-compiler.version=14
+compiler.libcxx=libc++
+compiler.version=17
 os=Macos
+
+[conf]
+tools.apple:sdk_path={{ os.popen("xcrun --show-sdk-path").read().strip() }}
