@@ -11,14 +11,21 @@ endif()
 # ============================================================================
 set(CONAN_SCRIPTS_DIR "${CMAKE_SOURCE_DIR}/scripts/conan_build")
 
-# cmake_layout generates files to build/<build_type>/generators/
+# cmake_layout generates files to different paths per platform:
+# - Windows: build/generators/
+# - Linux/Mac: build/<build_type>/generators/
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE
       Release
       CACHE STRING "Build type" FORCE
   )
 endif()
-set(CONAN_GENERATORS_DIR "${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE}/generators")
+
+if(WIN32)
+  set(CONAN_GENERATORS_DIR "${CMAKE_SOURCE_DIR}/build/generators")
+else()
+  set(CONAN_GENERATORS_DIR "${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE}/generators")
+endif()
 
 # ============================================================================
 # Detect Platform and Select Profile

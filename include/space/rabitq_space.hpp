@@ -293,10 +293,10 @@ class RaBitQSpace {
 
     void batch_est_dist() {
       size_t padded_dim = distance_space_.get_padded_dim();
-      const uint8_t *__restrict__ qc_ptr = distance_space_.get_nei_qc_ptr(c_);
-      const DataType *__restrict__ f_add_ptr = distance_space_.get_f_add_ptr(c_);
-      const DataType *__restrict__ f_rescale_ptr = distance_space_.get_f_rescale_ptr(c_);
-      DataType *__restrict__ est_ptr = est_dists_.data();
+      const uint8_t *ALAYA_RESTRICT qc_ptr = distance_space_.get_nei_qc_ptr(c_);
+      const DataType *ALAYA_RESTRICT f_add_ptr = distance_space_.get_f_add_ptr(c_);
+      const DataType *ALAYA_RESTRICT f_rescale_ptr = distance_space_.get_f_rescale_ptr(c_);
+      DataType *ALAYA_RESTRICT est_ptr = est_dists_.data();
 
       // look up, get sum(nth_segment)
       fastscan::accumulate(qc_ptr, lookup_table_.lut(), accu_res_.data(), padded_dim);

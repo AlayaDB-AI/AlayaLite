@@ -37,7 +37,7 @@ struct RaBitQQuantizer {
    * @param binary_code uncompact quantization code, e.g., [1,0,1,0,0,1,1,0]
    * @param compact_code compact quantization code, e.g., [10100110]
    */
-  void pack_binary(const int *__restrict__ binary_code, uint8_t *__restrict__ compact_code) {
+  void pack_binary(const int *ALAYA_RESTRICT binary_code, uint8_t *ALAYA_RESTRICT compact_code) {
     constexpr size_t kTypeBits = sizeof(uint8_t) * 8;
     // i points to the start point of each batch
     for (size_t i = 0; i < padded_dim_; i += kTypeBits) {

@@ -18,6 +18,8 @@
 
 #include <Eigen/Dense>
 
+#include "utils/platform.hpp"
+
 #define LOWBIT(x) ((x) & (-(x)))
 
 namespace alaya {
@@ -64,20 +66,20 @@ template <typename T>
 using ConstVectorMap = Eigen::Map<const Vector<T>>;
 
 template <typename T>
-auto dot_product(const T *__restrict__ vec0, const T *__restrict__ vec1, size_t dim) -> T {
+auto dot_product(const T *ALAYA_RESTRICT vec0, const T *ALAYA_RESTRICT vec1, size_t dim) -> T {
   ConstVectorMap<T> v0(vec0, dim);
   ConstVectorMap<T> v1(vec1, dim);
   return v0.dot(v1);
 }
 
 template <typename T>
-inline auto l2_sqr(const T *__restrict__ vec0, size_t dim) -> T {
+inline auto l2_sqr(const T *ALAYA_RESTRICT vec0, size_t dim) -> T {
   ConstVectorMap<T> v0(vec0, dim);
   return v0.dot(v0);
 }
 
 template <typename T>
-inline auto l2_sqr(const T *__restrict__ vec0, const T *__restrict__ vec1, size_t dim) -> T {
+inline auto l2_sqr(const T *ALAYA_RESTRICT vec0, const T *ALAYA_RESTRICT vec1, size_t dim) -> T {
   ConstVectorMap<T> v0(vec0, dim);
   ConstVectorMap<T> v1(vec1, dim);
   return (v0 - v1).dot(v0 - v1);

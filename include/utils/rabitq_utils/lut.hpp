@@ -27,7 +27,7 @@
 namespace alaya {
 
 template <typename T>
-inline void data_range(const T *__restrict__ vec0, size_t dim, T &lo, T &hi) {
+inline void data_range(const T *ALAYA_RESTRICT vec0, size_t dim, T &lo, T &hi) {
   ConstRowMajorArrayMap<T> v0(vec0, 1, dim);
   lo = v0.minCoeff();
   hi = v0.maxCoeff();
@@ -35,8 +35,8 @@ inline void data_range(const T *__restrict__ vec0, size_t dim, T &lo, T &hi) {
 
 template <typename T>
 inline void scalar_quantize_normal(
-    uint8_t *__restrict__ result,
-    const T *__restrict__ vec0,
+    uint8_t *ALAYA_RESTRICT result,
+    const T *ALAYA_RESTRICT vec0,
     size_t dim,
     T lo,
     T delta) {  // normal implementation when AVX512F is not available
@@ -51,8 +51,8 @@ inline void scalar_quantize_normal(
 }
 
 template <typename T>
-inline void scalar_quantize_optimized(uint8_t *__restrict__ result,
-                                      const T *__restrict__ vec0,
+inline void scalar_quantize_optimized(uint8_t *ALAYA_RESTRICT result,
+                                      const T *ALAYA_RESTRICT vec0,
                                       size_t dim,
                                       T lo,
                                       T delta) {

@@ -16,14 +16,7 @@
 
 #pragma once
 
-// Architecture-specific SIMD headers
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-  #define ALAYA_ARCH_X86
-  #include <immintrin.h>
-#elif defined(__aarch64__) || defined(_M_ARM64)
-  #define ALAYA_ARCH_ARM64
-  #include <arm_neon.h>
-#endif
+#include "utils/platform.hpp"
 
 #include <array>
 #include <cassert>
@@ -118,9 +111,9 @@ inline void pack_codes(size_t padded_dim,
 
 // NOLINTBEGIN
 //  use fast scan to accumulate one block, dim % 16 == 0
-inline void accumulate(const uint8_t *__restrict__ codes,
-                       const uint8_t *__restrict__ lp_table,
-                       uint16_t *__restrict__ result,
+inline void accumulate(const uint8_t *ALAYA_RESTRICT codes,
+                       const uint8_t *ALAYA_RESTRICT lp_table,
+                       uint16_t *ALAYA_RESTRICT result,
                        size_t dim) {
   size_t code_length = dim << 2;
 #if defined(__AVX512F__)
@@ -266,7 +259,7 @@ inline void accumulate(const uint8_t *__restrict__ codes,
 // pack lookup table for fastscan, for each 4 dim, we have 16 (2^4) different results
 // ! dim % 4 == 0
 template <typename T>
-inline void pack_lut(size_t dim, const T *__restrict__ query, T *__restrict__ lut) {
+inline void pack_lut(size_t dim, const T *ALAYA_RESTRICT query, T *ALAYA_RESTRICT lut) {
   size_t num_codebook = dim >> 2;
   for (size_t i = 0; i < num_codebook; ++i) {
     lut[0] = 0;
