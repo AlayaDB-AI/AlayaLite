@@ -20,6 +20,7 @@
 #include <string>
 #include "utils/evaluate.hpp"
 #include "utils/io_utils.hpp"
+#include "utils/locks.hpp"
 
 namespace alaya {
 
@@ -111,12 +112,18 @@ inline auto deep1m(const std::filesystem::path &data_dir) -> DatasetConfig {
 /**
  * @brief Load dataset from config. Downloads if needed.
  *
+ * Uses file locking to prevent concurrent downloads when multiple tests run in parallel.
+ *
  * Usage:
  *   auto ds = load_dataset(sift_small("/data"));
  *   // Use ds.data_, ds.queries_, ds.ground_truth_ directly
  */
 inline auto load_dataset(const DatasetConfig &config) -> Dataset {
-  // Download if files don't exist
+  // Use file lock to prevent concurrent downloads
+  auto lock_file = config.dir_.parent_path() / (config.name_ + ".lock");
+  FileLock lock(lock_file);
+
+  // Download if files don't exist (check again after acquiring lock)
   bool files_exist = std::filesystem::exists(config.data_file_) &&
                      std::filesystem::exists(config.query_file_) &&
                      std::filesystem::exists(config.gt_file_);

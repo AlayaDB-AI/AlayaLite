@@ -16,13 +16,49 @@
 
 #pragma once
 
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 #include <atomic>
 #include <cassert>
+#include <filesystem>  // NOLINT(build/c++17)
+
+namespace alaya {
+/**
+ * @brief RAII file lock for cross-process synchronization.
+ *
+ * Uses flock() to acquire an exclusive lock on a lock file.
+ * The lock is automatically released when the object is destroyed.
+ */
+class FileLock {
+ public:
+  explicit FileLock(std::filesystem::path lock_file) : lock_file_(std::move(lock_file)) {
+    fd_ = open(lock_file_.c_str(), O_CREAT | O_RDWR, 0666);
+    if (fd_ >= 0) {
+      flock(fd_, LOCK_EX);  // Acquire exclusive lock (blocking)
+    }
+  }
+
+  ~FileLock() {
+    if (fd_ >= 0) {
+      flock(fd_, LOCK_UN);  // Release lock
+      close(fd_);
+    }
+  }
+
+  FileLock(const FileLock &) = delete;
+  auto operator=(const FileLock &) -> FileLock & = delete;
+
+ private:
+  std::filesystem::path lock_file_;
+  int fd_ = -1;
+};
+
 class SpinLock {
  public:
   void lock() {
     while (flag_.test_and_set(std::memory_order_acquire)) {
-      // 自旋等待锁释放
+      // Spin-wait lock release
     }
   }
 
@@ -40,7 +76,7 @@ class SpinLockGuard {
 
   ~SpinLockGuard() { lock_.unlock(); }
 
-  // 禁用拷贝和赋值操作
+  // Disable copy and assignment operations
   SpinLockGuard(const SpinLockGuard &) = delete;
   auto operator=(const SpinLockGuard &) -> SpinLockGuard & = delete;
 
@@ -106,3 +142,5 @@ class SharedLock {
  private:
   std::atomic<int> state_;  // num > 0: shared, -1: exclusive, 0: no
 };
+
+}  // namespace alaya
