@@ -81,7 +81,8 @@ function(conan_install)
 
   # Run conan install - let cmake_layout handle the output directory
   execute_process(
-    COMMAND ${CONAN_EXECUTABLE} install "${CMAKE_SOURCE_DIR}" -pr:h "${conan_profile}" -pr:b default --build=missing
+    COMMAND ${CONAN_EXECUTABLE} install "${CMAKE_SOURCE_DIR}" -pr:h "${conan_profile}" -pr:b default -s
+            build_type=${CMAKE_BUILD_TYPE} --build=missing
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     RESULT_VARIABLE conan_result
     OUTPUT_VARIABLE conan_output
