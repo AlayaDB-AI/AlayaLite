@@ -119,8 +119,15 @@ inline auto deep1m(const std::filesystem::path &data_dir) -> DatasetConfig {
  *   // Use ds.data_, ds.queries_, ds.ground_truth_ directly
  */
 inline auto load_dataset(const DatasetConfig &config) -> Dataset {
+  // Ensure lock directory exists before creating lock file
+  auto lock_dir = config.dir_.parent_path();
+  if (!std::filesystem::exists(lock_dir)) {
+    std::filesystem::create_directories(lock_dir);
+  }
+
   // Use file lock to prevent concurrent downloads
-  auto lock_file = config.dir_.parent_path() / (config.name_ + ".lock");
+  // Lock based on directory name (not dataset name) to handle configs sharing the same dir
+  auto lock_file = lock_dir / (config.dir_.filename().string() + ".lock");
   FileLock lock(lock_file);
 
   // Download if files don't exist (check again after acquiring lock)
