@@ -41,7 +41,8 @@ inline auto fwht_generic_template(float *buf) -> void {
   }
 }
 
-#ifdef ALAYA_ARCH_X86
+// MSVC does not support inline assembly on x64, so we disable optimized implementations
+#if defined(ALAYA_ARCH_X86) && !defined(_MSC_VER)
 
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX2
@@ -3648,7 +3649,7 @@ inline auto helper_float_11_avx512(float *buf) -> void {  // NOLINT
 
 inline auto helper_float_6(float *buf) -> void {  // NOLINT
   static const FHT_Helper_Func kFunc = []() -> FHT_Helper_Func {
-#ifdef ALAYA_ARCH_X86
+#if defined(ALAYA_ARCH_X86) && !defined(_MSC_VER)
     const auto &f = get_cpu_features();
     if (f.avx512f_) {
       return helper_float_6_avx512;
@@ -3663,7 +3664,7 @@ inline auto helper_float_6(float *buf) -> void {  // NOLINT
 }
 inline auto helper_float_7(float *buf) -> void {
   static const FHT_Helper_Func kFunc = []() -> FHT_Helper_Func {
-#ifdef ALAYA_ARCH_X86
+#if defined(ALAYA_ARCH_X86) && !defined(_MSC_VER)
     const auto &f = get_cpu_features();
     if (f.avx512f_) {
       return helper_float_7_avx512;
@@ -3678,7 +3679,7 @@ inline auto helper_float_7(float *buf) -> void {
 }
 inline auto helper_float_8(float *buf) -> void {
   static const FHT_Helper_Func kFunc = []() -> FHT_Helper_Func {
-#ifdef ALAYA_ARCH_X86
+#if defined(ALAYA_ARCH_X86) && !defined(_MSC_VER)
     const auto &f = get_cpu_features();
     if (f.avx512f_) {
       return helper_float_8_avx512;
@@ -3694,7 +3695,7 @@ inline auto helper_float_8(float *buf) -> void {
 
 inline auto helper_float_9(float *buf) -> void {
   static const FHT_Helper_Func kFunc = []() -> FHT_Helper_Func {
-#ifdef ALAYA_ARCH_X86
+#if defined(ALAYA_ARCH_X86) && !defined(_MSC_VER)
     const auto &f = get_cpu_features();
     if (f.avx512f_) {
       return helper_float_9_avx512;
@@ -3709,7 +3710,7 @@ inline auto helper_float_9(float *buf) -> void {
 }
 inline auto helper_float_10(float *buf) -> void {
   static const FHT_Helper_Func kFunc = []() -> FHT_Helper_Func {
-#ifdef ALAYA_ARCH_X86
+#if defined(ALAYA_ARCH_X86) && !defined(_MSC_VER)
     const auto &f = get_cpu_features();
     if (f.avx512f_) {
       return helper_float_10_avx512;
@@ -3724,7 +3725,7 @@ inline auto helper_float_10(float *buf) -> void {
 }
 inline auto helper_float_11(float *buf) -> void {
   static const FHT_Helper_Func kFunc = []() -> FHT_Helper_Func {
-#ifdef ALAYA_ARCH_X86
+#if defined(ALAYA_ARCH_X86) && !defined(_MSC_VER)
     const auto &f = get_cpu_features();
     if (f.avx512f_) {
       return helper_float_11_avx512;
