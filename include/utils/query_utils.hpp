@@ -69,7 +69,7 @@ inline auto count_trailing_zeros(uint64_t x) -> int {
 class DynamicBitset {
  private:
   std::vector<uint64_t, AlignedAlloc<uint64_t>> data_;
-  [[maybe_unused]] size_t size_;
+  size_t size_;
 
  public:
   /**
@@ -170,7 +170,7 @@ class HierarchicalBitset {
  private:
   std::vector<uint64_t> data_;
   std::vector<uint64_t> summary_;
-  [[maybe_unused]] size_t size_;
+  size_t size_;
   static const size_t kBitsPerBlock = 512;
   static const size_t kSummaryBlockSize = 64;
 

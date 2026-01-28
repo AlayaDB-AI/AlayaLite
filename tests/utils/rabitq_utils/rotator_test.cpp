@@ -236,9 +236,9 @@ TEST_F(RotatorTest, FhtKacRotator_NormPreservation) {
     output_norm_sum += out_norm;
   }
 
+#if defined(__AVX512F__)
   float avg_in = input_norm_sum / trials;
   float avg_out = output_norm_sum / trials;
-#if defined(__AVX512F__)
   EXPECT_NEAR(avg_out, avg_in, 0.2f);  // loose due to randomness
 #endif
 }

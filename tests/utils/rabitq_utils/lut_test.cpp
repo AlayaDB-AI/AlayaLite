@@ -28,7 +28,7 @@ TEST(LutTest, SimpleExample) {
   size_t padded_dim = 64;
   std::vector<float> rotated_query(padded_dim, 1.0F);
   Lut<float> lookup_table;
-  lookup_table = std::move(Lut<float>(rotated_query.data(), padded_dim));
+  lookup_table = Lut<float>(rotated_query.data(), padded_dim);
   float delta = 4.0F / 255.0F;  // vr = 4, 4/(2^8-1) = 4/255
 
   EXPECT_EQ(lookup_table.delta(), delta);

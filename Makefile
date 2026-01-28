@@ -1,103 +1,104 @@
-# Makefile for managing Python projects with uv
-# This Makefile provides common tasks such as installing dependencies,
-# running tests, linting, formatting, and cleaning.
-# It leverages uv for faster dependency management.
+# AlayaLite Makefile
+# Usage: make help
 
-# -----------------------------------------------------------------------------
-# Project Configuration
-# -----------------------------------------------------------------------------
-PYTHON_VERSION ?= 3.11
-PROJECT_NAME   := alayalite        # The name of your project
-PYTHON         := .venv/bin/python  # Path to the Python interpreter in the virtual environment
+.PHONY: help build build-debug build-release test test-cpp test-py lint clean install dev-install wheel
 
-# -----------------------------------------------------------------------------
-# Colors for Terminal Output
-# -----------------------------------------------------------------------------
+# Configuration
+BUILD_DIR      := build
+BUILD_TYPE     := Release
+CMAKE_FLAGS    := -DBUILD_TESTING=ON
+PYTEST_FLAGS   := -v
+CTEST_FLAGS    := --output-on-failure
+JOBS           := $(shell nproc 2>/dev/null || echo 4)
+PYTHON_VERSION := 3.11
 
-# Use terminal colors for better readability (optional)
-RED    := $(shell tput -Txterm setaf 1)  # Red    color
-GREEN  := $(shell tput -Txterm setaf 2)  # Green  color
-YELLOW := $(shell tput -Txterm setaf 3)  # Yellow color
-BLUE   := $(shell tput -Txterm setaf 4)  # Blue   color
-RESET  := $(shell tput -Txterm sgr0)     # Reset  color
+# Suppress "Entering/Leaving directory" messages from sub-makes
+MAKEFLAGS     += --no-print-directory
 
-# -----------------------------------------------------------------------------
-# Target Definitions
-# -----------------------------------------------------------------------------
+# Colors
+CYAN  := \033[36m
+GREEN := \033[32m
+RESET := \033[0m
 
-# .PHONY: Declare targets that are not actual files
-# This prevents conflicts with files that have the same name as the targets.
-.PHONY: help uv-venv sync install test lint format clean
+# Default target
+.DEFAULT_GOAL := help
 
-# Default target: 'help'
-# When you run 'make' without any arguments, it will execute the 'help' target.
-default: help
+help: ## Show this help message
+	@echo "$(CYAN)AlayaLite Development Commands$(RESET)"
+	@echo ""
+	@awk 'BEGIN {FS = ":.*## "} /^[a-zA-Z_-]+:.*## / {printf "  $(GREEN)%-18s$(RESET) %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+	@echo ""
+	@echo "Examples:"
+	@echo "  make build          # Build release version"
+	@echo "  make test           # Run all tests"
 
-# Help target: Display available targets and their descriptions
-help:
-	@echo "$(BLUE)Makefile Help$(RESET)"
-	@echo "-----------------------------------------------------------------------------"
-	@echo "Available targets:"
-	@echo "  sync   - Sync dependencies using uv."
-	@echo "  install   - Install the project in editable mode."
-	@echo "  build     - Build the project using uv."
-	@echo "  test      - Run tests with pytest."
-	@echo "  lint      - Run linters with ruff."
-	@echo "  format    - Format code with ruff."
-	@echo "  clean     - Clean the project (remove virtual environment, caches, etc.)."
-	@echo "  help      - Show this help message."
-	@echo "-----------------------------------------------------------------------------"
-	@echo "$(YELLOW)Example: make test$(RESET)"
+# ============================================================================
+# Build
+# ============================================================================
 
-# sync target: Sync dependencies using uv
-# This target creates the virtual environment if it doesn't exist and then syncs dependencies using uv.
-sync:
-	@echo "$(GREEN)Syncing dependencies with uv...$(RESET)"
-	uv sync -p $(PYTHON_VERSION) --no-install-project --dev
-	@echo "$(GREEN)Dependencies synced!$(RESET)"
+build: build-release ## Build project (release mode)
 
-# install target: Install the project in editable mode
-# This allows you to make changes to the code without having to reinstall the project.
-install: clean
-	@echo "$(GREEN)Installing project in editable mode...$(RESET)"
-	uv sync -p $(PYTHON_VERSION) --dev --reinstall -v
-	@echo "$(GREEN)Project installed in editable mode!$(RESET)"
+build-debug: ## Build project in debug mode
+	@cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug $(CMAKE_FLAGS)
+	@cmake --build $(BUILD_DIR) -j$(JOBS)
 
-build: clean
-	@echo "$(GREEN)Building project...$(RESET)"
-	ALAYA_ROOT=$(shell dirname "$$(pwd)") uv build -p $(PYTHON_VERSION)
-	@echo "$(GREEN)Project built!$(RESET)"
+build-release: ## Build project in release mode
+	@cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release $(CMAKE_FLAGS)
+	@cmake --build $(BUILD_DIR) -j$(JOBS)
 
-# test target: Run tests with pytest
-# This target runs the tests using pytest.
-test:
-	@echo "$(GREEN)Running tests with pytest...$(RESET)"
-	$(PYTHON) -m pytest
-	@echo "$(GREEN)Tests finished!$(RESET)"
+build-coverage: ## Build with coverage instrumentation
+	@cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Debug $(CMAKE_FLAGS) -DENABLE_COVERAGE=ON
+	@cmake --build $(BUILD_DIR) -j$(JOBS)
 
-# lint target: Run linters with ruff
-# This target checks the code for style issues using ruff.
-lint: sync
-	@echo "$(GREEN)Running linters with ruff...$(RESET)"
-	$(PYTHON) -m ruff check .  # Run ruff
-	@echo "$(GREEN)Linters finished!$(RESET)"
+configure: ## Only configure cmake (no build)
+	@cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE) $(CMAKE_FLAGS)
 
-# format target: Format code with ruff
-# This target automatically formats the code using ruff.
-format: sync
-	@echo "$(GREEN)Formatting code with ruff...$(RESET)"
-	$(PYTHON) -m ruff format .
-	@echo "$(GREEN)Code formatted!$(RESET)"
+# ============================================================================
+# Test
+# ============================================================================
 
-# clean target: Clean the project
-# This target removes the virtual environment, cache files, and other temporary files.
-clean:
-	@echo "$(RED)Cleaning project...$(RESET)"
-	@rm -rf CMakeUserPresets.json build .venv .pytest_cache .ruff_cache
-	@rm -rf python/.pytest_cache python/.ruff_cache python/tests/__pycache__
-	@echo "$(RED)Project cleaned!$(RESET)"
+test: test-cpp test-py ## Run all tests (C++ and Python)
 
-# -----------------------------------------------------------------------------
-# Prevent command name conflicts
-# -----------------------------------------------------------------------------
-.PHONY: $(MAKECMDGOALS)
+test-cpp: build ## Run C++ tests with CTest
+	@cd $(BUILD_DIR) && ctest $(CTEST_FLAGS) -j$(JOBS)
+
+test-py: ## Run Python tests with pytest
+	@uv run pytest $(PYTEST_FLAGS)
+
+test-py-cov: ## Run Python tests with coverage
+	@uv run pytest $(PYTEST_FLAGS) --cov=python/src --cov-report=html
+
+# ============================================================================
+# Code Quality
+# ============================================================================
+
+lint: ## Run all pre-commit checks
+	@uvx pre-commit run -a
+
+# ============================================================================
+# Install & Package
+# ============================================================================
+
+install: ## Install package (production only)
+	@uv sync --no-dev
+
+dev-install: ## Install package with dev dependencies
+	@uv sync
+
+wheel: ## Build wheel package (use PYTHON_VERSION=3.x to specify)
+	@uvx --python $(PYTHON_VERSION) --from build pyproject-build
+
+# ============================================================================
+# Clean
+# ============================================================================
+
+clean: ## Remove build artifacts
+	@rm -rf $(BUILD_DIR)
+	@rm -rf dist *.egg-info
+	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+	@find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
+	@echo "Cleaned."
+
+clean-all: clean ## Remove build artifacts and dependencies
+	@rm -rf .venv
+	@echo "Cleaned all."

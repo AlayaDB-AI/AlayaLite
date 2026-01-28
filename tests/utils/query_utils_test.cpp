@@ -15,6 +15,7 @@
  */
 
 #include "utils/query_utils.hpp"
+#include "utils/thread_pool.hpp"
 #include <gtest/gtest.h>
 
 namespace alaya {
@@ -106,7 +107,7 @@ TEST_F(LinearPoolTest, ConcurrentInsertTest) {
   const int kInsertsPerThread = 100;
 
   // Lambda function for inserting elements
-  auto insert_function = [this](int thread_id) {
+  auto insert_function = [this](int thread_id) -> void {
     for (int i = 0; i < kInsertsPerThread; ++i) {
       pool_->insert(thread_id * kInsertsPerThread + i, static_cast<float>(i));
     }

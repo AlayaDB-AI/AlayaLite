@@ -25,15 +25,24 @@ dependencies = [
 "Homepage" = "https://github.com/AlayaDB-AI/AlayaLite"
 
 [dependency-groups]
-dev = [
+test = [
     "pytest",
     "pytest-cov",
     "pytest-asyncio",
+]
+lint = [
     "ruff",
+]
+api = [
     "fastapi",
     "uvicorn[standard]",
     "pydantic",
     "httpx",
+]
+dev = [
+    { include-group = "test" },
+    { include-group = "lint" },
+    { include-group = "api" },
 ]
 
 

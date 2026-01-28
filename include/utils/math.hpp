@@ -59,7 +59,7 @@ template <typename T>
   // C++20 standard library implementation
   return std::bit_width(static_cast<std::make_unsigned_t<T>>(x)) - 1;
 #else
-  // Legacy C++17/14 实现
+  // Legacy C++17/14 realization
   // GCC / Clang
   #if defined(__GNUC__) || defined(__clang__)
   if constexpr (sizeof(T) <= sizeof(unsigned int)) {
