@@ -18,20 +18,39 @@
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/spdlog.h>
 #include <cstdarg>
-#include <filesystem>  // NOLINT(build/c++17)
-#include <string>
+#include <cstring>
 
-#ifdef PROJECT_ROOT
-  #define RELATIVE_FILE get_relative_path(__FILE__, PROJECT_ROOT)
-auto inline get_relative_path(const std::string &full_path, const std::string &base_path)
-    -> std::string {
-  std::filesystem::path full(full_path);
-  std::filesystem::path base(base_path);
-  return std::filesystem::relative(full, base).string();
+/**
+ * @brief Extract relative path from full path.
+ *
+ * Looks for common source directories (include/, src/, tests/) in the path
+ * and returns the path starting from there. This ensures consistent log output
+ * regardless of the build directory location.
+ *
+ * Examples:
+ *   /tmp/build-xxx/alayalite/include/utils/log.hpp -> include/utils/log.hpp
+ *   /home/user/project/src/main.cpp -> src/main.cpp
+ */
+inline auto extract_relative_path(const char *full_path) -> const char * {
+  // Look for common source directory markers
+  const char *pos = std::strstr(full_path, "/include/");
+  if (pos != nullptr) {
+    return pos + 1;
+  }
+  pos = std::strstr(full_path, "/src/");
+  if (pos != nullptr) {
+    return pos + 1;
+  }
+  pos = std::strstr(full_path, "/tests/");
+  if (pos != nullptr) {
+    return pos + 1;
+  }
+  // Fallback: return just the filename
+  const char *last_slash = std::strrchr(full_path, '/');
+  return last_slash != nullptr ? last_slash + 1 : full_path;
 }
-#else
-  #define RELATIVE_FILE __FILE__
-#endif
+
+#define RELATIVE_FILE extract_relative_path(__FILE__)
 
 #define CONCATENATE_STRINGS(a, b) a b
 #define LOG_TRACE(msg, ...)                                                     \
