@@ -166,7 +166,8 @@ class QGBuilder {
     std::vector<std::mutex> locks(num_nodes_);
     std::vector<CandidateList> reverse_buffer(num_nodes_);
   #pragma omp parallel for schedule(dynamic)
-    for (int64_t data_id = 0; data_id < static_cast<int64_t>(num_nodes_); ++data_id) {  // for every vertex
+    for (int64_t data_id = 0; data_id < static_cast<int64_t>(num_nodes_);
+         ++data_id) {  // for every vertex
       for (const auto &nei : new_neighbors_[data_id]) {
         auto dst = nei.id_;
         bool dup = false;
@@ -192,7 +193,8 @@ class QGBuilder {
       }
     }
   #pragma omp parallel for schedule(dynamic)
-    for (int64_t data_id = 0; data_id < static_cast<int64_t>(num_nodes_); ++data_id) {  // prune for every vertex
+    for (int64_t data_id = 0; data_id < static_cast<int64_t>(num_nodes_);
+         ++data_id) {  // prune for every vertex
       CandidateList &tmp_pool = reverse_buffer[data_id];
       tmp_pool.reserve(tmp_pool.size() + degree_bound_);
       // add current neighbors

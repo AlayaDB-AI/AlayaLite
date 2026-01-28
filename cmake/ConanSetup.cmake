@@ -11,9 +11,8 @@ endif()
 # ============================================================================
 set(CONAN_SCRIPTS_DIR "${CMAKE_SOURCE_DIR}/scripts/conan_build")
 
-# cmake_layout generates files to different paths per platform:
-# - Windows: build/generators/
-# - Linux/Mac: build/<build_type>/generators/
+# cmake_layout generates files to different paths per platform: - Windows: build/generators/ - Linux/Mac:
+# build/<build_type>/generators/
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE
       Release

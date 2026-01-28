@@ -42,9 +42,13 @@ class FileLock {
  public:
   explicit FileLock(std::filesystem::path lock_file) : lock_file_(std::move(lock_file)) {
 #ifdef _WIN32
-    handle_ = CreateFileW(lock_file_.wstring().c_str(), GENERIC_READ | GENERIC_WRITE,
-                          FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
-                          FILE_ATTRIBUTE_NORMAL, nullptr);
+    handle_ = CreateFileW(lock_file_.wstring().c_str(),
+                          GENERIC_READ | GENERIC_WRITE,
+                          FILE_SHARE_READ | FILE_SHARE_WRITE,
+                          nullptr,
+                          OPEN_ALWAYS,
+                          FILE_ATTRIBUTE_NORMAL,
+                          nullptr);
     if (handle_ != INVALID_HANDLE_VALUE) {
       OVERLAPPED overlapped = {0};
       LockFileEx(handle_, LOCKFILE_EXCLUSIVE_LOCK, 0, MAXDWORD, MAXDWORD, &overlapped);
