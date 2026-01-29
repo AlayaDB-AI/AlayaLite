@@ -22,18 +22,23 @@ jobs:
           #   arch: aarch64
           # - os: macos-13
           #   arch: x86_64
-          - os: macos-14
-            arch: arm64
+        - os: macos-14
+          arch: arm64
 
     env:
       CONAN_NON_INTERACTIVE: 1
-      # CI 特定配置：Linux Docker 挂载 Conan 缓存
-      CIBW_CONTAINER_ENGINE: "docker; create_args: -v /home/runner/.conan2:/root/.conan2"
+      # CI 特定配置：Linux Docker 挂载 Conan 和 uv 缓存
+      CIBW_CONTAINER_ENGINE: 'docker; create_args: -v /home/runner/.conan2:/root/.conan2 -v /home/runner/.cache/uv:/root/.cache/uv'
       CIBW_ARCHS_LINUX: ${{ matrix.arch }}
       CIBW_ARCHS_MACOS: ${{ matrix.arch }}
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        cache-local-path: ${{ runner.os == 'Linux' && '/home/runner/.cache/uv' || '' }}
 
     - name: Restore Conan cache
       uses: ./.github/actions/cache-restore
@@ -45,7 +50,7 @@ jobs:
         key: docker-cibuildwheel-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('pyproject.toml')}}
 
     - name: Build wheels
-      uses: pypa/cibuildwheel@v2.16.5
+      uses: pypa/cibuildwheel@v3.3
 
     - uses: actions/upload-artifact@v4
       with:
