@@ -56,19 +56,21 @@ wheel.packages = ["python/src/alayalite"]
 BUILD_TESTING="OFF"
 
 [tool.cibuildwheel]
-build = "cp38-*"
-build-frontend = "build[uv]"
-skip = [
-    "*-manylinux_i686",
-    "*-musllinux*", # TODO: Adapt to muslLinux version
-]
-environment = { BUILD_TIME = "$(date)" }
+build-frontend = "build"
+skip = ["pp*", "*-musllinux*", "*-manylinux_i686"]
+before-build = "pip install conan && python {project}/scripts/conan_build/conan_install.py --project-dir {project}"
+container-engine = "docker; create_args: -v ~/.conan2:/root/.conan2"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
+before-all = "yum -y install perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece"
 
-archs = ["x86_64"]
+[tool.cibuildwheel.macos]
+before-all = ""
+
+[tool.cibuildwheel.windows]
+before-all = ""
 # ----------------- build whl end ------------------
 
 [[tool.uv.index]]

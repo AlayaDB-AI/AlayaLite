@@ -15,42 +15,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # os: [ubuntu-latest, windows-latest, macos-13, macos-14]
-        os: [ubuntu-latest]
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+          # - os: ubuntu-24.04-arm
+          #   arch: aarch64
 
     env:
-      CONAN_NON_INTERACTIVE: 1 # Conan non-interactive mode
+      CONAN_NON_INTERACTIVE: 1
       CIBW_CONTAINER_ENGINE: "docker; create_args: -v /home/runner/.conan2:/root/.conan2"
-      # manylinux 容器需要安装 OpenSSL 编译所需的 Perl 模块
-      CIBW_BEFORE_ALL_LINUX: >
-        yum -y install perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece &&
-        pip install conan &&
-        python {project}/scripts/conan_build/conan_install.py --project-dir {project}
-
-      CIBW_BEFORE_ALL_MACOS: >
-        pip install conan &&
-        python {project}/scripts/conan_build/conan_install.py --project-dir {project}
-
-      CIBW_BEFORE_ALL_WINDOWS: >
-        pip install conan &&
-        python {project}/scripts/conan_build/conan_install.py --project-dir {project}
-
-      # 配置 scikit-build-core 使用 Conan 的工具链
-      # cmake_layout 生成的路径: Linux/Mac: build/Release/generators/, Windows: build/generators/
-      CIBW_ENVIRONMENT_LINUX: >
-        CMAKE_TOOLCHAIN_FILE="/project/build/Release/generators/conan_toolchain.cmake"
-
-      CIBW_ENVIRONMENT_MACOS: >
-        CMAKE_TOOLCHAIN_FILE="{project}/build/Release/generators/conan_toolchain.cmake"
-        MACOSX_DEPLOYMENT_TARGET=10.15
-
-      CIBW_ENVIRONMENT_WINDOWS: >
-        CMAKE_TOOLCHAIN_FILE="{project}/build/generators/conan_toolchain.cmake"
-
-      # 跳过 PyPy 和 musllinux（Alpine Linux 需要额外配置）
-      CIBW_SKIP: pp* *musllinux* *-manylinux_i686
-      # 指定构建工具，如果你用 scikit-build-core
-      CIBW_BUILD_FRONTEND: build
+      CIBW_ARCHS_LINUX: ${{ matrix.arch }}
 
     steps:
     - uses: actions/checkout@v4
@@ -63,7 +37,7 @@ jobs:
 
     - uses: actions/upload-artifact@v4
       with:
-        name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+        name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}
         path: ./wheelhouse/*.whl
 
   # upload_pypi:
