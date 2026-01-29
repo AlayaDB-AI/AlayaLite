@@ -4,9 +4,7 @@ if(_CONAN_SETUP_DONE)
   return()
 endif()
 
-# cmake_layout output path: 
-#   Windows -> build/generators/, 
-#   Others -> build/<type>/generators/
+# cmake_layout output path: Windows -> build/generators/, Others -> build/<type>/generators/
 if(WIN32)
   set(CONAN_TOOLCHAIN_FILE "${CMAKE_SOURCE_DIR}/build/generators/conan_toolchain.cmake")
 else()
@@ -15,15 +13,18 @@ endif()
 
 # Run conan install if toolchain doesn't exist
 if(NOT EXISTS "${CONAN_TOOLCHAIN_FILE}")
-  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  find_package(
+    Python3
+    COMPONENTS Interpreter
+    REQUIRED
+  )
 
   set(CONAN_INSTALL_SCRIPT "${CMAKE_SOURCE_DIR}/scripts/conan_build/conan_install.py")
   message(STATUS "Running: ${CONAN_INSTALL_SCRIPT}")
 
   execute_process(
-    COMMAND ${Python3_EXECUTABLE} "${CONAN_INSTALL_SCRIPT}"
-            --project-dir "${CMAKE_SOURCE_DIR}"
-            --build-type "${CMAKE_BUILD_TYPE}"
+    COMMAND ${Python3_EXECUTABLE} "${CONAN_INSTALL_SCRIPT}" --project-dir "${CMAKE_SOURCE_DIR}" --build-type
+            "${CMAKE_BUILD_TYPE}"
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     RESULT_VARIABLE _conan_result
   )
@@ -39,4 +40,7 @@ if(NOT EXISTS "${CONAN_TOOLCHAIN_FILE}")
 endif()
 include("${CONAN_TOOLCHAIN_FILE}")
 
-set(_CONAN_SETUP_DONE TRUE CACHE INTERNAL "")
+set(_CONAN_SETUP_DONE
+    TRUE
+    CACHE INTERNAL ""
+)

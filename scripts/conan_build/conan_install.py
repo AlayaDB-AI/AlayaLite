@@ -61,9 +61,7 @@ def run_command(cmd: list[str], cwd: Path | None = None) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Install Conan dependencies with platform-specific profile"
-    )
+    parser = argparse.ArgumentParser(description="Install Conan dependencies with platform-specific profile")
     parser.add_argument(
         "--build-type",
         default="Release",
@@ -109,9 +107,12 @@ def main():
         "conan",
         "install",
         str(project_dir),
-        "-pr:h", str(profile_path),
-        "-pr:b", "default",
-        "-s", f"build_type={args.build_type}",
+        "-pr:h",
+        str(profile_path),
+        "-pr:b",
+        "default",
+        "-s",
+        f"build_type={args.build_type}",
         "--build=missing",
     ]
 

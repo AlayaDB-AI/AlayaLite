@@ -1,9 +1,10 @@
+---
 name: Build Wheels
 
-on:
+on  :
   workflow_dispatch:
   push:
-    branches: [ test/ci ]
+    branches: [test/ci]
   #   tags:
   #     - 'v*'
 
@@ -19,7 +20,7 @@ jobs:
 
     env:
       CONAN_NON_INTERACTIVE: 1 # Conan non-interactive mode
-      CIBW_DOCKER_RUN_FLAGS: "-v /home/runner/.conan2:/root/.conan2"
+      CIBW_DOCKER_RUN_FLAGS: -v /home/runner/.conan2:/root/.conan2
       # manylinux 容器需要安装 OpenSSL 编译所需的 Perl 模块
       CIBW_BEFORE_ALL_LINUX: >
         yum -y install perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece &&
@@ -46,25 +47,25 @@ jobs:
       CIBW_ENVIRONMENT_WINDOWS: >
         CMAKE_TOOLCHAIN_FILE="{project}/build/generators/conan_toolchain.cmake"
 
-      # 忽略 PyPy，通常 C++ 扩展对 PyPy 支持较麻烦
-      CIBW_SKIP: "pp*"
+      # 跳过 PyPy 和 musllinux（Alpine Linux 需要额外配置）
+      CIBW_SKIP: pp* *musllinux* *-manylinux_i686
       # 指定构建工具，如果你用 scikit-build-core
-      CIBW_BUILD_FRONTEND: "build" 
+      CIBW_BUILD_FRONTEND: build
 
     steps:
-      - uses: actions/checkout@v4
+    - uses: actions/checkout@v4
 
-      - name: Restore Conan cache
-        uses: ./.github/actions/cache-restore
+    - name: Restore Conan cache
+      uses: ./.github/actions/cache-restore
 
-      - name: Build wheels
-        uses: pypa/cibuildwheel@v2.16.5
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v2.16.5
         # 可以在这里配置 output-dir，或者默认在 wheelhouse/
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
-          path: ./wheelhouse/*.whl
+    - uses: actions/upload-artifact@v4
+      with:
+        name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+        path: ./wheelhouse/*.whl
 
   # upload_pypi:
   #   needs: [build_wheels]
