@@ -25,7 +25,10 @@ jobs:
       CIBW_BEFORE_ALL_LINUX: >
         yum -y install perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece &&
         pip install conan &&
-        python {project}/scripts/conan_build/conan_install.py --project-dir {project}
+        python {project}/scripts/conan_build/conan_install.py --project-dir {project} &&
+        echo "=== Conan cache in container ===" &&
+        du -sh /root/.conan2 &&
+        ls -la /root/.conan2
 
       CIBW_BEFORE_ALL_MACOS: >
         pip install conan &&
@@ -60,7 +63,13 @@ jobs:
 
     - name: Build wheels
       uses: pypa/cibuildwheel@v2.16.5
-        # 可以在这里配置 output-dir，或者默认在 wheelhouse/
+
+    - name: Debug - Check Conan cache on host
+      if: always()
+      run: |
+        echo "=== Conan cache on host ==="
+        du -sh ~/.conan2 || echo "Directory not found"
+        ls -la ~/.conan2 || echo "Cannot list"
 
     - uses: actions/upload-artifact@v4
       with:
