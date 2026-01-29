@@ -30,7 +30,8 @@ def get_profile_path(script_dir: Path) -> Path:
 
     Profile selection logic (matches cmake/ConanSetup.cmake):
     - Windows: conan_profile_win.x86_64
-    - macOS: conan_profile_mac.aarch64
+    - macOS aarch64/arm64: conan_profile_mac.aarch64
+    - macOS x86_64: conan_profile_mac.x86_64
     - Linux aarch64/arm64: conan_profile.aarch64
     - Linux x86_64: conan_profile.x86_64
     """
@@ -40,7 +41,10 @@ def get_profile_path(script_dir: Path) -> Path:
     if system == "Windows":
         profile_name = "conan_profile_win.x86_64"
     elif system == "Darwin":
-        profile_name = "conan_profile_mac.aarch64"
+        if machine in ("arm64", "aarch64"):
+            profile_name = "conan_profile_mac.aarch64"
+        else:
+            profile_name = "conan_profile_mac.x86_64"
     elif system == "Linux":
         if machine in ("aarch64", "arm64"):
             profile_name = "conan_profile.aarch64"
