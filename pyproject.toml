@@ -56,6 +56,7 @@ wheel.packages = ["python/src/alayalite"]
 BUILD_TESTING="OFF"
 
 [tool.cibuildwheel]
+build = "cp38-*"
 build-frontend = "build"
 skip = ["pp*", "*-musllinux*", "*-manylinux_i686"]
 before-build = "pip install conan && python {project}/scripts/conan_build/conan_install.py --project-dir {project}"
