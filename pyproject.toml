@@ -59,7 +59,7 @@ BUILD_TESTING="OFF"
 build = "cp38-*"
 build-frontend = "build[uv]"
 skip = ["pp*", "*-musllinux*", "*-manylinux_i686"]
-before-build = "uv pip install conan && uv run python {project}/scripts/conan_build/conan_install.py --project-dir {project}"
+before-build = "{python} {project}/scripts/conan_build/conan_install.py --project-dir {project}"
 container-engine = "docker; create_args: -v ~/.conan2:/root/.conan2"
 
 [tool.cibuildwheel.linux]
