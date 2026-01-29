@@ -56,7 +56,7 @@ wheel.packages = ["python/src/alayalite"]
 BUILD_TESTING="OFF"
 
 [tool.cibuildwheel]
-# build = "cp38-*"
+build = "cp38-*"
 build-frontend = "build[uv]"
 skip = [
     "*-manylinux_i686",

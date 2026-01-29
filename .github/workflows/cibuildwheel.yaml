@@ -1,48 +1,76 @@
----
-name: Build
+name: Build Wheels
 
-on  :
+on:
   workflow_dispatch:
-
+  push:
+    branches: [ test/ci ]
+  #   tags:
+  #     - 'v*'
 
 jobs:
   build_wheels:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        # os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-13, macos-latest]
+        # os: [ubuntu-latest, windows-latest, macos-13, macos-14]
         os: [ubuntu-latest]
 
+    env:
+      CONAN_NON_INTERACTIVE: 1 # Conan non-interactive mode
+      CIBW_BEFORE_ALL_LINUX: >
+        pip install conan &&
+        python {project}/scripts/conan_build/conan_install.py --project-dir {project}
+
+      CIBW_BEFORE_ALL_MACOS: >
+        pip install conan &&
+        python {project}/scripts/conan_build/conan_install.py --project-dir {project}
+
+      CIBW_BEFORE_ALL_WINDOWS: >
+        pip install conan &&
+        python {project}/scripts/conan_build/conan_install.py --project-dir {project}
+
+      # 配置 scikit-build-core 使用 Conan 的工具链
+      # cmake_layout 生成的路径: Linux/Mac: build/Release/generators/, Windows: build/generators/
+      CIBW_ENVIRONMENT_LINUX: >
+        CMAKE_TOOLCHAIN_FILE="/project/build/Release/generators/conan_toolchain.cmake"
+
+      CIBW_ENVIRONMENT_MACOS: >
+        CMAKE_TOOLCHAIN_FILE="{project}/build/Release/generators/conan_toolchain.cmake"
+        MACOSX_DEPLOYMENT_TARGET=10.15
+
+      CIBW_ENVIRONMENT_WINDOWS: >
+        CMAKE_TOOLCHAIN_FILE="{project}/build/generators/conan_toolchain.cmake"
+
+      # 忽略 PyPy，通常 C++ 扩展对 PyPy 支持较麻烦
+      CIBW_SKIP: "pp*"
+      # 指定构建工具，如果你用 scikit-build-core
+      CIBW_BUILD_FRONTEND: "build" 
+
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up QEMU
-      if: runner.os == 'Linux'
-      uses: docker/setup-qemu-action@v3
-      with:
-        platforms: all
+      - uses: actions/checkout@v4
 
-    - name: Restore Caches
-      uses: ./.github/actions/cache-restore
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.16.5
+        # 可以在这里配置 output-dir，或者默认在 wheelhouse/
 
-    - name: Install uv
-      if: runner.os == 'macOS'
-      uses: astral-sh/setup-uv@v5
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
 
-    - name: Install cibuildwheel
-      uses: pypa/cibuildwheel@v3.0.0
-      env:
-        CIBW_ARCHS_LINUX: aarch64, x86_64
-        # CIBW_ARCHS_MACOS: x86_64, arm64
-        CIBW_CONTAINER_ENGINE_ARGS: -v /home/runner/.conan2:/root/.conan2
+  # upload_pypi:
+  #   needs: [build_wheels]
+  #   runs-on: ubuntu-latest
+  #   if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         pattern: cibw-wheels-*
+  #         path: dist
+  #         merge-multiple: true
 
-    - name: Upload wheels
-      uses: actions/upload-artifact@v4
-      with:
-        name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
-        path: ./wheelhouse/*.whl
-
-    - name: Fix cache permissions
-      if: runner.os == 'Linux' && always() # Even if the construction fails, try to fix it to prevent no cache next time.存
-      run: |
-        sudo chown -R $USER:$USER ~/.conan2
+  #     - uses: pypa/gh-action-pypi-publish@release/v1
+  #       with:
+  #         password: ${{ secrets.PYPI_API_TOKEN }}

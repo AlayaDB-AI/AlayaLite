@@ -4,6 +4,11 @@ cmake_minimum_required(VERSION 3.15...3.31)
 set(PROJECT_NAME AlayaLite)
 project(${PROJECT_NAME} LANGUAGES CXX)
 
+# Default build type
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 # Include utility functions
 include(cmake/PrintSummary.cmake)
 include(cmake/Codecov.cmake)
