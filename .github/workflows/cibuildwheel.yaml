@@ -20,15 +20,12 @@ jobs:
 
     env:
       CONAN_NON_INTERACTIVE: 1 # Conan non-interactive mode
-      CIBW_DOCKER_RUN_FLAGS: -v /home/runner/.conan2:/root/.conan2
+      CIBW_CONTAINER_ENGINE: "docker; create_args: -v /home/runner/.conan2:/root/.conan2"
       # manylinux 容器需要安装 OpenSSL 编译所需的 Perl 模块
       CIBW_BEFORE_ALL_LINUX: >
         yum -y install perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece &&
         pip install conan &&
-        python {project}/scripts/conan_build/conan_install.py --project-dir {project} &&
-        echo "=== Conan cache in container ===" &&
-        du -sh /root/.conan2 &&
-        ls -la /root/.conan2
+        python {project}/scripts/conan_build/conan_install.py --project-dir {project}
 
       CIBW_BEFORE_ALL_MACOS: >
         pip install conan &&
@@ -63,13 +60,6 @@ jobs:
 
     - name: Build wheels
       uses: pypa/cibuildwheel@v2.16.5
-
-    - name: Debug - Check Conan cache on host
-      if: always()
-      run: |
-        echo "=== Conan cache on host ==="
-        du -sh ~/.conan2 || echo "Directory not found"
-        ls -la ~/.conan2 || echo "Cannot list"
 
     - uses: actions/upload-artifact@v4
       with:
