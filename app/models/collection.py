@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List, Tuple
+
 from pydantic import BaseModel
 
 __all__ = [
@@ -34,17 +38,17 @@ class ResetCollectionRequest(BaseModel):
 
 class InsertCollectionRequest(BaseModel):
     collection_name: str
-    items: list[tuple[int, str, list[float], dict]]
+    items: List[Tuple[int, str, List[float], Dict[str, Any]]]
 
 
 class UpsertCollectionRequest(BaseModel):
     collection_name: str
-    items: list[tuple[int, str, list[float], dict]]
+    items: List[Tuple[int, str, List[float], Dict[str, Any]]]
 
 
 class QueryCollectionRequest(BaseModel):
     collection_name: str
-    query_vector: list[list[float]]
+    query_vector: List[List[float]]
     limit: int = 1
     ef_search: int = 10
     num_threads: int = 1
@@ -52,12 +56,12 @@ class QueryCollectionRequest(BaseModel):
 
 class DeleteByIdRequest(BaseModel):
     collection_name: str
-    ids: list[int]
+    ids: List[int]
 
 
 class DeleteByFilterRequest(BaseModel):
     collection_name: str
-    filter: dict
+    filter: Dict[str, Any]
 
 
 class SaveCollectionRequest(BaseModel):

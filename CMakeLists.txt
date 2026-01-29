@@ -4,6 +4,14 @@ cmake_minimum_required(VERSION 3.15...3.31)
 set(PROJECT_NAME AlayaLite)
 project(${PROJECT_NAME} LANGUAGES CXX)
 
+# Default build type
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE
+      Release
+      CACHE STRING "Build type" FORCE
+  )
+endif()
+
 # Include utility functions
 include(cmake/PrintSummary.cmake)
 include(cmake/Codecov.cmake)
@@ -30,7 +38,12 @@ endif()
 # 1. Dependency Management (Auto Conan Setup)
 # ============================================================================
 include(cmake/ConanSetup.cmake)
-
+if(APPLE)
+  file(GLOB OPENMP_BREW_PATHS "/usr/local/opt/libomp" # Intel Mac
+       "/opt/homebrew/opt/libomp" # Apple Silicon
+  )
+  list(APPEND CMAKE_PREFIX_PATH ${OPENMP_BREW_PATHS})
+endif()
 find_package(concurrentqueue REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
@@ -59,16 +72,6 @@ target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 # ============================================================================
 # SUBDIRECTORIES
 # ============================================================================
-if(ENABLE_COVERAGE)
-  # Create an interface library named coverage_config
-  add_library(coverage_config INTERFACE)
-
-  # Add coverage flags for GCC/Clang
-  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(coverage_config INTERFACE --coverage -O0 -g)
-    target_link_libraries(coverage_config INTERFACE --coverage)
-  endif()
-endif()
 if(BUILD_TESTING)
   include(CTest)
   find_package(GTest)

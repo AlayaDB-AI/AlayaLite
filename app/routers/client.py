@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import os
 import sys
+from typing import List
 
 from alayalite import Client
 from fastapi import APIRouter, status
@@ -59,7 +62,7 @@ async def set_metric(request: SetMetricRequest):
 
 @router.post(path="/collection/list", tags=["collection"])
 async def list_collections():
-    collections: list[str] = list(client.list_collections())
+    collections: List[str] = list(client.list_collections())
     return collections
 
 

@@ -29,13 +29,13 @@ class AlayaLiteConan(ConanFile):
 
         # OpenMP support
         if self.settings.os == "Linux":
-            if self.settings.compiler != "gcc":
-                self.requires("llvm-openmp/18.1.8")
             self.requires("libcoro/0.14.1")
-        elif self.settings.os == "Macos":
-            self.requires("llvm-openmp/18.1.8")
 
     def configure(self):
+        # Static link all dependencies
+        self.options["*"].shared = False
+        self.options["*"].fPIC = True
+
         # Use header-only spdlog to avoid ABI compatibility issues on Windows
         self.options["spdlog"].header_only = True
 

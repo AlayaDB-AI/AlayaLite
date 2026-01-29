@@ -1,0 +1,11 @@
+[settings]
+arch=x86_64
+build_type=Release
+compiler=apple-clang
+compiler.cppstd=20
+compiler.libcxx=libc++
+compiler.version=15
+os=Macos
+
+[conf]
+tools.apple:sdk_path={{ os.popen("xcrun --show-sdk-path").read().strip() }}

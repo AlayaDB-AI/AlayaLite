@@ -1,48 +1,70 @@
 ---
-name: Build
+name: Build Wheels
 
 on  :
   workflow_dispatch:
-
+  push:
+    branches: [test/ci]
+  #   tags:
+  #     - 'v*'
 
 jobs:
   build_wheels:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        # os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, windows-11-arm, macos-13, macos-latest]
-        os: [ubuntu-latest]
+        include:
+        - os: ubuntu-latest
+          arch: x86_64
+        - os: ubuntu-24.04-arm
+          arch: aarch64
+        - os: macos-15-intel
+          arch: x86_64
+        - os: macos-14
+          arch: arm64
+        # - os: windows-2022
+        #   arch: AMD64
+
+    env:
+      CONAN_NON_INTERACTIVE: 1
+      # CI 特定配置：Linux Docker 挂载 Conan 和 uv 缓存
+      CIBW_CONTAINER_ENGINE: 'docker; create_args: -v /home/runner/.conan2:/root/.conan2'
+      CIBW_ARCHS_LINUX: ${{ matrix.arch }}
+      CIBW_ARCHS_MACOS: ${{ matrix.arch }}
+      CIBW_ARCHS_WINDOWS: ${{ matrix.arch }}
 
     steps:
     - uses: actions/checkout@v4
-    - name: Set up QEMU
-      if: runner.os == 'Linux'
-      uses: docker/setup-qemu-action@v3
-      with:
-        platforms: all
 
-    - name: Restore Caches
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        cache-local-path: ${{ runner.os == 'Linux' && '/home/runner/.cache/uv' || '' }}
+
+    - name: Restore Conan cache
       uses: ./.github/actions/cache-restore
 
-    - name: Install uv
-      if: runner.os == 'macOS'
-      uses: astral-sh/setup-uv@v5
+    - name: Build wheels
+      uses: pypa/cibuildwheel@v3.3
 
-    - name: Install cibuildwheel
-      uses: pypa/cibuildwheel@v3.0.0
-      env:
-        CIBW_ARCHS_LINUX: aarch64, x86_64
-        # CIBW_ARCHS_MACOS: x86_64, arm64
-        CIBW_CONTAINER_ENGINE_ARGS: -v /home/runner/.conan2:/root/.conan2
-
-    - name: Upload wheels
-      uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v4
       with:
-        name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+        name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}
         path: ./wheelhouse/*.whl
 
-    - name: Fix cache permissions
-      if: runner.os == 'Linux' && always() # Even if the construction fails, try to fix it to prevent no cache next time.存
-      run: |
-        sudo chown -R $USER:$USER ~/.conan2
+  # upload_pypi:
+  #   needs: [build_wheels]
+  #   runs-on: ubuntu-latest
+  #   if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         pattern: cibw-wheels-*
+  #         path: dist
+  #         merge-multiple: true
+
+  #     - uses: pypa/gh-action-pypi-publish@release/v1
+  #       with:
+  #         password: ${{ secrets.PYPI_API_TOKEN }}

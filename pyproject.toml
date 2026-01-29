@@ -56,20 +56,28 @@ wheel.packages = ["python/src/alayalite"]
 BUILD_TESTING="OFF"
 
 [tool.cibuildwheel]
-# build = "cp38-*"
+build = "cp3{8,9,10,11,12,13}-*"
 build-frontend = "build[uv]"
-skip = [
-    "*-manylinux_i686",
-    "*-musllinux*", # TODO: Adapt to muslLinux version
-]
-environment = { BUILD_TIME = "$(date)" }
+skip = ["*-musllinux*", "*-manylinux_i686"]
+before-build = "python {project}/scripts/conan_build/conan_install.py --project-dir {project}"
+container-engine = "docker; create_args: -v ~/.conan2:/root/.conan2"
+test-requires = ["pytest", "pytest-asyncio", "httpx", "fastapi"]
+test-command = "pytest {project} -v"
+# Skip testing cp38 arm64 on macOS - cibuildwheel uses x86_64 CPython 3.8 installer
+test-skip = "cp38-macosx_arm64"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
+before-all = "yum -y install perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece"
 
-archs = ["x86_64"]
-before-build = "yum -y install perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece"
+[tool.cibuildwheel.macos]
+before-all = "brew install libomp"
+environment = { MACOSX_DEPLOYMENT_TARGET = "14.0" }
+repair-wheel-command = "delocate-listdeps {wheel} && delocate-wheel -w {dest_dir} -v {wheel}"
+
+[tool.cibuildwheel.windows]
+before-all = ""
 # ----------------- build whl end ------------------
 
 [[tool.uv.index]]
