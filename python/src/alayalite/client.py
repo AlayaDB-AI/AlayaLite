@@ -21,6 +21,8 @@ import json
 import os
 import shutil
 
+from alaya_vis_sdk import notify
+
 from .collection import Collection
 from .index import Index
 from .schema import IndexParams, is_collection_url, is_index_url
@@ -110,7 +112,15 @@ class Client:
             print(f"Index {name} does not exist")
             return None
 
-    def create_collection(self, name: str = "default", **kwargs) -> Collection:
+    @notify(span_id="client_create_collection")
+    def create_collection(
+        self,
+        name: str = "default",
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
+        **kwargs,
+    ) -> Collection:
         """
         Create a new collection with the given name.
 
@@ -127,12 +137,33 @@ class Client:
         if name in self.__collection_map or name in self.__index_map:
             raise RuntimeError(f"A collection or index with name '{name}' already exists")
 
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.create_collection(), "
+                "monitoring data will not be reported"
+            )
+        else:
+            payload.update(
+                {
+                    "collection_name": str(name),
+                }
+            )
+
         index_params = IndexParams.from_kwargs(**kwargs)
         collection = Collection(name, index_params)
         self.__collection_map[name] = collection
         return collection
 
-    def create_index(self, name: str = "default", **kwargs) -> Index:
+    @notify(span_id="client_create_index")
+    def create_index(
+        self,
+        name: str = "default",
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
+        **kwargs,
+    ) -> Index:
         """
         Create a new index with the given name and parameters.
 
@@ -148,6 +179,19 @@ class Client:
         """
         if name in self.__collection_map or name in self.__index_map:
             raise RuntimeError(f"A collection or index with name '{name}' already exists")
+
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.create_index(), "
+                "monitoring data will not be reported"
+            )
+        else:
+            payload.update(
+                {
+                    "index_type": str(kwargs.get("index_type", "HNSW")),
+                }
+            )
 
         params = IndexParams.from_kwargs(**kwargs)
         index = Index(name, params)
@@ -186,7 +230,15 @@ class Client:
             index = self.create_index(name, **kwargs)
         return index
 
-    def delete_collection(self, collection_name: str, delete_on_disk: bool = False):
+    @notify(span_id="client_delete_collection")
+    def delete_collection(
+        self,
+        collection_name: str,
+        delete_on_disk: bool = False,
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
+    ):
         """
         Delete a collection by name.
 
@@ -199,6 +251,20 @@ class Client:
         """
         if collection_name not in self.__collection_map:
             raise RuntimeError(f"Collection '{collection_name}' does not exist")
+
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.delete_collection(), "
+                "monitoring data will not be reported"
+            )
+        else:
+            payload.update(
+                {
+                    "collection_name": str(collection_name),
+                }
+            )
+
         del self.__collection_map[collection_name]
         if delete_on_disk:
             if self.__url is None:
@@ -208,7 +274,15 @@ class Client:
                 shutil.rmtree(collection_url)
                 print(f"Collection '{collection_name}' is deleted from disk")
 
-    def delete_index(self, index_name: str, delete_on_disk: bool = False):
+    @notify(span_id="client_delete_index")
+    def delete_index(
+        self,
+        index_name: str,
+        delete_on_disk: bool = False,
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
+    ):
         """
         Delete an index by name.
 
@@ -221,6 +295,21 @@ class Client:
         """
         if index_name not in self.__index_map:
             raise RuntimeError(f"Index '{index_name}' does not exist")
+
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.delete_index(), "
+                "monitoring data will not be reported"
+            )
+        else:
+            index = self.__index_map[index_name]
+            payload.update(
+                {
+                    "index_type": str(index.get_params().index_type) if index.get_params().index_type else "HNSW",
+                }
+            )
+
         del self.__index_map[index_name]
         if delete_on_disk:
             if self.__url is None:
@@ -248,7 +337,14 @@ class Client:
         self.__collection_map = {}
         self.__index_map = {}
 
-    def save_index(self, index_name: str):
+    @notify(span_id="client_save_index")
+    def save_index(
+        self,
+        index_name: str,
+        *,
+        trace_id=None,  # pylint: disable=unused-argument
+        payload=None,
+    ):
         """
         Save an index to disk.
 
@@ -263,14 +359,36 @@ class Client:
         if index_name not in self.__index_map:
             raise RuntimeError(f"Index '{index_name}' does not exist")
 
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.save_index(), "
+                "monitoring data will not be reported"
+            )
+        else:
+            index = self.__index_map[index_name]
+            payload.update(
+                {
+                    "vector_dim": int(index.get_dim()),
+                    "index_type": str(index.get_params().index_type) if index.get_params().index_type else "HNSW",
+                }
+            )
+
         index_url = os.path.join(self.__url, index_name)
-        schema_map = self.__index_map[index_name].save(index_url)
+        schema_map = self.__index_map[index_name].save(index_url, payload={})
         index_schema_url = os.path.join(index_url, "schema.json")
         with open(index_schema_url, "w", encoding="utf-8") as f:
             json.dump(schema_map, f, indent=4)
         print(f"Index '{index_name}' is saved")
 
-    def save_collection(self, collection_name: str):
+    @notify(span_id="client_save_collection")
+    def save_collection(
+        self,
+        collection_name: str,
+        *,
+        trace_id=None,
+        payload=None,
+    ):  # pylint: disable=unused-argument
         """
         Save a collection to disk.
 
@@ -285,8 +403,24 @@ class Client:
         if collection_name not in self.__collection_map:
             raise RuntimeError(f"Collection '{collection_name}' does not exist")
 
+        # Prepare monitoring data
+        if payload is None:
+            print(
+                f"WARNING: payload is None in {self.__class__.__name__}.save_collection(), "
+                "monitoring data will not be reported"
+            )
+        else:
+            collection = self.__collection_map[collection_name]
+            payload.update(
+                {
+                    "collection_name": str(collection_name),
+                    "vector_dim": int(collection.get_dim()),
+                    "total_vectors": int(collection.get_total_vectors()),
+                }
+            )
+
         collection_url = os.path.join(self.__url, collection_name)
-        schema_map = self.__collection_map[collection_name].save(collection_url)
+        schema_map = self.__collection_map[collection_name].save(collection_url, payload={})
         collection_schema_url = os.path.join(collection_url, "schema.json")
 
         with open(collection_schema_url, "w", encoding="utf-8") as f:
