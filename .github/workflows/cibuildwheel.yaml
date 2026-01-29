@@ -19,7 +19,10 @@ jobs:
 
     env:
       CONAN_NON_INTERACTIVE: 1 # Conan non-interactive mode
+      CIBW_DOCKER_RUN_FLAGS: "-v /home/runner/.conan2:/root/.conan2"
+      # manylinux 容器需要安装 OpenSSL 编译所需的 Perl 模块
       CIBW_BEFORE_ALL_LINUX: >
+        yum install -y perl-IPC-Cmd &&
         pip install conan &&
         python {project}/scripts/conan_build/conan_install.py --project-dir {project}
 

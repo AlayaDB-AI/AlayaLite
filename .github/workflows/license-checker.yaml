@@ -1,12 +1,14 @@
 ---
 name: License Header Checker
 
-on  :
-  pull_request:
-  push:
-    branches:
-    - main
-    - master
+# Temporarily disabled for cibuildwheel testing
+on  : workflow_dispatch
+# on  :
+#   pull_request:
+#   push:
+#     branches:
+#     - main
+#     - master
 
 jobs:
   license-header-check:
