@@ -58,13 +58,11 @@ BUILD_TESTING="OFF"
 [tool.cibuildwheel]
 build = "cp3{8,9,10,11,12,13}-*"
 build-frontend = "build[uv]"
-skip = ["*-musllinux*", "*-manylinux_i686"]
+skip = ["*-musllinux*", "*-manylinux_i686", "cp38-win*"]
 before-build = "python {project}/scripts/conan_build/conan_install.py --project-dir {project}"
 container-engine = "docker; create_args: -v ~/.conan2:/root/.conan2"
 test-requires = ["pytest", "pytest-asyncio", "httpx", "fastapi"]
 test-command = "pytest {project} -v"
-# Skip testing cp38 arm64 on macOS - cibuildwheel uses x86_64 CPython 3.8 installer
-test-skip = "cp38-macosx_arm64"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
