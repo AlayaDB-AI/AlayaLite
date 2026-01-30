@@ -17,7 +17,8 @@ runs       :
     uses: actions/cache@v4
     with:
       path: ~/.conan2
-      key: conan-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-type }}-${{ hashFiles('**/conanfile.py', 'scripts/conan_build/conan_profile*') }}
+      key: conan-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-type }}-${{ hashFiles('**/conanfile.py', 
+        '**/conan_profile*') }} # NOLINT
       restore-keys: |
         conan-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-type }}-
         conan-${{ runner.os }}-${{ runner.arch }}-

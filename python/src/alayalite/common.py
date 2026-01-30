@@ -25,15 +25,15 @@ from typing import Literal, Type, Union
 import numpy as np
 from numpy import typing as npt
 
+from ._alayalitepy import IndexType as _IndexType
+from ._alayalitepy import MetricType as _MetricType
+from ._alayalitepy import QuantizationType as _QuantizationType
+
 # TypeAlias is only available in Python 3.10+
 if sys.version_info >= (3, 10):
     from typing import TypeAlias
 else:
     TypeAlias = type  # Fallback for older Python versions
-
-from ._alayalitepy import IndexType as _IndexType
-from ._alayalitepy import MetricType as _MetricType
-from ._alayalitepy import QuantizationType as _QuantizationType
 
 IDType: TypeAlias = Union[Type[np.uint64], Type[np.uint32]]
 """ Type alias for one of {`numpy.uint64`, `numpy.uint32`} """

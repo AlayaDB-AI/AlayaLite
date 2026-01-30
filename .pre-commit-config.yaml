@@ -12,17 +12,15 @@ repos:
     args: [--fix]
 
 #===========================================================================
-#                            CODE QUALITY PRE_COMMIT HOOK
+#                            PYTHON LINT HOOK
 #===========================================================================
-- repo: https://github.com/pre-commit/pre-commit-hooks
-  rev: v5.0.0
+- repo: https://github.com/PyCQA/pylint
+  rev: v4.0.4
   hooks:
-  - id: trailing-whitespace
-  - id: end-of-file-fixer
-  - id: check-added-large-files
-    args: [--maxkb=1000]
-  - id: check-merge-conflict
-  - id: check-yaml
+  - id: pylint
+    args:
+    - --rcfile=python/.pylintrc
+    files: ^(examples|python/src/alayalite|python/tests)/.*\.py$
 
 
 #===========================================================================
@@ -32,7 +30,23 @@ repos:
   rev: 0.2.1
   hooks:
   - id: yamlfmt
-    args: [--mapping, '2', --sequence, '2', --offset, '0', --colons, --width, '200']
+    args: [--mapping, '2', --sequence, '2', --offset, '0', --colons, --width, '120']
+
+
+#===========================================================================
+#                            CODE QUALITY PRE_COMMIT HOOK
+#===========================================================================
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v5.0.0
+  hooks:
+  - id: trailing-whitespace
+    exclude: \.(yaml|yml)$
+  - id: end-of-file-fixer
+    exclude: \.(yaml|yml)$
+  - id: check-added-large-files
+    args: [--maxkb=1000]
+  - id: check-merge-conflict
+  - id: check-yaml
 
 
 #===========================================================================
