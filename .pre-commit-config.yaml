@@ -118,3 +118,15 @@ repos:
       -build/include_what_you_use
 
     - --recursive
+
+#===========================================================================
+#                            CHINESE CHARACTER CHECK HOOK
+#===========================================================================
+- repo: local
+  hooks:
+  - id: no-chinese-characters
+    name: Check for Chinese characters in code
+    entry: python scripts/check_chinese.py
+    language: python
+    files: (Makefile|\.(c|cc|cpp|cxx|h|hpp|hxx|ipp|py|yaml|yml|sh|cmake|txt))$
+    exclude: ^(docs/|build/)

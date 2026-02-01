@@ -74,7 +74,7 @@ TEST_F(SQ4SpaceTest, InsertAndRemove) {
   EXPECT_EQ(space_->get_data_num(), 1);
 
   space_->remove(id);
-  EXPECT_EQ(space_->get_data_num(), 1);  // remove 只是标记删除
+  EXPECT_EQ(space_->get_data_num(), 1);  // remove only marks the item as deleted
 }
 
 TEST_F(SQ4SpaceTest, GetDistance) {
