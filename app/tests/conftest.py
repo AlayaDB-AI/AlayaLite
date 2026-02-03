@@ -19,12 +19,12 @@ def _reload_app_module() -> TestClient:
 def fresh_client(tmp_path, monkeypatch) -> Generator[TestClient, None, None]:
     # Isolate storage into a temp directory for this test
     monkeypatch.setenv("ALAYALITE_DATA_DIR", str(tmp_path))
+    # Set RocksDB directory to tmp_path for test isolation
+    rocksdb_dir = str(tmp_path / "RocksDB")
+    monkeypatch.setenv("ALAYALITE_ROCKSDB_DIR", rocksdb_dir)
     client = _reload_app_module()
     try:
         yield client
     finally:
-        # Best-effort cleanup of created data in tmp_path
-        for entry in tmp_path.iterdir():
-            if entry.is_dir():
-                for _ in entry.iterdir():
-                    pass  # tmp path will be cleaned by pytest
+        # tmp_path will be cleaned up by pytest automatically
+        pass

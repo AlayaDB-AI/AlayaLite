@@ -33,6 +33,7 @@
 #include "storage/static_storage.hpp"
 #include "utils/log.hpp"
 #include "utils/math.hpp"
+#include "utils/metadata_filter.hpp"
 #include "utils/metric_type.hpp"
 #include "utils/prefetch.hpp"
 #include "utils/rabitq_utils/fastscan.hpp"
@@ -43,11 +44,13 @@ namespace alaya {
 template <typename DataType = float,
           typename DistanceType = float,
           typename IDType = uint32_t,
-          typename MetaDataType = EmptyMetadata>
+          typename ScalarDataType = EmptyScalarData>
 class RaBitQSpace {
- private:
-  static constexpr bool has_metadata = !std::is_same_v<MetaDataType, EmptyMetadata>;  // NOLINT
+ public:
+  static constexpr bool has_scalar_data =
+      !std::is_same_v<ScalarDataType, EmptyScalarData>;  // NOLINT
 
+ private:
   IDType capacity_{0};                 ///< The maximum number of data points (nodes)
   uint32_t dim_{0};                    ///< Dimensionality of the data points
   MetricType metric_{MetricType::L2};  ///< Metric type
@@ -63,10 +66,11 @@ class RaBitQSpace {
   DistFuncRaBitQ<DataType, DistanceType> distance_cal_func_;  ///< Distance calculation function
 
   StaticStorage<> storage_;  ///< Data Storage
-  RocksDBConfig config_;     ///< Configuration for Meta Data Storage
-  std::unique_ptr<RocksDBStorage<MetaDataType, IDType>> meta_storage_;  ///< Meta Data Storage
-  std::unique_ptr<RaBitQQuantizer<DataType>> quantizer_;                ///< Data Quantizer
-  std::unique_ptr<Rotator<DataType>> rotator_;                          ///< Data rotator
+  RocksDBConfig config_;     ///< Configuration for Scalar Data Storage
+  std::unique_ptr<RocksDBStorage<IDType>>
+      scalar_storage_;  ///< Scalar Data Storage (stores ScalarData)
+  std::unique_ptr<RaBitQQuantizer<DataType>> quantizer_;  ///< Data Quantizer
+  std::unique_ptr<Rotator<DataType>> rotator_;            ///< Data rotator
 
   IDType ep_;  ///< search entry point
 
@@ -94,7 +98,7 @@ class RaBitQSpace {
     set_metric_function();
   }
 
-  void save_meta_config(std::ofstream &writer) {
+  void save_scalar_config(std::ofstream &writer) {
     // Save db_path_ string
     size_t db_path_size = config_.db_path_.size();
     writer.write(reinterpret_cast<char *>(&db_path_size), sizeof(db_path_size));
@@ -119,7 +123,7 @@ class RaBitQSpace {
     writer.write(reinterpret_cast<char *>(&enable_compression), sizeof(enable_compression));
   }
 
-  void load_meta_config(std::ifstream &reader) {
+  void load_scalar_config(std::ifstream &reader) {
     config_.create_if_missing_ = false;  // db is missing means something's wrong
     config_.error_if_exists_ = false;    // Of course db exists
     // Load db_path_ string
@@ -175,10 +179,20 @@ class RaBitQSpace {
   auto operator=(const RaBitQSpace &) -> RaBitQSpace & = delete;
   auto operator=(RaBitQSpace &&) -> RaBitQSpace & = delete;
 
-  auto insert(DataType *data, const MetaDataType *meta_data = nullptr) -> IDType {
+  auto insert(DataType *data, const ScalarDataType *scalar_data = nullptr) -> IDType {
     throw std::runtime_error("Insert operation is not supported yet!");
   }
   auto remove(IDType id) -> IDType {
+    throw std::runtime_error("Remove operation is not supported yet!");
+  }
+
+  /**
+   * @brief Remove a data point by its item_id
+   * @param item_id The item_id to remove
+   * @return The internal ID that was removed
+   * @throws std::runtime_error - not supported yet
+   */
+  auto remove(const std::string &item_id) -> IDType {
     throw std::runtime_error("Remove operation is not supported yet!");
   }
 
@@ -225,7 +239,7 @@ class RaBitQSpace {
                                get_f_rescale_ptr(c));
   }
 
-  void fit(const DataType *data, IDType item_cnt, const MetaDataType *meta_data = nullptr) {
+  void fit(const DataType *data, IDType item_cnt, const ScalarDataType *scalar_data = nullptr) {
     if (data == nullptr) {
       throw std::invalid_argument("Invalid or null vector data pointer.");
     }
@@ -245,21 +259,6 @@ class RaBitQSpace {
     }
     item_cnt_ = item_cnt;
 
-    if constexpr (has_metadata) {
-      if (meta_data == nullptr) {
-        throw std::invalid_argument("Invalid or null metadata pointer.");
-      }
-      if (meta_storage_ == nullptr) {
-        // otherwise existing metadata will lack corresponding vector data.
-        // if you want to open a existing metadata db, try load() and then insert() your new data
-        config_.error_if_exists_ = true;
-        meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
-      }
-      if (!meta_storage_->batch_insert(meta_data, meta_data + item_cnt)) {
-        throw std::runtime_error("Failed to batch insert metadata");
-      }
-    }
-
     // We don't fit after loading , so loaded storage_ would not be overwritten.
     storage_ = StaticStorage<>(std::vector<size_t>{item_cnt_, data_chunk_size_});
 #pragma omp parallel for schedule(dynamic)
@@ -267,6 +266,23 @@ class RaBitQSpace {
       const auto *src = data + (dim_ * i);
       auto *dst = get_data_by_id(i);
       std::copy(src, src + dim_, dst);
+    }
+
+    // Store ScalarData with synchronized IDs (0, 1, 2, ...)
+    if constexpr (has_scalar_data) {
+      if (scalar_data == nullptr) {
+        throw std::invalid_argument("Invalid or null ScalarData pointer.");
+      }
+      if (scalar_storage_ == nullptr) {
+        config_.error_if_exists_ = true;
+        scalar_storage_ = std::make_unique<RocksDBStorage<IDType>>(config_);
+      }
+      // Batch insert with starting ID 0, ensuring sync with vector storage IDs
+      if (!scalar_storage_->batch_insert(static_cast<IDType>(0),
+                                         scalar_data,
+                                         scalar_data + item_cnt)) {
+        throw std::runtime_error("Failed to batch insert ScalarData");
+      }
     }
   }
 
@@ -321,11 +337,46 @@ class RaBitQSpace {
     return reinterpret_cast<IDType *>(&storage_.at((data_chunk_size_ * id) + nei_id_offset_));
   }
 
-  auto get_metadata(IDType id) const -> MetaDataType {
-    if constexpr (has_metadata) {
-      return (*meta_storage_)[id];
+  auto get_scalar_data(IDType id) const -> ScalarDataType {
+    if constexpr (has_scalar_data) {
+      return (*scalar_storage_)[id];
     }
-    throw std::runtime_error("No metadata available.");
+    throw std::runtime_error("No ScalarData available.");
+  }
+
+  /**
+   * @brief Get scalar data by item_id
+   * @param item_id The item_id to look up
+   * @return Pair of (internal_id, scalar_data)
+   * @throws std::runtime_error if item_id not found or no scalar data available
+   */
+  auto get_scalar_data(const std::string &item_id) const -> std::pair<IDType, ScalarDataType> {
+    if constexpr (has_scalar_data) {
+      auto internal_id = scalar_storage_->find_by_item_id(item_id);
+      if (!internal_id.has_value()) {
+        throw std::runtime_error("Item ID not found: " + item_id);
+      }
+      return {internal_id.value(), (*scalar_storage_)[internal_id.value()]};
+    }
+    throw std::runtime_error("No ScalarData available.");
+  }
+
+  /**
+   * @brief Get scalar data with metadata filter
+   * @param filter MetadataFilter to apply
+   * @param limit Maximum number of results
+   * @return Vector of (internal_id, scalar_data) pairs
+   */
+  auto get_scalar_data(const MetadataFilter &filter, size_t limit) const
+      -> std::vector<std::pair<IDType, ScalarDataType>> {
+    if constexpr (has_scalar_data) {
+      return scalar_storage_->scan_with_filter(
+          [&filter](const ScalarData &sd) {
+            return filter.evaluate(sd.metadata);
+          },
+          limit);
+    }
+    throw std::runtime_error("No ScalarData available.");
   }
 
   /**
@@ -471,8 +522,8 @@ class RaBitQSpace {
     writer.write(reinterpret_cast<char *>(&ep_), sizeof(ep_));
     // no need to save offsets, we will take care of that in loading
 
-    if constexpr (has_metadata) {
-      save_meta_config(writer);
+    if constexpr (has_scalar_data) {
+      save_scalar_config(writer);
     }
 
     rotator_->save(writer);
@@ -498,14 +549,9 @@ class RaBitQSpace {
     reader.read(reinterpret_cast<char *>(&type_), sizeof(type_));
     reader.read(reinterpret_cast<char *>(&ep_), sizeof(ep_));
 
-    if constexpr (has_metadata) {
-      load_meta_config(reader);
-      meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
-    }
-
-    if constexpr (has_metadata) {
-      load_meta_config(reader);
-      meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
+    if constexpr (has_scalar_data) {
+      load_scalar_config(reader);
+      scalar_storage_ = std::make_unique<RocksDBStorage<IDType>>(config_);
     }
 
     rotator_ = choose_rotator<DataType>(dim_, type_, alaya::math::round_up_pow2<size_t>(dim_, 64));
@@ -520,6 +566,18 @@ class RaBitQSpace {
     quantizer_->load(reader);
 
     LOG_INFO("RaBitQSpace is successfully loaded from {}", filename);
+  }
+
+  /**
+   * @brief Close the RocksDB storage explicitly
+   */
+  void close_db() {
+    if constexpr (has_scalar_data) {
+      if (scalar_storage_ != nullptr) {
+        scalar_storage_->flush();
+        scalar_storage_.reset();
+      }
+    }
   }
 };
 

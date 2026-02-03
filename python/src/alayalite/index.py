@@ -18,6 +18,7 @@ and querying a single vector index.
 """
 
 import os
+from typing import List, Optional
 
 import numpy as np
 
@@ -75,11 +76,23 @@ class Index:
     def fit(
         self,
         vectors: VectorLikeBatch,
+        *,
         ef_construction: int = 100,
         num_threads: int = 1,
+        item_ids: Optional[List[str]] = None,
+        documents: Optional[List[str]] = None,
+        metadata_list: Optional[List[dict]] = None,
     ):
         """
         Build the index with the given set of vectors.
+
+        Args:
+            vectors: 2D numpy array of vectors to index.
+            ef_construction: Construction parameter for HNSW algorithm.
+            num_threads: Number of threads to use for building.
+            item_ids: Optional list of item IDs for scalar data storage.
+            documents: Optional list of document strings.
+            metadata_list: Optional list of metadata dictionaries.
         """
         if self.__is_initialized:
             raise RuntimeError("An index can be only fitted once")
@@ -101,7 +114,7 @@ class Index:
             f"  vectors.shape: {vectors.shape}, num_threads: {num_threads}, ef_construction: {ef_construction}\n"
             f"start fitting index..."
         )
-        self.__index.fit(vectors, ef_construction, num_threads)
+        self.__index.fit(vectors, ef_construction, num_threads, item_ids, documents, metadata_list)
 
     def insert(self, vectors: VectorLike, ef: int = 100):
         """
@@ -191,6 +204,17 @@ class Index:
         Get the data type of vectors stored in the index.
         """
         return self.__params.data_type
+
+    def get_cpp_index(self) -> _PyIndexInterface:
+        """
+        Get the underlying C++ PyIndexInterface.
+
+        This allows direct access to C++ methods for advanced usage.
+
+        Returns:
+            _PyIndexInterface: The underlying C++ index interface
+        """
+        return self.__index
 
     def save(self, url) -> dict:
         """

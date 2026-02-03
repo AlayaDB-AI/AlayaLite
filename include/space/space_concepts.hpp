@@ -27,7 +27,7 @@ namespace alaya {
 // ==========================================
 
 const uint32_t kAlignment = 64;
-struct EmptyMetadata {};
+struct EmptyScalarData {};
 
 template <typename DataType, typename DistanceType>
 using DistFunc = DistanceType (*)(const DataType *, const DataType *, size_t);

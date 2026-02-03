@@ -72,11 +72,10 @@ TEST_F(UpdateTest, HalfInsertTest) {
   auto search_job = std::make_shared<alaya::GraphSearchJob<alaya::RawSpace<>>>(space, hnsw_graph);
   std::vector<uint32_t> ids(ds_.query_num_ * topk);
   size_t ef_1 = 30;
-  std::vector<uint32_t> ef_results(ef_1);
   for (uint32_t i = 0; i < ds_.query_num_; i++) {
     auto cur_query = ds_.queries_.data() + i * ds_.dim_;
-    search_job->search_solo(cur_query, ef_results.data(), ef_1);
-    std::copy(ef_results.begin(), ef_results.begin() + topk, ids.data() + i * topk);
+    // New interface: search_solo(query, ids, topk, ef) returns topk results directly
+    search_job->search_solo(cur_query, ids.data() + i * topk, topk, ef_1);
   }
 
   auto recall = calc_recall(ids.data(), half_gt.data(), ds_.query_num_, topk, topk);
@@ -90,11 +89,10 @@ TEST_F(UpdateTest, HalfInsertTest) {
   }
 
   size_t ef_2 = 50;
-  std::vector<uint32_t> ef_results_2(ef_2);
   for (uint32_t i = 0; i < ds_.query_num_; i++) {
     auto cur_query = ds_.queries_.data() + i * ds_.dim_;
-    search_job->search_solo(cur_query, ef_results_2.data(), ef_2);
-    std::copy(ef_results_2.begin(), ef_results_2.begin() + topk, ids.data() + i * topk);
+    // New interface: search_solo(query, ids, topk, ef) returns topk results directly
+    search_job->search_solo(cur_query, ids.data() + i * topk, topk, ef_2);
   }
 
   auto full_gt = find_exact_gt(ds_.queries_, ds_.data_, ds_.dim_, topk);
@@ -108,7 +106,7 @@ TEST_F(UpdateTest, HalfInsertTest) {
   std::vector<uint32_t> ef_results_3(ef_3);
   for (uint32_t i = 0; i < ds_.query_num_; i++) {
     auto cur_query = ds_.queries_.data() + i * ds_.dim_;
-    search_job->search_solo_updated(cur_query, ef_results_3.data(), ef_3);
+    search_job->search_solo_updated(cur_query, ef_results_3.data(), ef_3, topk);
     std::copy(ef_results_3.begin(), ef_results_3.begin() + topk, ids.data() + i * topk);
   }
   auto recall_after_delete = calc_recall(ids.data(), full_gt.data(), ds_.query_num_, topk, topk);

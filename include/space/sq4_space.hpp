@@ -37,6 +37,7 @@
 #include "storage/storage_concept.hpp"
 #include "utils/log.hpp"
 #include "utils/math.hpp"
+#include "utils/metadata_filter.hpp"
 #include "utils/metric_type.hpp"
 #include "utils/platform.hpp"
 #include "utils/prefetch.hpp"
@@ -54,18 +55,17 @@ namespace alaya {
  * @tparam IDType The data type for storing IDs, with the default being uint32_t.
  * @tparam DataStorage The storage backend for vector data, with the default being
  * SequentialStorage.
- * @tparam MetaDataType The data type for metadata, with the default being EmptyMetadata.
+ * @tparam ScalarDataType The data type for Scalardata, with the default being EmptyScalardata.
  */
 template <typename DataType = float,
           typename DistanceType = float,
           typename IDType = uint32_t,
           typename DataStorage = SequentialStorage<uint8_t, IDType>,
-          typename MetaDataType = EmptyMetadata>
+          typename ScalarDataType = EmptyScalarData>
 class SQ4Space {
- private:
-  static constexpr bool has_metadata = !std::is_same_v<MetaDataType, EmptyMetadata>;
-
  public:
+  static constexpr bool has_scalar_data = !std::is_same_v<ScalarDataType, EmptyScalarData>;
+
   using DataTypeAlias = DataType;
   using IDTypeAlias = IDType;
   using DistanceTypeAlias = DistanceType;
@@ -84,7 +84,7 @@ class SQ4Space {
    * @param capacity The maximum number of data points (nodes)
    * @param dim Dimensionality of each data point
    * @param metric Metric type
-   * @param config RocksDB configuration for metadata storage
+   * @param config RocksDB configuration for Scalardata storage
    */
   SQ4Space(IDType capacity,
            size_t dim,
@@ -134,9 +134,9 @@ class SQ4Space {
    * @brief Fit the data into the space
    * @param data Pointer to the input data array
    * @param item_cnt Number of data points
-   * @param meta_data Pointer to metadata array (optional)
+   * @param scalar_data Pointer to ScalarData array (optional)
    */
-  void fit(const DataType *data, IDType item_cnt, const MetaDataType *meta_data = nullptr) {
+  void fit(const DataType *data, IDType item_cnt, const ScalarDataType *scalar_data = nullptr) {
     if (data == nullptr) {
       throw std::invalid_argument("Invalid or null vector data pointer.");
     }
@@ -146,25 +146,29 @@ class SQ4Space {
     }
     item_cnt_ = item_cnt;
 
-    if constexpr (has_metadata) {  // NOLINT
-      if (meta_data == nullptr) {
-        throw std::invalid_argument("Invalid or null metadata pointer.");
-      }
-      if (meta_storage_ == nullptr) {
-        // otherwise existing metadata will lack corresponding vector data.
-        // if you want to open a existing metadata db, try load() and then insert() your new data
-        config_.error_if_exists_ = true;
-        meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
-      }
-      if (!meta_storage_->batch_insert(meta_data, meta_data + item_cnt)) {
-        throw std::runtime_error("Failed to batch insert metadata");
-      }
-    }
-
     quantizer_.fit(data, item_cnt);
     for (IDType i = 0; i < item_cnt; i++) {
       auto id = data_storage_.reserve();
       quantizer_.encode(data + (i * dim_), data_storage_[id]);
+    }
+
+    // Store ScalarData with synchronized IDs (0, 1, 2, ...)
+    if constexpr (has_scalar_data) {  // NOLINT
+      if (scalar_data == nullptr) {
+        throw std::invalid_argument("Invalid or null ScalarData pointer.");
+      }
+      if (scalar_storage_ == nullptr) {
+        // otherwise existing ScalarData will lack corresponding vector data.
+        // if you want to open a existing ScalarData db, try load() and then insert() your new data
+        config_.error_if_exists_ = true;
+        scalar_storage_ = std::make_unique<RocksDBStorage<IDType>>(config_);
+      }
+      // Batch insert with starting ID 0, ensuring sync with vector storage IDs
+      if (!scalar_storage_->batch_insert(static_cast<IDType>(0),
+                                         scalar_data,
+                                         scalar_data + item_cnt)) {
+        throw std::runtime_error("Failed to batch insert ScalarData");
+      }
     }
   }
 
@@ -208,15 +212,50 @@ class SQ4Space {
   auto get_dist_func() -> DistFuncSQ<DataType, DistanceType> { return distance_calu_func_; }
 
   /**
-   * @brief Get metadata for a specific ID
+   * @brief Get ScalarData for a specific ID
    * @param id The ID of the data point
-   * @return The metadata for the given ID
+   * @return The ScalarData for the given ID
    */
-  auto get_metadata(IDType id) const -> MetaDataType {
-    if constexpr (has_metadata) {  // NOLINT
-      return (*meta_storage_)[id];
+  auto get_scalar_data(IDType id) const -> ScalarDataType {
+    if constexpr (has_scalar_data) {  // NOLINT
+      return (*scalar_storage_)[id];
     }
-    throw std::runtime_error("No metadata available.");
+    throw std::runtime_error("No ScalarData available.");
+  }
+
+  /**
+   * @brief Get scalar data by item_id
+   * @param item_id The item_id to look up
+   * @return Pair of (internal_id, scalar_data)
+   * @throws std::runtime_error if item_id not found or no scalar data available
+   */
+  auto get_scalar_data(const std::string &item_id) const -> std::pair<IDType, ScalarDataType> {
+    if constexpr (has_scalar_data) {  // NOLINT
+      auto internal_id = scalar_storage_->find_by_item_id(item_id);
+      if (!internal_id.has_value()) {
+        throw std::runtime_error("Item ID not found: " + item_id);
+      }
+      return {internal_id.value(), (*scalar_storage_)[internal_id.value()]};
+    }
+    throw std::runtime_error("No ScalarData available.");
+  }
+
+  /**
+   * @brief Get scalar data with metadata filter
+   * @param filter MetadataFilter to apply
+   * @param limit Maximum number of results
+   * @return Vector of (internal_id, scalar_data) pairs
+   */
+  auto get_scalar_data(const MetadataFilter &filter, size_t limit) const
+      -> std::vector<std::pair<IDType, ScalarDataType>> {
+    if constexpr (has_scalar_data) {  // NOLINT
+      return scalar_storage_->scan_with_filter(
+          [&filter](const ScalarData &sd) {
+            return filter.evaluate(sd.metadata);
+          },
+          limit);
+    }
+    throw std::runtime_error("No ScalarData available.");
   }
 
   /**
@@ -236,11 +275,11 @@ class SQ4Space {
    * space. The ID of the inserted data point will be returned.
    *
    * @param data Pointer to the data point to be inserted
-   * @param meta_data Pointer to metadata (optional, only used when MetaDataType is not
-   * EmptyMetadata)
+   * @param scalar_data Pointer to ScalarData (optional, only used when ScalarDataType is not
+   * EmptyScalarData)
    * @return IDType The ID of the inserted data point (-1 for failure)
    */
-  auto insert(DataType *data, const MetaDataType *meta_data = nullptr) -> IDType {
+  auto insert(DataType *data, const ScalarDataType *scalar_data = nullptr) -> IDType {
     auto id = data_storage_.reserve();
     if (id == static_cast<IDType>(-1)) {
       return static_cast<IDType>(-1);
@@ -248,10 +287,13 @@ class SQ4Space {
     item_cnt_++;
     quantizer_.encode(data, data_storage_[id]);
 
-    // Insert metadata if provided
-    if constexpr (has_metadata) {  // NOLINT
-      if (meta_data != nullptr && meta_storage_ != nullptr) {
-        meta_storage_->insert(*meta_data);
+    // Insert ScalarData with the same ID as vector
+    if constexpr (has_scalar_data) {  // NOLINT
+      if (scalar_data != nullptr && scalar_storage_ != nullptr) {
+        if (!scalar_storage_->insert(id, *scalar_data)) {
+          LOG_ERROR("Failed to insert ScalarData for ID {}", id);
+          // Don't fail the whole operation, just log the error
+        }
       }
     }
 
@@ -268,14 +310,31 @@ class SQ4Space {
   auto remove(IDType id) -> IDType {
     delete_cnt_++;
 
-    // Remove metadata if present
-    if constexpr (has_metadata) {  // NOLINT
-      if (meta_storage_ != nullptr) {
-        meta_storage_->remove(id);
+    // Remove ScalarData if present
+    if constexpr (has_scalar_data) {  // NOLINT
+      if (scalar_storage_ != nullptr) {
+        scalar_storage_->remove(id);
       }
     }
 
     return data_storage_.remove(id);
+  }
+
+  /**
+   * @brief Remove a data point by its item_id
+   * @param item_id The item_id to remove
+   * @return The internal ID that was removed
+   * @throws std::runtime_error if item_id not found
+   */
+  auto remove(const std::string &item_id) -> IDType {
+    if constexpr (has_scalar_data) {  // NOLINT
+      auto internal_id_opt = scalar_storage_->find_by_item_id(item_id);
+      if (!internal_id_opt.has_value()) {
+        throw std::runtime_error("Item ID not found: " + item_id);
+      }
+      return remove(internal_id_opt.value());
+    }
+    throw std::runtime_error("No ScalarData available.");
   }
 
   /**
@@ -296,9 +355,9 @@ class SQ4Space {
     reader.read(reinterpret_cast<char *>(&delete_cnt_), sizeof(delete_cnt_));
     reader.read(reinterpret_cast<char *>(&capacity_), sizeof(capacity_));
 
-    if constexpr (has_metadata) {  // NOLINT
-      load_meta_config(reader);
-      meta_storage_ = std::make_unique<RocksDBStorage<MetaDataType, IDType>>(config_);
+    if constexpr (has_scalar_data) {  // NOLINT
+      load_scalar_config(reader);
+      scalar_storage_ = std::make_unique<RocksDBStorage<IDType>>(config_);
     }
 
     data_storage_.load(reader);
@@ -323,8 +382,8 @@ class SQ4Space {
     writer.write(reinterpret_cast<char *>(&delete_cnt_), sizeof(delete_cnt_));
     writer.write(reinterpret_cast<char *>(&capacity_), sizeof(capacity_));
 
-    if constexpr (has_metadata) {  // NOLINT
-      save_meta_config(writer);
+    if constexpr (has_scalar_data) {  // NOLINT
+      save_scalar_config(writer);
     }
 
     data_storage_.save(writer);
@@ -394,6 +453,18 @@ class SQ4Space {
 
   auto get_query_computer(const IDType id) { return QueryComputer(*this, id); }
 
+  /**
+   * @brief Close the RocksDB storage explicitly
+   */
+  void close_db() {
+    if constexpr (has_scalar_data) {
+      if (scalar_storage_ != nullptr) {
+        scalar_storage_->flush();
+        scalar_storage_.reset();
+      }
+    }
+  }
+
  private:
   IDType capacity_{0};                 ///< The maximum number of data points (nodes)
   uint32_t dim_{0};                    ///< Dimensionality of the data points
@@ -406,10 +477,11 @@ class SQ4Space {
   DataStorage data_storage_;          ///< Data storage for encoded data
   SQ4Quantizer<DataType> quantizer_;  ///< The quantizer used to quantize the data
 
-  RocksDBConfig config_;  ///< Configuration for Meta Data Storage
-  std::unique_ptr<RocksDBStorage<MetaDataType, IDType>> meta_storage_;  ///< Meta Data Storage
+  RocksDBConfig config_;  ///< Configuration for Scalar Data Storage
+  std::unique_ptr<RocksDBStorage<IDType>>
+      scalar_storage_;  ///< Scalar Data Storage (stores ScalarData)
 
-  void save_meta_config(std::ofstream &writer) {
+  void save_scalar_config(std::ofstream &writer) {
     // Save db_path_ string
     size_t db_path_size = config_.db_path_.size();
     writer.write(reinterpret_cast<char *>(&db_path_size), sizeof(db_path_size));
@@ -434,7 +506,7 @@ class SQ4Space {
     writer.write(reinterpret_cast<char *>(&enable_compression), sizeof(enable_compression));
   }
 
-  void load_meta_config(std::ifstream &reader) {
+  void load_scalar_config(std::ifstream &reader) {
     config_.create_if_missing_ = false;  // db is missing means something went wrong
     config_.error_if_exists_ = false;    // Of course db exists
     // Load db_path_ string

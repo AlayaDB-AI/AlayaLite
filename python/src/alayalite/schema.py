@@ -54,6 +54,8 @@ class IndexParams:
     metric: str = None
     capacity: np.uint32 = None
     max_nbrs: int = None
+    rocksdb_path: str = ""  # Path for RocksDB storage (for scalar data)
+    has_scalar_data: bool = False  # Whether to enable scalar data storage
 
     def index_path(self, folder_uri):
         return os.path.join(folder_uri, f"{self.index_type}_{self.metric}_{self.max_nbrs}.index")
@@ -98,6 +100,8 @@ class IndexParams:
             quantization_type_=native_quantization_type,
             metric_=native_metric_type,
             capacity_=capacity,
+            rocksdb_path_=self.rocksdb_path if self.rocksdb_path else "",
+            has_scalar_data_=self.has_scalar_data,
         )
 
     def to_json_dict(self) -> str:
@@ -109,6 +113,7 @@ class IndexParams:
             "metric": self.metric,
             "capacity": self.capacity,
             "max_nbrs": self.max_nbrs,
+            "has_scalar_data": self.has_scalar_data,
         }
 
     @classmethod
@@ -122,6 +127,7 @@ class IndexParams:
             metric=data["metric"],
             capacity=data["capacity"],
             max_nbrs=data["max_nbrs"],
+            has_scalar_data=data.get("has_scalar_data", False),  # Default to False for backward compatibility
         )
 
     @classmethod
