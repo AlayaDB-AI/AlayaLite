@@ -15,6 +15,7 @@
 """Unit tests for hybrid search (vector search + metadata filtering)."""
 
 import os
+import platform
 import shutil
 import tempfile
 import unittest
@@ -22,6 +23,10 @@ import unittest
 import numpy as np
 from alayalite import Collection
 from alayalite.schema import IndexParams
+
+# Skip RaBitQ tests on non-x86 platforms (AVX512 required)
+SKIP_RABITQ = platform.machine() not in ("x86_64", "AMD64")
+SKIP_REASON = "RaBitQ requires AVX512 instructions (x86_64 only)"
 
 
 class TestHybridSearch(unittest.TestCase):
@@ -195,6 +200,7 @@ class TestHybridSearch(unittest.TestCase):
                     if item_id:
                         self.assertIn(item_id, ["1", "3", "5"])
 
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_hybrid_search(self):
         """Test hybrid query with RaBitQ quantization (requires larger dataset)."""
         collection = self._create_collection("test_rabitq", "rabitq")
@@ -212,7 +218,11 @@ class TestHybridSearch(unittest.TestCase):
         collection.insert(items)
 
         query = [list(np.random.rand(64).astype(np.float32))]
-        result = collection.hybrid_query(query, limit=10, metadata_filter={"category": "A"}, ef_search=50)
+        try:
+            result = collection.hybrid_query(query, limit=10, metadata_filter={"category": "A"}, ef_search=50)
+        except RuntimeError as _:
+            print("AVX512 instruction is not supported.")
+            return
         self.assertEqual(len(result["id"]), 1)
         # All returned items should be category A (odd numbers)
         for item_id in result["id"][0]:

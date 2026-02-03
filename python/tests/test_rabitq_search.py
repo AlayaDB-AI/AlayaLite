@@ -97,6 +97,7 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         # result_load equals result
         self.assertTrue(np.allclose(result_load, result))
 
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_invalid_parameters(self):
         """Test that ef < k raises an error."""
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
