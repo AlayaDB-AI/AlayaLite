@@ -44,7 +44,7 @@ class TestAlayaLiteIndex(unittest.TestCase):
         vectors = np.random.rand(1000, 128).astype(np.float32)
         single_query = np.random.rand(128).astype(np.float32)
         index.fit(vectors)
-        result = index.search(single_query, 10).reshape(1, -1)
+        result = index.search(single_query, 10, 400).reshape(1, -1)
         gt = calc_gt(vectors, single_query.reshape(1, -1), 10)
         recall = calc_recall(result, gt)
         self.assertGreaterEqual(recall, 0.9)

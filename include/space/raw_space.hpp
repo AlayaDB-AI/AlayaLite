@@ -21,6 +21,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include "../utils/prefetch.hpp"
@@ -34,6 +35,7 @@
 #include "utils/metric_type.hpp"
 #include "utils/platform.hpp"
 #include "utils/prefetch.hpp"
+#include "utils/scalar_data.hpp"
 
 namespace alaya {
 
@@ -53,6 +55,8 @@ template <typename DataType = float,
           typename DataStorage = SequentialStorage<DataType, IDType>>
 class RawSpace {
  public:
+  static constexpr bool has_scalar_data = false;  // NOLINT
+
   using DistDataType = DataType;  ///< Type alias for the data type used in distance calculations
   using DataTypeAlias = DataType;
   using IDTypeAlias = IDType;
@@ -127,8 +131,11 @@ class RawSpace {
    * @brief Fit the data into the space
    * @param data Pointer to the input data array, no padding between data points
    * @param item_cnt Number of data points
+   * @param scalar_data Optional scalar data (ignored in RawSpace since has_scalar_data=false)
    */
-  void fit(const DataType *data, IDType item_cnt) {
+  void fit(const DataType *data,
+           IDType item_cnt,
+           [[maybe_unused]] const ScalarData *scalar_data = nullptr) {
     item_cnt_ = item_cnt;
     for (IDType i = 0; i < item_cnt_; ++i) {
       // if the metric is cosine, normalize the query
@@ -142,8 +149,10 @@ class RawSpace {
   /**
    * @brief Insert a data point into the space
    * @param data Pointer to the data point
+   * @param scalar_data Optional scalar data (ignored in RawSpace, for API compatibility)
    */
-  auto insert(const DataType *data) -> IDType {
+  auto insert(const DataType *data, [[maybe_unused]] const ScalarData *scalar_data = nullptr)
+      -> IDType {
     // if the metric is cosine, normalize the query
     if (metric_ == MetricType::COS) {
       normalize(const_cast<DataType *>(data), dim_);
@@ -215,6 +224,15 @@ class RawSpace {
    * @return The dimensionality
    */
   auto get_dim() -> uint32_t { return dim_; }
+
+  auto get_scalar_data([[maybe_unused]] IDType id) const -> ScalarData {
+    throw std::runtime_error("raw space does not store scalar data.");
+  }
+
+  auto get_scalar_data([[maybe_unused]] const std::string &item_id) const
+      -> std::pair<IDType, ScalarData> {
+    throw std::runtime_error("raw space does not store scalar data.");
+  }
 
   auto load(std::string_view filename) -> void {
     std::ifstream reader(std::string(filename), std::ios::binary);
@@ -319,6 +337,13 @@ class RawSpace {
   auto get_query_computer(const DataType *query) { return QueryComputer(*this, query); }
 
   auto get_query_computer(IDType id) { return QueryComputer(*this, id); }
+
+  /**
+   * @brief Close the RocksDB storage explicitly (no-op for RawSpace)
+   */
+  void close_db() {
+    // RawSpace has no RocksDB storage
+  }
 };
 
 // use static assert to check if RawSpace satisfies the Space concept

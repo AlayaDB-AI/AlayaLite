@@ -45,3 +45,6 @@ coverage_c++.info
 perf.data
 perf.data.old
 flamegraph.svg
+
+# claude code
+CLAUDE.md
