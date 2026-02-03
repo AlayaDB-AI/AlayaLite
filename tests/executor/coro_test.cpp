@@ -91,20 +91,21 @@ TEST_F(HNSWCoroutineTest, CoroutineSearch) {
   auto search_task = [&](uint32_t query_id) -> task<> {
     auto search_job = std::make_shared<GraphSearchJob<RawSpace<>>>(space_, graph_);
     auto query = queries_.data() + query_id * dim_;
-    std::vector<uint32_t> ids(kEf);
+    std::vector<uint32_t> ids(k_);  // Now returns topk directly
 
     LOG_INFO("Starting search task {}", query_id);
     co_await scheduler_->schedule();
 
     LOG_INFO("Resumed search task {}", query_id);
 
-    search_job->search_solo(query, ids.data(), kEf);
+    // New interface: search_solo(query, ids, topk, ef) returns topk results
+    search_job->search_solo(query, ids.data(), k_, kEf);
     LOG_INFO("Search completed for task {}", query_id);
 
     {
       auto lock = co_await result_mutex.lock();
-      // Extract topk results from ef candidates
-      results[query_id] = std::vector<uint32_t>(ids.begin(), ids.begin() + k_);
+      // search_solo now returns topk results directly
+      results[query_id] = ids;
       completed_queries.fetch_add(1);
     }
     LOG_INFO("Updated results for task {}", query_id);

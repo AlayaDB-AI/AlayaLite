@@ -22,6 +22,9 @@
 #include <filesystem>
 #include <memory>
 #include <string_view>
+#include "utils/log.hpp"
+#include "utils/metadata_filter.hpp"
+#include "utils/scalar_data.hpp"
 
 namespace alaya {
 
@@ -137,19 +140,12 @@ TEST_F(SQ8SpaceTest, HandleFileErrors) {
 }
 
 // ============================================================================
-// Metadata Tests
+// Metadata Tests with ScalarData
 // ============================================================================
 
 class SQ8SpaceMetadataTest : public ::testing::Test {
  protected:
-  struct TestMetadata {
-    int category;
-    double timestamp;
-    char description[64];
-  };
-
-  using SpaceType =
-      SQ8Space<float, float, uint32_t, SequentialStorage<uint8_t, uint32_t>, TestMetadata>;
+  using SpaceType = SQ8Space<float, float, uint32_t, SequentialStorage<uint8_t, uint32_t>, ScalarData>;
 
   void SetUp() override {
     dim_ = 4;
@@ -171,12 +167,14 @@ class SQ8SpaceMetadataTest : public ::testing::Test {
     }
   }
 
-  std::vector<TestMetadata> make_test_metadata(uint32_t item_cnt) {
-    std::vector<TestMetadata> metadata(item_cnt);
+  auto make_test_metadata(uint32_t item_cnt) -> std::vector<ScalarData> {
+    std::vector<ScalarData> metadata(item_cnt);
     for (uint32_t i = 0; i < item_cnt; ++i) {
-      metadata[i].category = static_cast<int>(i % 5);
-      metadata[i].timestamp = static_cast<double>(i) * 100.0;
-      snprintf(metadata[i].description, sizeof(metadata[i].description), "description_%u", i);
+      MetadataMap meta;
+      meta["category"] = static_cast<int64_t>(i % 5);
+      meta["timestamp"] = static_cast<double>(i) * 100.0;
+      meta["description"] = std::string("description_") + std::to_string(i);
+      metadata[i] = ScalarData("item_" + std::to_string(i), "doc_content_" + std::to_string(i), meta);
     }
     return metadata;
   }
@@ -223,10 +221,12 @@ TEST_F(SQ8SpaceMetadataTest, GetMetadata) {
   space_->fit(data, 2, metadata.data());
 
   for (uint32_t i = 0; i < 2; ++i) {
-    auto retrieved = space_->get_metadata(i);
-    EXPECT_EQ(retrieved.category, metadata[i].category);
-    EXPECT_DOUBLE_EQ(retrieved.timestamp, metadata[i].timestamp);
-    EXPECT_STREQ(retrieved.description, metadata[i].description);
+    auto retrieved = space_->get_scalar_data(i);
+    EXPECT_EQ(retrieved.item_id, metadata[i].item_id);
+    EXPECT_EQ(retrieved.document, metadata[i].document);
+    EXPECT_EQ(std::get<int64_t>(retrieved.metadata.at("category")), static_cast<int64_t>(i % 5));
+    EXPECT_DOUBLE_EQ(std::get<double>(retrieved.metadata.at("timestamp")), static_cast<double>(i) * 100.0);
+    EXPECT_EQ(std::get<std::string>(retrieved.metadata.at("description")), "description_" + std::to_string(i));
   }
 }
 
@@ -249,10 +249,11 @@ TEST_F(SQ8SpaceMetadataTest, SaveAndLoadWithMetadata) {
 
     // Verify metadata persisted
     for (uint32_t i = 0; i < 2; ++i) {
-      auto retrieved = space_->get_metadata(i);
-      EXPECT_EQ(retrieved.category, metadata[i].category);
-      EXPECT_DOUBLE_EQ(retrieved.timestamp, metadata[i].timestamp);
-      EXPECT_STREQ(retrieved.description, metadata[i].description);
+      auto retrieved = space_->get_scalar_data(i);
+      EXPECT_EQ(retrieved.item_id, metadata[i].item_id);
+      EXPECT_EQ(retrieved.document, metadata[i].document);
+      EXPECT_EQ(std::get<int64_t>(retrieved.metadata.at("category")), static_cast<int64_t>(i % 5));
+      EXPECT_DOUBLE_EQ(std::get<double>(retrieved.metadata.at("timestamp")), static_cast<double>(i) * 100.0);
     }
   }
 }
@@ -284,7 +285,7 @@ TEST_F(SQ8SpaceMetadataTest, GetMetadataWithoutMetadata) {
   float data[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
   space_no_meta->fit(data, 2);
 
-  EXPECT_THROW(space_no_meta->get_metadata(0), std::runtime_error);
+  EXPECT_THROW(space_no_meta->get_scalar_data(0), std::runtime_error);
 }
 
 TEST_F(SQ8SpaceMetadataTest, MetadataCorrectness) {
@@ -299,13 +300,10 @@ TEST_F(SQ8SpaceMetadataTest, MetadataCorrectness) {
 
   // Verify each metadata entry
   for (uint32_t i = 0; i < 3; ++i) {
-    auto retrieved = space_->get_metadata(i);
-    EXPECT_EQ(retrieved.category, static_cast<int>(i % 5));
-    EXPECT_DOUBLE_EQ(retrieved.timestamp, static_cast<double>(i) * 100.0);
-
-    char expected_desc[64];
-    snprintf(expected_desc, sizeof(expected_desc), "description_%u", i);
-    EXPECT_STREQ(retrieved.description, expected_desc);
+    auto retrieved = space_->get_scalar_data(i);
+    EXPECT_EQ(retrieved.item_id, "item_" + std::to_string(i));
+    EXPECT_EQ(std::get<int64_t>(retrieved.metadata.at("category")), static_cast<int64_t>(i % 5));
+    EXPECT_DOUBLE_EQ(std::get<double>(retrieved.metadata.at("timestamp")), static_cast<double>(i) * 100.0);
   }
 }
 
@@ -324,6 +322,106 @@ TEST_F(SQ8SpaceMetadataTest, CustomRocksDBConfig) {
 
   EXPECT_EQ(space_->get_data_num(), 2);
   EXPECT_TRUE(std::filesystem::exists(db_path_));
+}
+
+TEST_F(SQ8SpaceMetadataTest, GetScalarDataWithEmptyFilter) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  float data[20] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+                    11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0};
+  auto metadata = make_test_metadata(5);
+  space_->fit(data, 5, metadata.data());
+
+  MetadataFilter empty_filter;
+  auto results = space_->get_scalar_data(empty_filter, 10);
+
+  EXPECT_EQ(results.size(), 5);
+}
+
+TEST_F(SQ8SpaceMetadataTest, GetScalarDataWithEqFilter) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  float data[20] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+                    11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0};
+  auto metadata = make_test_metadata(5);
+  space_->fit(data, 5, metadata.data());
+
+  MetadataFilter filter;
+  filter.add_eq("category", static_cast<int64_t>(0));
+
+  auto results = space_->get_scalar_data(filter, 10);
+
+  // category = i % 5, so items 0 and 5 have category 0, but we only have 5 items
+  EXPECT_EQ(results.size(), 1);
+  EXPECT_EQ(results[0].first, 0);
+  EXPECT_EQ(results[0].second.item_id, "item_0");
+}
+
+TEST_F(SQ8SpaceMetadataTest, GetScalarDataWithGtFilter) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  float data[20] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+                    11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0};
+  auto metadata = make_test_metadata(5);
+  space_->fit(data, 5, metadata.data());
+
+  MetadataFilter filter;
+  filter.add_gt("timestamp", 200.0);  // timestamp = i * 100.0
+
+  auto results = space_->get_scalar_data(filter, 10);
+
+  // Items with timestamp > 200.0: item_3 (300.0), item_4 (400.0)
+  EXPECT_EQ(results.size(), 2);
+}
+
+TEST_F(SQ8SpaceMetadataTest, GetScalarDataWithLimit) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  float data[20] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+                    11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0};
+  auto metadata = make_test_metadata(5);
+  space_->fit(data, 5, metadata.data());
+
+  MetadataFilter empty_filter;
+  auto results = space_->get_scalar_data(empty_filter, 2);
+
+  EXPECT_EQ(results.size(), 2);
+}
+
+TEST_F(SQ8SpaceMetadataTest, GetScalarDataWithOrFilter) {
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
+
+  float data[20] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+                    11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0};
+  auto metadata = make_test_metadata(5);
+  space_->fit(data, 5, metadata.data());
+
+  // OR filter: category == 0 OR category == 1
+  MetadataFilter filter;
+  filter.logic_op = LogicOp::OR;
+
+  auto sub1 = std::make_shared<MetadataFilter>();
+  sub1->add_eq("category", static_cast<int64_t>(0));
+  filter.add_sub_filter(*sub1);
+
+  auto sub2 = std::make_shared<MetadataFilter>();
+  sub2->add_eq("category", static_cast<int64_t>(1));
+  filter.add_sub_filter(*sub2);
+
+  auto results = space_->get_scalar_data(filter, 10);
+
+  // Items with category 0 or 1: item_0, item_1
+  EXPECT_EQ(results.size(), 2);
 }
 
 }  // namespace alaya
