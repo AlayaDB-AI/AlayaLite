@@ -14,7 +14,9 @@
 
 """Test cases for RaBitQ search functionality."""
 
+import os
 import platform
+import shutil
 import tempfile
 import unittest
 
@@ -32,7 +34,16 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
     """Test cases for RaBitQ implementation."""
 
     def setUp(self):
-        self.client = Client()
+        # Create temp directory for test isolation
+        self.temp_dir = tempfile.mkdtemp()
+        # Set RocksDB directory to temp_dir for isolation
+        os.environ["ALAYALITE_ROCKSDB_DIR"] = os.path.join(self.temp_dir, "RocksDB")
+        self.client = Client(url=self.temp_dir)
+
+    def tearDown(self):
+        """Clean up temp directories after each test."""
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
 
     @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_search_solo(self):
@@ -66,28 +77,25 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
 
     @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_save_load(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            self.client = Client(url=temp_dir)
+        index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
+        vectors = np.random.rand(1000, 128).astype(np.float32)
+        queries = np.random.rand(10, 128).astype(np.float32)
+        index.fit(vectors)
+        try:
+            result = index.batch_search(queries, 10, 400)
+        except RuntimeError as _:
+            print("AVX512 instruction is not supported.")
+            return
+        gt = calc_gt(vectors, queries, 10)
+        recall = calc_recall(result, gt)
+        self.assertGreaterEqual(recall, 0.95)
 
-            index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
-            vectors = np.random.rand(1000, 128).astype(np.float32)
-            queries = np.random.rand(10, 128).astype(np.float32)
-            index.fit(vectors)
-            try:
-                result = index.batch_search(queries, 10, 400)
-            except RuntimeError as _:
-                print("AVX512 instruction is not supported.")
-                return
-            gt = calc_gt(vectors, queries, 10)
-            recall = calc_recall(result, gt)
-            self.assertGreaterEqual(recall, 0.95)
-
-            self.client.save_index("rabitq_index")
-            index = Index.load(temp_dir, "rabitq_index")
-            result_load = index.batch_search(queries, 10, 400)
-            self.assertEqual(result_load.shape, result.shape)
-            # result_load equals result
-            self.assertTrue(np.allclose(result_load, result))
+        self.client.save_index("rabitq_index")
+        index = Index.load(self.temp_dir, "rabitq_index")
+        result_load = index.batch_search(queries, 10, 400)
+        self.assertEqual(result_load.shape, result.shape)
+        # result_load equals result
+        self.assertTrue(np.allclose(result_load, result))
 
     def test_invalid_parameters(self):
         """Test that ef < k raises an error."""

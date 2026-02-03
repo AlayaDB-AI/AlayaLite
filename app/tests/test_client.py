@@ -1,3 +1,4 @@
+import gc
 import importlib
 import os
 import shutil
@@ -10,9 +11,13 @@ from fastapi.testclient import TestClient
 
 def reload_client():
     # Simulate restart: force reload of app modules and create a new TestClient
+    # Force garbage collection to release RocksDB locks from previous client
+    gc.collect()
+    # Remove alayalite modules to ensure Client objects are released
     for name in list(sys.modules.keys()):
-        if name.startswith("app.") or name == "app":
+        if name.startswith("app.") or name == "app" or name.startswith("alayalite"):
             del sys.modules[name]
+    gc.collect()
 
     app_module = importlib.import_module("app.main")
     test_app = app_module.app
@@ -60,7 +65,9 @@ async def test_reset_collection(fresh_client: TestClient):
 
 
 @pytest.mark.asyncio
-async def test_reset_persistence_collection():
+async def test_reset_persistence_collection(tmp_path, monkeypatch):
+    monkeypatch.setenv("ALAYALITE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("ALAYALITE_ROCKSDB_DIR", str(tmp_path / "RocksDB"))
     tc = reload_client()
     collection_name_list = ["a", "b", "c", "d", "e"]
     for collection_name in collection_name_list:
@@ -252,6 +259,7 @@ async def test_query_collection(fresh_client: TestClient):
 async def test_persistence_across_restart(tmp_path, monkeypatch):
     storage_dir = str(tmp_path)
     monkeypatch.setenv("ALAYALITE_DATA_DIR", storage_dir)
+    monkeypatch.setenv("ALAYALITE_ROCKSDB_DIR", str(tmp_path / "RocksDB"))
 
     tc = reload_client()
 
@@ -278,6 +286,7 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
     }
     tc1_ans = tc.post("/api/v1/collection/query", json=query_payload)
     assert tc1_ans.status_code == 200
+    tc1_result = tc1_ans.json()  # Save result before releasing client
 
     # save collection to disk
     resp = tc.post("/api/v1/collection/save", json={"collection_name": "restart_coll"})
@@ -288,6 +297,11 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
     assert os.path.isdir(coll_path)
     assert os.path.isfile(os.path.join(coll_path, "schema.json"))
 
+    # Release old client to free RocksDB lock
+    del tc
+    del tc1_ans
+    gc.collect()
+
     tc2 = reload_client()
     # list collections should include our saved collection
     resp = tc2.post("/api/v1/collection/list")
@@ -296,7 +310,7 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
 
     tc2_ans = tc2.post("/api/v1/collection/query", json=query_payload)
     assert tc2_ans.status_code == 200
-    assert tc1_ans.json() == tc2_ans.json()
+    assert tc1_result == tc2_ans.json()
 
     # delete on disk
     resp = tc2.post("/api/v1/collection/delete", json={"collection_name": "restart_coll", "delete_on_disk": True})
@@ -456,8 +470,8 @@ def test_cosine_metric_setting(fresh_client: TestClient):
     top3_cos = get_cosine_similarity_map(query_vector, insert_vector_0)  # Opposite direction.
 
     assert abs(ret["distance"][0][0] - top1_cos) < eps
-    assert ret["id"][0][0] == 3
+    assert ret["id"][0][0] == "3"
     assert abs(ret["distance"][0][1] - top2_cos) < eps
-    assert ret["id"][0][1] == 2
+    assert ret["id"][0][1] == "2"
     assert abs(ret["distance"][0][2] - top3_cos) < eps
-    assert ret["id"][0][2] == 1
+    assert ret["id"][0][2] == "1"

@@ -23,38 +23,43 @@
 
 #include "../../index/graph/graph.hpp"
 #include "../../space/space_concepts.hpp"
+#include "../../utils/scalar_data.hpp"
 #include "./graph_search_job.hpp"
 #include "./job_context.hpp"
 
 namespace alaya {
 
 template <typename DistanceSpaceType,
+          typename BuildSpaceType = DistanceSpaceType,
           typename DataType = typename DistanceSpaceType::DataTypeAlias,
           typename DistanceType = typename DistanceSpaceType::DistanceTypeAlias,
           typename IDType = typename DistanceSpaceType::IDTypeAlias>
-  requires Space<DistanceSpaceType>
+  requires Space<DistanceSpaceType> && Space<BuildSpaceType>
 class GraphUpdateJob {
  public:
-  std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job_ = nullptr;  ///< The search job
+  std::shared_ptr<GraphSearchJob<DistanceSpaceType, BuildSpaceType>> search_job_ =
+      nullptr;                                                ///< The search job
   std::shared_ptr<DistanceSpaceType> space_ = nullptr;        ///< The is a data manager interface .
   std::shared_ptr<Graph<DataType, IDType>> graph_ = nullptr;  ///< The search graph.
   std::shared_ptr<JobContext<IDType>> job_context_;           ///< The shared job context
 
-  explicit GraphUpdateJob(std::shared_ptr<GraphSearchJob<DistanceSpaceType>> search_job)
+  explicit GraphUpdateJob(
+      std::shared_ptr<GraphSearchJob<DistanceSpaceType, BuildSpaceType>> search_job)
       : search_job_(search_job),
         space_(search_job->space_),
         graph_(search_job->graph_),
         job_context_(search_job->job_context_) {}
 
   auto insert(DataType *query, IDType *ids, uint32_t ef) -> IDType {
-    uint32_t search_size = std::max(ef, static_cast<uint32_t>(graph_->max_nbrs_));
+    uint32_t search_size = graph_->max_nbrs_;
     std::vector<IDType> search_results(search_size, -1);
 
-    search_job_->search_solo(query, search_results.data(), search_size);
+    // Use search_solo_updated for graph update (returns approximate ef results)
+    search_job_->search_solo_updated(query, search_results.data(), ef, search_size);
     auto node_id = graph_->insert(search_results.data());
     space_->insert(query);
 
-    for (IDType i = 0; i < graph_->max_nbrs_; i++) {
+    for (IDType i = 0; i < search_size; i++) {
       auto invert_node = search_results[i];
 
       if (invert_node != static_cast<IDType>(-1)) {
@@ -65,19 +70,26 @@ class GraphUpdateJob {
     return node_id;
   }
 
-  auto insert_and_update(DataType *query, uint32_t ef) -> IDType {
-    uint32_t search_size = std::max(ef, static_cast<uint32_t>(graph_->max_nbrs_));
+  auto insert_and_update(DataType *query, uint32_t ef, const ScalarData *scalar_data = nullptr)
+      -> IDType {
+    uint32_t search_size = graph_->max_nbrs_;
     std::vector<IDType> search_results(search_size, static_cast<IDType>(-1));
 
-    search_job_->search_solo(query, search_results.data(), search_size);
+    // Use search_solo_updated for graph update (returns approximate ef results)
+    search_job_->search_solo_updated(query, search_results.data(), ef, search_size);
     auto node_id = graph_->insert(search_results.data());
     if (node_id == static_cast<IDType>(-1)) {
       assert(space_->insert(query) == static_cast<IDType>(-1));
       return static_cast<IDType>(-1);
     }
-    space_->insert(query);
+    // Conditionally pass scalar_data based on space support to avoid type mismatch
+    if constexpr (DistanceSpaceType::has_scalar_data) {
+      space_->insert(query, scalar_data);
+    } else {
+      space_->insert(query, nullptr);
+    }
 
-    for (IDType i = 0; i < graph_->max_nbrs_; i++) {
+    for (IDType i = 0; i < search_size; i++) {
       auto invert_node = search_results[i];
 
       if (invert_node != static_cast<IDType>(-1)) {
@@ -103,6 +115,29 @@ class GraphUpdateJob {
     job_context_->removed_vertices_.insert(node_id);
     graph_->remove(node_id);
     space_->remove(node_id);
+  }
+
+  /**
+   * @brief Remove a node by its item_id
+   * @param item_id The item_id to remove
+   * @note This method is only available for spaces that support scalar data
+   */
+  auto remove(const std::string &item_id) -> void {
+    if constexpr (DistanceSpaceType::has_scalar_data) {
+      auto internal_id = space_->remove(item_id);  // Space handles lookup and deletion
+      auto nbrs = graph_->edges(internal_id);
+      for (IDType i = 0; i < graph_->max_nbrs_; i++) {
+        auto nbr = nbrs[i];
+        if (nbr == static_cast<IDType>(-1)) {
+          break;
+        }
+        job_context_->removed_node_nbrs_[internal_id].push_back(nbr);
+      }
+      job_context_->removed_vertices_.insert(internal_id);
+      graph_->remove(internal_id);
+    } else {
+      throw std::runtime_error("Remove by item_id is not supported for spaces without scalar data");
+    }
   }
 
   auto update(IDType node_id) -> void {

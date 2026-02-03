@@ -25,7 +25,7 @@ namespace alaya {
 
 // NOLINTBEGIN
 enum class QuantizationType {
-  NONE = 0,    // none quantization
+  NONE = 0,    // no quantization
   SQ8 = 1,     // 8-bit quantization
   SQ4 = 2,     // 4-bit quantization
   RABITQ = 3,  // 1-bit quantization
