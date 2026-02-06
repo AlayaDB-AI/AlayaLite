@@ -380,6 +380,17 @@ class RaBitQSpace {
   }
 
   /**
+   * @brief Get the scalar storage for direct index access
+   * @return Pointer to RocksDBStorage (nullptr if no scalar data)
+   */
+  auto get_scalar_storage() const -> RocksDBStorage<IDType> * {
+    if constexpr (has_scalar_data) {
+      return scalar_storage_.get();
+    }
+    return nullptr;
+  }
+
+  /**
    * @brief Prefetch data into cache by ID to optimize memory access
    * @param id The ID of the data point to prefetch
    */

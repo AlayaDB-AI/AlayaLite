@@ -113,7 +113,8 @@ PYBIND11_MODULE(_alayalitepy, m) {
                     uint32_t,
                     uint32_t,
                     std::string,
-                    bool>(),
+                    bool,
+                    std::vector<std::string>>(),
            py::arg("index_type_") = alaya::IndexType::HNSW,
            py::arg("data_type_") = py::dtype::of<float>(),
            py::arg("id_type_") = py::dtype::of<uint32_t>(),
@@ -122,7 +123,8 @@ PYBIND11_MODULE(_alayalitepy, m) {
            py::arg("capacity_") = py::dtype::of<uint32_t>(),
            py::arg("max_nbrs_") = 32,
            py::arg("rocksdb_path_") = "",
-           py::arg("has_scalar_data_") = false)
+           py::arg("has_scalar_data_") = false,
+           py::arg("indexed_fields_") = std::vector<std::string>{})
       .def_readwrite("index_type_", &alaya::IndexParams::index_type_)
       .def_readwrite("data_type_", &alaya::IndexParams::data_type_)
       .def_readwrite("id_type_", &alaya::IndexParams::id_type_)
@@ -130,7 +132,8 @@ PYBIND11_MODULE(_alayalitepy, m) {
       .def_readwrite("metric_", &alaya::IndexParams::metric_)
       .def_readwrite("capacity_", &alaya::IndexParams::capacity_)
       .def_readwrite("rocksdb_path_", &alaya::IndexParams::rocksdb_path_)
-      .def_readwrite("has_scalar_data_", &alaya::IndexParams::has_scalar_data_);
+      .def_readwrite("has_scalar_data_", &alaya::IndexParams::has_scalar_data_)
+      .def_readwrite("indexed_fields_", &alaya::IndexParams::indexed_fields_);
 
   alaya::IndexParams default_param;
 

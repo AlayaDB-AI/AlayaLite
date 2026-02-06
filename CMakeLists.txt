@@ -31,7 +31,13 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
   add_compile_options(/EHsc /utf-8 /O2)
 else()
-  add_compile_options(-Wall -Ofast)
+  add_compile_options(
+    -Wall
+    -Ofast
+    -march=native
+    -funroll-loops
+    -fopenmp
+  )
 endif()
 
 # ============================================================================
@@ -51,7 +57,13 @@ find_package(Eigen3 REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(RocksDB REQUIRED)
 
-set(THIRD_PARTY_LIBS spdlog::spdlog_header_only concurrentqueue::concurrentqueue Eigen3::Eigen OpenMP::OpenMP_CXX RocksDB::rocksdb)
+set(THIRD_PARTY_LIBS
+    spdlog::spdlog_header_only
+    concurrentqueue::concurrentqueue
+    Eigen3::Eigen
+    OpenMP::OpenMP_CXX
+    RocksDB::rocksdb
+)
 
 if(UNIX AND NOT APPLE)
   find_package(libcoro REQUIRED)

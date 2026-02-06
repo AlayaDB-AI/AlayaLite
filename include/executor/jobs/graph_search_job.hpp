@@ -16,6 +16,9 @@
 
 #pragma once
 
+#include <algorithm>
+#include <climits>
+#include <cmath>
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
@@ -23,6 +26,7 @@
 #include <memory>
 #include <queue>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -109,6 +113,125 @@ struct GraphSearchJob {
   }
 
   /**
+   * @brief Pre-filter using scalar index for simple single-field filter
+   *
+   * For a simple filter (single condition on an indexed field), uses the field index
+   * to quickly identify matching IDs. Sets all bits in vis first, then resets only
+   * the matching IDs (marking them as unvisited/valid for search).
+   *
+   * @param vis DynamicBitset to mark valid IDs (matching filter)
+   * @param filter The metadata filter
+   * @param filter_vec Output vector to store matching IDs
+   * @return true if pre-filter was applied, false if filter is not simple or field not indexed
+   */
+  auto pre_filter(DynamicBitset &vis, const MetadataFilter &filter, std::vector<IDType> &filter_vec)
+      -> bool {
+    // Check if filter is simple: one condition, no sub_filters
+    // TODO(ljh): add support for more complex filters
+    if (filter.conditions.size() != 1 || !filter.sub_filters.empty()) {
+      return false;
+    }
+
+    const auto &cond = filter.conditions[0];
+    auto *storage = space_->get_scalar_storage();
+    if (storage == nullptr) {
+      return false;
+    }
+
+    // Check if field is indexed
+    const auto &indexed_fields = storage->config().indexed_fields_;
+    bool is_indexed =
+        std::find(indexed_fields.begin(), indexed_fields.end(), cond.field) != indexed_fields.end();
+    if (!is_indexed) {
+      LOG_WARN("Field '{}' is not indexed, cannot pre-filter.", cond.field);
+      return false;
+    }
+
+    // Get matching IDs based on operator
+    switch (cond.op) {
+      case FilterOp::EQ:
+        filter_vec = storage->get_ids_by_field_value(cond.field, cond.value);
+        break;
+      case FilterOp::GE: {
+        if (std::holds_alternative<int64_t>(cond.value)) {
+          filter_vec =
+              storage->get_ids_by_int_range(cond.field, std::get<int64_t>(cond.value), INT64_MAX);
+        } else if (std::holds_alternative<double>(cond.value)) {
+          filter_vec = storage->get_ids_by_double_range(cond.field,
+                                                        std::get<double>(cond.value),
+                                                        std::numeric_limits<double>::max());
+        } else {
+          return false;
+        }
+        break;
+      }
+      case FilterOp::GT: {
+        if (std::holds_alternative<int64_t>(cond.value)) {
+          filter_vec = storage->get_ids_by_int_range(cond.field,
+                                                     std::get<int64_t>(cond.value) + 1,
+                                                     INT64_MAX);
+        } else if (std::holds_alternative<double>(cond.value)) {
+          // For double, use nextafter to get the next representable value
+          filter_vec =
+              storage->get_ids_by_double_range(cond.field,
+                                               std::nextafter(std::get<double>(cond.value),
+                                                              std::numeric_limits<double>::max()),
+                                               std::numeric_limits<double>::max());
+        } else {
+          return false;
+        }
+        break;
+      }
+      case FilterOp::LE: {
+        if (std::holds_alternative<int64_t>(cond.value)) {
+          filter_vec =
+              storage->get_ids_by_int_range(cond.field, INT64_MIN, std::get<int64_t>(cond.value));
+        } else if (std::holds_alternative<double>(cond.value)) {
+          filter_vec = storage->get_ids_by_double_range(cond.field,
+                                                        std::numeric_limits<double>::lowest(),
+                                                        std::get<double>(cond.value));
+        } else {
+          return false;
+        }
+        break;
+      }
+      case FilterOp::LT: {
+        if (std::holds_alternative<int64_t>(cond.value)) {
+          filter_vec = storage->get_ids_by_int_range(cond.field,
+                                                     INT64_MIN,
+                                                     std::get<int64_t>(cond.value) - 1);
+        } else if (std::holds_alternative<double>(cond.value)) {
+          filter_vec =
+              storage
+                  ->get_ids_by_double_range(cond.field,
+                                            std::numeric_limits<double>::lowest(),
+                                            std::nextafter(std::get<double>(cond.value),
+                                                           std::numeric_limits<double>::lowest()));
+        } else {
+          return false;
+        }
+        break;
+      }
+      default:
+        return false;  // Unsupported operator for index
+    }
+
+    // Set all bits (mark all as visited/invalid)
+    vis.set_all();
+
+    // Reset matching IDs (mark them as unvisited/valid for search)
+    for (auto id : filter_vec) {
+      vis.reset(id);
+    }
+
+    LOG_INFO("pre_filter: {} matching IDs for field '{}' with op {}",
+             filter_vec.size(),
+             cond.field,
+             static_cast<int>(cond.op));
+    return true;
+  }
+
+  /**
    * @brief Rerank search results using exact distances from build space
    * @param src Source ID array (ef candidates from graph search)
    * @param desc Destination ID array (topk results after rerank)
@@ -169,8 +292,8 @@ struct GraphSearchJob {
               uint32_t ef,
               uint32_t topk,
               auto dist_compute,
-              const MetadataFilter &filter,
-              ScalarData *res) -> uint32_t
+              std::string *res
+              ) -> uint32_t
     requires(DistanceSpaceType::has_scalar_data) {
     // clang-format on
     std::priority_queue<std::pair<DistanceType, IDType>,
@@ -178,23 +301,21 @@ struct GraphSearchJob {
                         std::greater<>>
         pq;
 
-    // Determine which space to use for scalar data
+    // Calculate distances for all candidates
     for (size_t i = 0; i < ef; i++) {
       auto node = src[i];
-      auto sd = space_->get_scalar_data(node);
-      if (filter.evaluate(sd.metadata)) {
-        pq.push({dist_compute(node), node});
-      }
+      pq.push({dist_compute(node), node});
     }
 
     uint32_t result_count = std::min(topk, static_cast<uint32_t>(pq.size()));
+    auto *storage = space_->get_scalar_storage();
     for (uint32_t i = 0; i < result_count; i++) {
       if (pq.empty()) {
         break;
       }
       auto node = pq.top().second;
       ids[i] = node;
-      res[i] = space_->get_scalar_data(node);
+      res[i] = storage->get_item_id_only(node);
       pq.pop();
     }
 
@@ -206,7 +327,8 @@ struct GraphSearchJob {
                             IDType *ids,
                             uint32_t ef,
                             const MetadataFilter &filter,
-                            ScalarData *res) -> coro::task<> {
+                            std::string *res,
+                            int reseed_time = 5) -> coro::task<> {
 #if defined(__AVX512F__)
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");
@@ -218,19 +340,54 @@ struct GraphSearchJob {
 
     // init
     size_t degree_bound = RaBitQSpace<>::kDegreeBound;
-    auto entry = space_->get_ep();
-    mem_prefetch_l1(space_->get_data_by_id(entry), 10);
+
     auto q_computer = space_->get_query_computer(query);
 
     // sorted by estimated distance
     SearchBuffer<DistanceType> search_pool(ef);
-    search_pool.insert(entry, std::numeric_limits<DistanceType>::max());
+
+    // Use DynamicBitset to support pre_filter optimization
+    DynamicBitset vis(space_->get_data_num());
+
+    // Try pre_filter: if successful, vis has all non-matching IDs marked as visited
+    std::vector<IDType> filter_vec;
+    bool pre_filtered = pre_filter(vis, filter, filter_vec);
+    if (!pre_filtered) {
+      throw std::runtime_error("please remember to construct scalar index.");
+    }
+
+    auto entry = space_->get_ep();
+    if (!vis.get(entry)) {
+      search_pool.insert(entry, std::numeric_limits<DistanceType>::max());
+      mem_prefetch_l1(space_->get_data_by_id(entry), 10);
+      co_await std::suspend_always{};
+    }
 
     // sorted by exact distance (implicit rerank)
     SearchBuffer<DistanceType> res_pool(k);
-    auto vis = HashBasedBooleanSet(space_->get_data_num() / 10);
 
-    while (search_pool.has_next()) {
+    int filter_vec_pos = 0;
+    int reseed_round = 0;
+    auto should_reseed = [&]() {
+      return filter_vec_pos != filter_vec.size() &&
+             (reseed_round != reseed_time || !res_pool.is_full());
+    };
+
+    while (search_pool.has_next() || should_reseed()) {
+      if (!search_pool.has_next()) {
+        // re-seed
+        reseed_round++;
+        search_pool.clear();
+        for (; filter_vec_pos < filter_vec.size(); ++filter_vec_pos) {
+          auto id = filter_vec[filter_vec_pos];
+          if (!vis.get(id)) {
+            search_pool.insert(id, std::numeric_limits<DistanceType>::max());
+            ++filter_vec_pos;  // Move to next position before break
+            break;
+          }
+        }
+      }
+
       auto cur_node = search_pool.pop();
       if (vis.get(cur_node)) {
         continue;
@@ -257,17 +414,16 @@ struct GraphSearchJob {
         co_await std::suspend_always{};
       }
 
-      if (filter.evaluate(space_->get_scalar_data(cur_node).metadata)) {
-        // implicit rerank
-        res_pool.insert(cur_node, q_computer.get_exact_qr_c_dist());
-      }
+      // implicit rerank
+      res_pool.insert(cur_node, q_computer.get_exact_qr_c_dist());
     }
 
     // return result
     res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids));
     auto res_size = res_pool.size();
+    auto *storage = space_->get_scalar_storage();
     for (size_t i = 0; i < res_size; ++i) {
-      res[i] = space_->get_scalar_data(ids[i]);
+      res[i] = storage->get_item_id_only(ids[i]);
     }
     if (res_size < k) {
       LOG_INFO("not enough result, current result number:{}, required topk:{}", res_size, k);
@@ -283,7 +439,8 @@ struct GraphSearchJob {
                                  IDType *ids,
                                  uint32_t ef,
                                  const MetadataFilter &filter,
-                                 ScalarData *res) {
+                                 std::string *res,
+                                 int reseed_time = 5) {
 #if defined(__AVX512F__)
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");
@@ -295,25 +452,57 @@ struct GraphSearchJob {
 
     // init
     size_t degree_bound = RaBitQSpace<>::kDegreeBound;
-    auto entry = space_->get_ep();
-    mem_prefetch_l1(space_->get_data_by_id(entry), 10);
     auto q_computer = space_->get_query_computer(query);
 
     // sorted by estimated distance
     SearchBuffer<DistanceType> search_pool(ef);
-    search_pool.insert(entry, std::numeric_limits<DistanceType>::max());
-    auto vis = HashBasedBooleanSet(space_->get_data_num() / 10);
-    // auto vis = DynamicBitset(space_->get_data_num());
+
+    // Use DynamicBitset to support pre_filter optimization
+    DynamicBitset vis(space_->get_data_num());
+
+    // Try pre_filter: if successful, vis has all non-matching IDs marked as visited
+    std::vector<IDType> filter_vec;
+    bool pre_filtered = pre_filter(vis, filter, filter_vec);
+    if (!pre_filtered) {
+      throw std::runtime_error("please remember to construct scalar index.");
+    }
+
+    // Insert entry point if it matches filter
+    auto entry = space_->get_ep();
+    if (!vis.get(entry)) {
+      search_pool.insert(entry, std::numeric_limits<DistanceType>::max());
+      mem_prefetch_l1(space_->get_data_by_id(entry), 10);
+    }
 
     // sorted by exact distance (implicit rerank)
     SearchBuffer<DistanceType> res_pool(k);
 
-    while (search_pool.has_next()) {
+    int filter_vec_pos = 0;
+    int reseed_round = 0;
+    auto should_reseed = [&]() {
+      return filter_vec_pos != filter_vec.size() &&
+             (reseed_round != reseed_time || !res_pool.is_full());
+    };
+
+    while (search_pool.has_next() || should_reseed()) {
+      if (!search_pool.has_next()) {
+        // re-seed
+        reseed_round++;
+        search_pool.clear();
+        for (; filter_vec_pos < filter_vec.size(); ++filter_vec_pos) {
+          auto id = filter_vec[filter_vec_pos];
+          if (!vis.get(id)) {
+            search_pool.insert(id, std::numeric_limits<DistanceType>::max());
+            ++filter_vec_pos;  // Move to next position before break
+            break;
+          }
+        }
+      }
+
       auto cur_node = search_pool.pop();
       if (vis.get(cur_node)) {
         continue;
       }
-
       vis.set(cur_node);
 
       // calculate est_dist for centroid's neighbors in batch after loading centroid
@@ -332,21 +521,18 @@ struct GraphSearchJob {
 
         auto next_id = search_pool.next_id();
         mem_prefetch_l2(space_->get_data_by_id(next_id), 12);
-        // mem_prefetch_l2(space_->get_nei_qc_ptr(next_id), 8);
-        // mem_prefetch_l2(space_->get_f_add_ptr(next_id), 6);  // 2+2+2
       }
 
-      if (filter.evaluate(space_->get_scalar_data(cur_node).metadata)) {
-        // implicit rerank
-        res_pool.insert(cur_node, q_computer.get_exact_qr_c_dist());
-      }
+      // implicit rerank
+      res_pool.insert(cur_node, q_computer.get_exact_qr_c_dist());
     }
 
     // return result
     res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids));
     auto res_size = res_pool.size();
+    auto *storage = space_->get_scalar_storage();
     for (size_t i = 0; i < res_size; ++i) {
-      res[i] = space_->get_scalar_data(ids[i]);
+      res[i] = storage->get_item_id_only(ids[i]);
     }
     if (res_size < k) {
       LOG_INFO("not enough result, current result number:{}, required topk:{}", res_size, k);
@@ -498,21 +684,50 @@ struct GraphSearchJob {
                           uint32_t topk,
                           uint32_t ef,
                           const MetadataFilter &filter,
-                          ScalarData *res)
+                          std::string *res)
     requires(DistanceSpaceType::has_scalar_data) {
     // clang-format on
     if (ef < topk) {
       throw std::invalid_argument("ef must be >= topk");
     }
 
-    std::vector<IDType> res_pool(ef);
-
     auto query_computer = space_->get_query_computer(query);
+
+    // Use LinearPool with built-in DynamicBitset
     LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
+
+    // Try pre_filter: get list of matching IDs
+    std::vector<IDType> filter_vec;
+    bool pre_filtered = pre_filter(pool.vis_, filter, filter_vec);
+    if (!pre_filtered) {
+      throw std::runtime_error("please remember to construct scalar index.");
+    }
+
+    // Initialize search with entry point
     graph_->initialize_search(pool, query_computer);
 
-    while (pool.has_next()) {
+    size_t filter_vec_pos = 0;  // Track position in filter_vec
+
+    while (pool.has_next() || filter_vec_pos < filter_vec.size()) {
+      // If search_pool is empty but we have more filtered IDs, insert a batch
+      if (!pool.has_next()) {
+        size_t batch_size =
+            std::min<size_t>(topk, filter_vec.size() - filter_vec_pos);  // arbitrary batch size
+        for (size_t i = 0; i < batch_size; ++i) {
+          auto id = filter_vec[filter_vec_pos + i];
+          if (!pool.vis_.get(id)) {  // Not visited yet
+            pool.insert(id, query_computer(id));
+            pool.vis_.set(id);
+          }
+        }
+        filter_vec_pos += batch_size;
+        if (!pool.has_next()) {
+          continue;
+        }
+      }
+
       auto u = pool.pop();
+
       for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
         auto v = graph_->at(u, i);
 
@@ -537,13 +752,15 @@ struct GraphSearchJob {
       }
     }
 
-    // Copy ef candidates
+    // Copy ef candidates from pool
+    std::vector<IDType> candidates(ef);
     for (uint32_t i = 0; i < ef; i++) {
-      res_pool[i] = pool.id(i);
+      candidates[i] = pool.id(i);
     }
 
+    // Rerank candidates with exact distances
     auto result_count =
-        rerank(res_pool, ids, ef, topk, build_space_->get_query_computer(query), filter, res);
+        rerank(candidates, ids, ef, topk, build_space_->get_query_computer(query), res);
 
     if (result_count < topk) {
       LOG_INFO("hybrid_search_solo: Only found {} results, requested {}", result_count, topk);
@@ -556,22 +773,45 @@ struct GraphSearchJob {
                      uint32_t topk,
                      uint32_t ef,
                      const MetadataFilter &filter,
-                     ScalarData *res) -> coro::task<> {
+                     std::string *res) -> coro::task<> {
     if (ef < topk) {
       throw std::invalid_argument("ef must be >= topk");
     }
-
-    std::vector<IDType> res_pool(ef);
-
-    auto query_computer = space_->get_query_computer(query);
-    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
-    graph_->initialize_search(pool, query_computer);
-
     space_->prefetch_by_address(query);
 
-    while (pool.has_next()) {
-      auto u = pool.pop();
+    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
+    // Try pre_filter: get list of matching IDs
+    std::vector<IDType> filter_vec;
+    bool pre_filtered = pre_filter(pool.vis_, filter, filter_vec);
+    if (!pre_filtered) {
+      throw std::runtime_error("please remember to construct scalar index.");
+    }
 
+    auto query_computer = space_->get_query_computer(query);
+
+    graph_->initialize_search(pool, query_computer);
+
+    size_t filter_vec_pos = 0;  // Track position in filter_vec
+
+    while (pool.has_next() || filter_vec_pos < filter_vec.size()) {
+      // If search_pool is empty but we have more filtered IDs, insert a batch
+      if (!pool.has_next()) {
+        size_t batch_size =
+            std::min<size_t>(topk, filter_vec.size() - filter_vec_pos);  // arbitrary batch size
+        for (size_t i = 0; i < batch_size; ++i) {
+          auto id = filter_vec[filter_vec_pos + i];
+          if (!pool.vis_.get(id)) {  // Not visited yet
+            pool.insert(id, query_computer(id));
+            pool.vis_.set(id);
+          }
+        }
+        filter_vec_pos += batch_size;
+        if (!pool.has_next()) {
+          continue;
+        }
+      }
+
+      auto u = pool.pop();
       mem_prefetch_l1(graph_->edges(u), graph_->max_nbrs_ * sizeof(IDType) / 64);
       co_await std::suspend_always{};
 
@@ -595,14 +835,13 @@ struct GraphSearchJob {
       }
     }
 
-    // Copy ef candidates
+    std::vector<IDType> candidates(ef);
     for (uint32_t i = 0; i < ef; i++) {
-      res_pool[i] = pool.id(i);
+      candidates[i] = pool.id(i);
     }
-
-    // Rerank with filter (works for both quantized and raw spaces)
+    // Rerank candidates with exact distances
     auto result_count =
-        rerank(res_pool, ids, ef, topk, build_space_->get_query_computer(query), filter, res);
+        rerank(candidates, ids, ef, topk, build_space_->get_query_computer(query), res);
 
     if (result_count < topk) {
       LOG_INFO("hybrid_search: Only found {} results, requested {}", result_count, topk);

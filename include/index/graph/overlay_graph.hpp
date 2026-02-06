@@ -139,8 +139,10 @@ class OverlayGraph {
         }
       }
     }
-    cand_pool.insert(u, cur_dist);
-    cand_pool.vis_.set(u);
+    if (!cand_pool.vis_.get(u)) {
+      cand_pool.insert(u, cur_dist);
+      cand_pool.vis_.set(u);
+    }
   }
 
   /**

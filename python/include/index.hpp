@@ -294,6 +294,8 @@ class PyIndex : public BasePyIndex {
     if (!params_.rocksdb_path_.empty()) {
       rocksdb_config.db_path_ = params_.rocksdb_path_;
     }
+    // Set indexed fields for fast filtering
+    rocksdb_config.indexed_fields_ = params_.indexed_fields_;
 
     // TODO: merge
     if constexpr (is_rabitq_space_v<SearchSpaceType>) {
@@ -479,7 +481,7 @@ class PyIndex : public BasePyIndex {
    * @param topk Number of results to return
    * @param ef Number of candidates to explore
    * @param filter Metadata filter for filtering results
-   * @return Tuple of (ids, scalar_data_list)
+   * @return Tuple of (ids, item_ids)
    */
   auto hybrid_search(py::array_t<DataType> &query,
                      uint32_t topk,
@@ -493,27 +495,22 @@ class PyIndex : public BasePyIndex {
       auto ret_ids = py::array_t<IDType>(static_cast<size_t>(topk));
       auto ret_id_ptr = static_cast<IDType *>(ret_ids.request().ptr);
 
-      std::vector<ScalarData> scalar_results(topk);
+      std::vector<std::string> item_ids(topk);
 
       if constexpr (is_rabitq_space_v<SearchSpaceType>) {
-        search_job_->rabitq_hybrid_search_solo(query_ptr,
-                                               topk,
-                                               ret_id_ptr,
-                                               ef,
-                                               filter,
-                                               scalar_results.data());
-      } else {
         search_job_
-            ->hybrid_search_solo(query_ptr, ret_id_ptr, topk, ef, filter, scalar_results.data());
+            ->rabitq_hybrid_search_solo(query_ptr, topk, ret_id_ptr, ef, filter, item_ids.data());
+      } else {
+        search_job_->hybrid_search_solo(query_ptr, ret_id_ptr, topk, ef, filter, item_ids.data());
       }
 
-      // Convert ScalarData to Python dict list
-      py::list scalar_list;
-      for (const auto &sd : scalar_results) {
-        scalar_list.append(scalar_data_to_pydict(sd));
+      // Convert item_ids to Python list
+      py::list item_id_list;
+      for (const auto &item_id : item_ids) {
+        item_id_list.append(item_id);
       }
 
-      return py::make_tuple(ret_ids, scalar_list);
+      return py::make_tuple(ret_ids, item_id_list);
     }
   }
 
@@ -524,7 +521,7 @@ class PyIndex : public BasePyIndex {
    * @param ef Number of candidates to explore
    * @param filter Metadata filter for filtering results
    * @param num_threads Number of threads
-   * @return Tuple of (ids_array, scalar_data_list_of_lists)
+   * @return Tuple of (ids_array, item_ids_list_of_lists)
    */
   auto batch_hybrid_search(py::array_t<DataType> &queries,
                            uint32_t topk,
@@ -540,10 +537,9 @@ class PyIndex : public BasePyIndex {
 
       auto *query_ptr = static_cast<DataType *>(queries.request().ptr);
 
-      Timer timer{};
       std::vector<std::vector<IDType>> id_results(query_size, std::vector<IDType>(topk));
-      std::vector<std::vector<ScalarData>> scalar_results(query_size,
-                                                          std::vector<ScalarData>(topk));
+      std::vector<std::vector<std::string>> item_id_results(query_size,
+                                                            std::vector<std::string>(topk));
 
       std::vector<CpuID> worker_cpus;
       std::vector<coro::task<>> coros;
@@ -563,22 +559,19 @@ class PyIndex : public BasePyIndex {
                                                                id_results[i].data(),
                                                                ef,
                                                                filter,
-                                                               scalar_results[i].data()));
+                                                               item_id_results[i].data()));
         } else {
           coros.emplace_back(search_job_->hybrid_search(cur_query,
                                                         id_results[i].data(),
                                                         topk,
                                                         ef,
                                                         filter,
-                                                        scalar_results[i].data()));
+                                                        item_id_results[i].data()));
         }
         scheduler->schedule(coros.back().handle());
       }
-      LOG_INFO("Scheduling {} hybrid search tasks.", coros.size());
       scheduler->begin();
       scheduler->join();
-
-      LOG_INFO("Batch hybrid search total time: {} s.", timer.elapsed() / 1000000.0);
 
       // Build result arrays
       auto ret_ids = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
@@ -587,17 +580,17 @@ class PyIndex : public BasePyIndex {
         std::copy(id_results[i].begin(), id_results[i].end(), ret_id_ptr + i * topk);
       }
 
-      // Convert ScalarData to Python list of lists
-      py::list all_scalar_lists;
+      // Convert item_ids to Python list of lists
+      py::list all_item_id_lists;
       for (size_t i = 0; i < query_size; i++) {
-        py::list scalar_list;
-        for (const auto &sd : scalar_results[i]) {
-          scalar_list.append(scalar_data_to_pydict(sd));
+        py::list item_id_list;
+        for (const auto &item_id : item_id_results[i]) {
+          item_id_list.append(item_id);
         }
-        all_scalar_lists.append(scalar_list);
+        all_item_id_lists.append(item_id_list);
       }
 
-      return py::make_tuple(ret_ids, all_scalar_lists);
+      return py::make_tuple(ret_ids, all_item_id_lists);
     }
   }
 
@@ -636,7 +629,6 @@ class PyIndex : public BasePyIndex {
     auto *query_ptr = static_cast<DataType *>(queries.request().ptr);
 
 #if defined(__linux__)
-    Timer timer{};
     std::vector<std::vector<IDType>> res_pool(query_size, std::vector<IDType>(topk));
 
     std::vector<CpuID> worker_cpus;
@@ -661,11 +653,8 @@ class PyIndex : public BasePyIndex {
 
       scheduler->schedule(coros.back().handle());
     }
-    LOG_INFO("Scheduling {} tasks.", coros.size());
     scheduler->begin();
     scheduler->join();
-
-    LOG_INFO("Total time: {} s.", timer.elapsed() / 1000000.0);
 
     auto ret = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
     auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
