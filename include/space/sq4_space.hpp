@@ -259,6 +259,17 @@ class SQ4Space {
   }
 
   /**
+   * @brief Get the scalar storage for direct index access
+   * @return Pointer to RocksDBStorage (nullptr if no scalar data)
+   */
+  auto get_scalar_storage() const -> RocksDBStorage<IDType> * {
+    if constexpr (has_scalar_data) {
+      return scalar_storage_.get();
+    }
+    return nullptr;
+  }
+
+  /**
    * @brief Get the dimensionality of the data points
    * @return The dimensionality
    */

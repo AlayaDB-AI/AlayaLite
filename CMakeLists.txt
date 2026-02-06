@@ -31,7 +31,13 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
   add_compile_options(/EHsc /utf-8 /O2)
 else()
-  add_compile_options(-Wall -Ofast)
+  add_compile_options(
+    -Wall
+    -Ofast
+    -march=native
+    -funroll-loops
+    -fopenmp
+  )
 endif()
 
 # ============================================================================

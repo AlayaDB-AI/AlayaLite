@@ -151,8 +151,10 @@ struct Graph {
       overlay_graph_->initialize(cand_pool, dist_func);
     } else {
       for (auto ep : eps_) {
-        cand_pool.insert(ep, dist_func(ep));
-        cand_pool.vis_.set(ep);
+        if (!cand_pool.vis_.get(ep)) {
+          cand_pool.insert(ep, dist_func(ep));
+          cand_pool.vis_.set(ep);
+        }
       }
     }
   }

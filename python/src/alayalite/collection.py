@@ -139,7 +139,8 @@ class Collection:
         cpp_index = self._get_cpp_index()
         filter_obj = self._build_filter(metadata_filter)
 
-        _, scalar_lists = cpp_index.batch_hybrid_search(
+        # Returns (ids_array, item_ids_list_of_lists)
+        _, item_id_lists = cpp_index.batch_hybrid_search(
             np.array(vectors, dtype=np.float32),
             limit,
             ef_search,
@@ -147,14 +148,8 @@ class Collection:
             num_threads,
         )
 
-        ret = {"id": [], "document": [], "metadata": [], "distance": []}
-        for scalar_list in scalar_lists:
-            ret["id"].append([s.get("item_id", "") for s in scalar_list])
-            ret["document"].append([s.get("document", "") for s in scalar_list])
-            ret["metadata"].append([s.get("metadata", {}) for s in scalar_list])
-            ret["distance"].append([])
-
-        return ret
+        # Return item_ids directly without fetching scalar data
+        return {"id": item_id_lists}
 
     def filter_query(self, metadata_filter: dict, limit: int = 100) -> dict:
         """

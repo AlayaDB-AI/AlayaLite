@@ -17,6 +17,7 @@
 #pragma once
 
 #include <sys/types.h>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <unordered_set>
@@ -112,6 +113,21 @@ class DynamicBitset {
    * @param pos The position of the bit to reset
    */
   void reset(size_t pos) { data_[pos / 64] &= ~(1ULL << (pos % 64)); }
+
+  /**
+   * @brief Set all bits to 1 (mark all as visited)
+   */
+  void set_all() { std::ranges::fill(data_, ~0ULL); }
+
+  /**
+   * @brief Clear all bits to 0 (mark all as unvisited)
+   */
+  void clear() { std::ranges::fill(data_, 0ULL); }
+
+  /**
+   * @brief Get the number of bits in the bitset
+   */
+  [[nodiscard]] auto size() const -> size_t { return size_; }
 };
 
 /**

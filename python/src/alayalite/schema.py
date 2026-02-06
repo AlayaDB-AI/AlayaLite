@@ -56,6 +56,7 @@ class IndexParams:
     max_nbrs: int = None
     rocksdb_path: str = ""  # Path for RocksDB storage (for scalar data)
     has_scalar_data: bool = False  # Whether to enable scalar data storage
+    indexed_fields: list = None  # Fields to create secondary indexes for (for fast filtering)
 
     def index_path(self, folder_uri):
         return os.path.join(folder_uri, f"{self.index_type}_{self.metric}_{self.max_nbrs}.index")
@@ -102,6 +103,7 @@ class IndexParams:
             capacity_=capacity,
             rocksdb_path_=self.rocksdb_path if self.rocksdb_path else "",
             has_scalar_data_=self.has_scalar_data,
+            indexed_fields_=self.indexed_fields if self.indexed_fields else [],
         )
 
     def to_json_dict(self) -> str:
@@ -114,6 +116,7 @@ class IndexParams:
             "capacity": self.capacity,
             "max_nbrs": self.max_nbrs,
             "has_scalar_data": self.has_scalar_data,
+            "indexed_fields": self.indexed_fields if self.indexed_fields else [],
         }
 
     @classmethod
@@ -128,6 +131,7 @@ class IndexParams:
             capacity=data["capacity"],
             max_nbrs=data["max_nbrs"],
             has_scalar_data=data.get("has_scalar_data", False),  # Default to False for backward compatibility
+            indexed_fields=data.get("indexed_fields", []),  # Default to empty list for backward compatibility
         )
 
     @classmethod
@@ -139,6 +143,7 @@ class IndexParams:
         metric = None
         capacity = None
         max_nbrs = None
+        indexed_fields = None
 
         if kwargs.get("index_type") is not None:
             ind_type = kwargs.get("index_type")
@@ -160,6 +165,8 @@ class IndexParams:
             capacity = valid_capacity_type(kwargs.get("capacity"))
         if kwargs.get("max_nbrs") is not None:
             max_nbrs = valid_max_nbrs(kwargs.get("max_nbrs"))
+        if kwargs.get("indexed_fields") is not None:
+            indexed_fields = list(kwargs.get("indexed_fields"))
         return cls(
             index_type=index_type,
             data_type=data_type,
@@ -168,6 +175,7 @@ class IndexParams:
             metric=metric,
             capacity=capacity,
             max_nbrs=max_nbrs,
+            indexed_fields=indexed_fields,
         )
 
 

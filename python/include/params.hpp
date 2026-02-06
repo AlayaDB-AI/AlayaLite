@@ -16,9 +16,11 @@
 
 #pragma once
 #include <pybind11/numpy.h>
+#include <pybind11/stl.h>
 #include <sys/types.h>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "index/index_type.hpp"
 #include "utils/metric_type.hpp"
@@ -35,8 +37,9 @@ struct IndexParams {
   MetricType metric_ = MetricType::L2;
   uint32_t capacity_ = 100000;
   uint32_t max_nbrs_ = 32;
-  std::string rocksdb_path_ = "";  // Path for RocksDB storage (for scalar data)
-  bool has_scalar_data_ = false;   // Whether to enable scalar data storage
+  std::string rocksdb_path_ = "";            // Path for RocksDB storage (for scalar data)
+  bool has_scalar_data_ = false;             // Whether to enable scalar data storage
+  std::vector<std::string> indexed_fields_;  // Fields to create secondary indexes for
 
   IndexParams(IndexType index_type = IndexType::HNSW,  // NOLINT
               py::dtype data_type = py::dtype::of<float>(),
@@ -46,7 +49,8 @@ struct IndexParams {
               uint32_t capacity = 100000,
               uint32_t max_nbrs = 32,
               std::string rocksdb_path = "",
-              bool has_scalar_data = false)
+              bool has_scalar_data = false,
+              std::vector<std::string> indexed_fields = {})
       : index_type_(index_type),
         data_type_(std::move(data_type)),
         id_type_(std::move(id_type)),
@@ -55,6 +59,7 @@ struct IndexParams {
         capacity_(capacity),
         max_nbrs_(max_nbrs),
         rocksdb_path_(std::move(rocksdb_path)),
-        has_scalar_data_(has_scalar_data) {}
+        has_scalar_data_(has_scalar_data),
+        indexed_fields_(std::move(indexed_fields)) {}
 };
 }  // namespace alaya

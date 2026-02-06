@@ -40,6 +40,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include "utils/index_encoding.hpp"
 #include "utils/log.hpp"
 #include "utils/scalar_data.hpp"
 
@@ -89,6 +90,8 @@ struct RocksDBConfig {
   size_t block_cache_size_mb_ = 512;  // 512MB
   bool enable_compression_ = false;   // Enable LZ4+ZSTD compression by default
 
+  std::vector<std::string> indexed_fields_;  // Fields to create secondary indexes for
+
   static auto default_config() -> RocksDBConfig { return RocksDBConfig{}; }
 };
 
@@ -101,6 +104,7 @@ struct RocksDBConfig {
  * Key schema:
  * - "d_{id}" -> ScalarData (primary data)
  * - "i_{item_id}" -> internal_id (secondary index)
+ * - "f_{field}_{value}_{id}" -> "" (field index for fast filtering)
  * - "__COUNT__" -> record count
  *
  * @tparam IDType The type used for internal IDs (default: uint32_t)
@@ -175,6 +179,44 @@ class RocksDBStorage {
   }
 
   /**
+   * @brief Get only item_id by internal ID (lightweight operation)
+   *
+   * This method only deserializes the item_id field without loading
+   * the full ScalarData, significantly improving performance when
+   * only the item_id is needed.
+   *
+   * @param id Internal ID
+   * @return item_id string (empty if not found or on error)
+   */
+  [[nodiscard]] auto get_item_id_only(IDType id) const -> std::string {
+    std::string key = data_key(id);
+    std::string value;
+    rocksdb::Status status = db_->Get(rocksdb::ReadOptions(), key, &value);
+
+    if (!status.ok()) {
+      LOG_ERROR("Failed to access ScalarData for ID {}: {}", id, status.ToString());
+      return "";
+    }
+
+    // Deserialize only the item_id field (first field in ScalarData)
+    // Format: [uint32_t length][string data]
+    if (value.size() < sizeof(uint32_t)) {
+      return "";
+    }
+
+    size_t offset = 0;
+    uint32_t len;
+    std::memcpy(&len, value.data() + offset, sizeof(len));
+    offset += sizeof(len);
+
+    if (offset + len > value.size()) {
+      return "";
+    }
+
+    return {value.data() + offset, len};
+  }
+
+  /**
    * @brief Insert ScalarData with specified ID (managed by Space)
    * @param id Internal ID
    * @param data ScalarData to insert
@@ -194,6 +236,9 @@ class RocksDBStorage {
       rocksdb::Slice id_slice(reinterpret_cast<const char *>(&id), sizeof(IDType));
       batch.Put(index_key, id_slice);
     }
+
+    // Add field indexes for indexed fields
+    add_field_indexes(batch, id, data);
 
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
     if (!status.ok()) {
@@ -234,6 +279,9 @@ class RocksDBStorage {
         batch.Put(idx_key, id_slice);
       }
 
+      // Add field indexes for indexed fields
+      add_field_indexes(batch, current_id, *it);
+
       ++count;
     }
 
@@ -265,6 +313,9 @@ class RocksDBStorage {
     if (!data.item_id.empty()) {
       batch.Delete(item_id_index_key(data.item_id));
     }
+
+    // Remove field indexes
+    remove_field_indexes(batch, id, data);
 
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
     if (!status.ok()) {
@@ -300,6 +351,10 @@ class RocksDBStorage {
         batch.Put(item_id_index_key(data.item_id), id_slice);
       }
     }
+
+    // Update field indexes: remove old, add new
+    remove_field_indexes(batch, id, old_data);
+    add_field_indexes(batch, id, data);
 
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
     if (!status.ok()) {
@@ -361,12 +416,12 @@ class RocksDBStorage {
   [[nodiscard]] auto count() const -> size_t { return cached_count_.load(); }
 
   /**
-   * @brief Scan all ScalarData with a filter function
+   * @brief Scan *ALL* ScalarData with a filter function
    * @param filter_fn Filter function, return true to include the record
    * @param limit Maximum number of results (0 = no limit)
    * @return Vector of (internal_id, ScalarData) pairs
    */
-  [[nodiscard]] auto scan_with_filter(std::function<bool(const ScalarData &)> filter_fn,
+  [[nodiscard]] auto scan_with_filter(const std::function<bool(const ScalarData &)> &filter_fn,
                                       size_t limit = 0) const
       -> std::vector<std::pair<IDType, ScalarData>> {
     std::vector<std::pair<IDType, ScalarData>> results;
@@ -395,6 +450,126 @@ class RocksDBStorage {
     }
 
     return results;
+  }
+
+  /**
+   * @brief Get IDs by exact field value match using index
+   * @param field Field name (must be in indexed_fields_)
+   * @param value Field value to match
+   * @return Vector of matching internal IDs
+   */
+  [[nodiscard]] auto get_ids_by_field_value(const std::string &field,
+                                            const MetadataValue &value) const
+      -> std::vector<IDType> {
+    std::vector<IDType> ids;
+    std::string encoded = index_encoding::encode_value(value);
+    std::string prefix = index_encoding::make_field_index_prefix(field, encoded);
+
+    rocksdb::ReadOptions read_opts;
+    read_opts.fill_cache = false;
+    std::unique_ptr<rocksdb::Iterator> iter(db_->NewIterator(read_opts));
+
+    for (iter->Seek(prefix); iter->Valid(); iter->Next()) {
+      auto key = iter->key().ToString();
+      if (!key.starts_with(prefix)) {
+        break;
+      }
+      IDType id = index_encoding::extract_id_from_key<IDType>(key);
+      ids.push_back(id);
+    }
+
+    return ids;
+  }
+
+  /**
+   * @brief Get IDs by int64 range query using index
+   * @param field Field name (must be in indexed_fields_)
+   * @param min_value Minimum value (inclusive)
+   * @param max_value Maximum value (inclusive)
+   * @return Vector of matching internal IDs
+   */
+  [[nodiscard]] auto get_ids_by_int_range(const std::string &field,
+                                          int64_t min_value,
+                                          int64_t max_value) const -> std::vector<IDType> {
+    std::vector<IDType> ids;
+
+    std::string field_prefix = index_encoding::make_field_prefix(field);
+    std::string start_key = field_prefix + "i_" + index_encoding::encode_int64(min_value);
+    std::string end_encoded = index_encoding::encode_int64(max_value);
+
+    rocksdb::ReadOptions read_opts;
+    read_opts.fill_cache = false;
+    std::unique_ptr<rocksdb::Iterator> iter(db_->NewIterator(read_opts));
+
+    for (iter->Seek(start_key); iter->Valid(); iter->Next()) {
+      auto key = iter->key().ToString();
+      // Check if still in the same field
+      if (!key.starts_with(field_prefix)) {
+        break;
+      }
+      // Check if it's an int type (prefix "i_")
+      if (key.size() < field_prefix.size() + 2 || key.substr(field_prefix.size(), 2) != "i_") {
+        continue;
+      }
+      // Extract encoded value and check range
+      auto value_start = field_prefix.size() + 2;
+      auto value_end = key.rfind('_');
+      if (value_end == std::string::npos || value_end <= value_start) {
+        continue;
+      }
+      std::string encoded_value = key.substr(value_start, value_end - value_start);
+      if (encoded_value > end_encoded) {
+        break;  // Exceeded max value
+      }
+      IDType id = index_encoding::extract_id_from_key<IDType>(key);
+      ids.push_back(id);
+    }
+
+    return ids;
+  }
+
+  /**
+   * @brief Get IDs by double range query using index
+   * @param field Field name (must be in indexed_fields_)
+   * @param min_value Minimum value (inclusive)
+   * @param max_value Maximum value (inclusive)
+   * @return Vector of matching internal IDs
+   */
+  [[nodiscard]] auto get_ids_by_double_range(const std::string &field,
+                                             double min_value,
+                                             double max_value) const -> std::vector<IDType> {
+    std::vector<IDType> ids;
+
+    std::string field_prefix = index_encoding::make_field_prefix(field);
+    std::string start_key = field_prefix + "d_" + index_encoding::encode_double(min_value);
+    std::string end_encoded = index_encoding::encode_double(max_value);
+
+    rocksdb::ReadOptions read_opts;
+    read_opts.fill_cache = false;
+    std::unique_ptr<rocksdb::Iterator> iter(db_->NewIterator(read_opts));
+
+    for (iter->Seek(start_key); iter->Valid(); iter->Next()) {
+      auto key = iter->key().ToString();
+      if (!key.starts_with(field_prefix)) {
+        break;
+      }
+      if (key.size() < field_prefix.size() + 2 || key.substr(field_prefix.size(), 2) != "d_") {
+        continue;
+      }
+      auto value_start = field_prefix.size() + 2;
+      auto value_end = key.rfind('_');
+      if (value_end == std::string::npos || value_end <= value_start) {
+        continue;
+      }
+      std::string encoded_value = key.substr(value_start, value_end - value_start);
+      if (encoded_value > end_encoded) {
+        break;
+      }
+      IDType id = index_encoding::extract_id_from_key<IDType>(key);
+      ids.push_back(id);
+    }
+
+    return ids;
   }
 
   [[nodiscard]] auto config() const -> const RocksDBConfig & { return config_; }
@@ -518,6 +693,34 @@ class RocksDBStorage {
   }
 
   static auto count_key() -> std::string { return "__COUNT__"; }
+
+  /**
+   * @brief Add field indexes for indexed fields
+   */
+  void add_field_indexes(rocksdb::WriteBatch &batch, IDType id, const ScalarData &data) const {
+    for (const auto &field : config_.indexed_fields_) {
+      auto it = data.metadata.find(field);
+      if (it != data.metadata.end()) {
+        std::string encoded = index_encoding::encode_value(it->second);
+        std::string idx_key = index_encoding::make_field_index_key(field, encoded, id);
+        batch.Put(idx_key, "");
+      }
+    }
+  }
+
+  /**
+   * @brief Remove field indexes for indexed fields
+   */
+  void remove_field_indexes(rocksdb::WriteBatch &batch, IDType id, const ScalarData &data) const {
+    for (const auto &field : config_.indexed_fields_) {
+      auto it = data.metadata.find(field);
+      if (it != data.metadata.end()) {
+        std::string encoded = index_encoding::encode_value(it->second);
+        std::string idx_key = index_encoding::make_field_index_key(field, encoded, id);
+        batch.Delete(idx_key);
+      }
+    }
+  }
 
   rocksdb::DB *db_ = nullptr;
   RocksDBConfig config_;
