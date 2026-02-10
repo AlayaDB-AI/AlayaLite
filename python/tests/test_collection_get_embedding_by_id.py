@@ -18,7 +18,7 @@ Tests for Collection.get_embeddings_by_id.
 
 import numpy as np
 import pytest
-from alayalite.collection import Collection
+from alayalite import Collection
 
 
 def test_get_embeddings_by_id_roundtrip():
