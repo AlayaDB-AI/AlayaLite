@@ -296,8 +296,6 @@ class Collection:
         """
         return self.__index_params
 
-
-
     # this function is mainly for MMR purpose，add by liangpeiran
     def get_embeddings_by_id(self, ids: List[str]) -> List[List[float]]:
         """
