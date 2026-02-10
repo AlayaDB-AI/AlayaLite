@@ -16,8 +16,6 @@ def test_get_embeddings_by_id_roundtrip():
 
     got = col.get_embeddings_by_id(["b", "a", "c"])
     assert len(got) == 3
-
-    # 顺序必须与输入一致
     assert np.allclose(got[0], np.array([0.0, 1.0, 0.0], dtype=np.float32))
     assert np.allclose(got[1], np.array([1.0, 0.0, 0.0], dtype=np.float32))
     assert np.allclose(got[2], np.array([0.0, 0.0, 1.0], dtype=np.float32))
