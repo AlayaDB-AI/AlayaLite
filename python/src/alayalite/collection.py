@@ -296,33 +296,34 @@ class Collection:
         """
         return self.__index_params
 
-    # this function is mainly for MMR purpose，add by liangpeiran
-    def get_embeddings_by_id(self, ids: List[str]) -> List[List[float]]:
-        """
-        Retrieve embeddings (vectors) from the underlying index by external ids.
 
-        Args:
-            ids: List of external ids used in Collection (the "id" column).
+def get_embeddings_by_id(self, ids: List[str]) -> List[List[float]]:
+    """
+    Retrieve embeddings (vectors) from the underlying index by external ids.
 
-        Returns:
-            A list of vectors (list of float), aligned with the input order.
+    Args:
+        ids: List of external ids used in Collection (the "id" column).
 
-        Raises:
-            RuntimeError: if index is not initialized.
-            KeyError: if any id does not exist in collection.
-        """
-        if not ids:
-            return []
+    Returns:
+        A list of vectors (list of float), aligned with the input order.
 
-        _assert(self.__index_py is not None, "Index is not initialized yet")
+    Raises:
+        RuntimeError: if index is not initialized.
+        KeyError: if any id does not exist in collection.
+    """
+    if not ids:
+        return []
 
-        missing = [x for x in ids if x not in self.__outer_inner_map]
-        if missing:
-            raise KeyError(f"Some ids do not exist in collection: {missing}")
+    if self.__index_py is None:
+        raise RuntimeError("Index is not initialized yet")
 
-        vectors: List[List[float]] = []
-        for outer_id in ids:
-            inner_id = self.__outer_inner_map[outer_id]
-            vec = self.__index_py.get_data_by_id(inner_id)
-            vectors.append(np.asarray(vec, dtype=np.float32).tolist())
-        return vectors
+    missing = [x for x in ids if x not in self.__outer_inner_map]
+    if missing:
+        raise KeyError(f"Some ids do not exist in collection: {missing}")
+
+    vectors: List[List[float]] = []
+    for outer_id in ids:
+        inner_id = self.__outer_inner_map[outer_id]
+        vec = self.__index_py.get_data_by_id(inner_id)
+        vectors.append(np.asarray(vec).tolist())
+    return vectors
