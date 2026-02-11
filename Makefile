@@ -8,7 +8,7 @@ BUILD_DIR      := build
 BUILD_TYPE     := Release
 CMAKE_FLAGS    := -DBUILD_TESTING=ON
 PYTEST_FLAGS   := -v
-CTEST_FLAGS    := --output-on-failure
+CTEST_FLAGS    := --output-on-failure -LE performance
 JOBS           := $(shell nproc 2>/dev/null || echo 4)
 PYTHON_VERSION := 3.11
 

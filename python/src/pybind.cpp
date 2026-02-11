@@ -186,6 +186,10 @@ PYBIND11_MODULE(_alayalitepy, m) {
       .def("get_scalar_data_by_internal_id",
            &alaya::PyIndexInterface::get_scalar_data_by_internal_id,
            py::arg("internal_id"))
+      .def("batch_get_item_ids_by_internal_ids",
+           &alaya::PyIndexInterface::batch_get_item_ids_by_internal_ids,
+           py::arg("internal_ids"),
+           "Batch get item_ids by internal IDs using RocksDB MultiGet")
       .def("filter_query",
            &alaya::PyIndexInterface::filter_query,
            py::arg("filter"),
@@ -219,13 +223,17 @@ PYBIND11_MODULE(_alayalitepy, m) {
            py::arg("query"),
            py::arg("topk"),
            py::arg("ef"),
-           py::arg("filter"))
+           py::arg("filter"),
+           py::arg("bf") = false,
+           py::arg("reseed_time") = 3)
       .def("batch_hybrid_search",
            &alaya::PyIndexInterface::batch_hybrid_search,
            py::arg("queries"),
            py::arg("topk"),
            py::arg("ef"),
            py::arg("filter"),
-           py::arg("num_threads"))
+           py::arg("num_threads"),
+           py::arg("bf") = false,
+           py::arg("reseed_time") = 3)
       .def("close_db", &alaya::PyIndexInterface::close_db, "Close and release RocksDB resources");
 }

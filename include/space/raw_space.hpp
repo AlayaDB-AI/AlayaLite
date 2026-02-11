@@ -138,10 +138,6 @@ class RawSpace {
            [[maybe_unused]] const ScalarData *scalar_data = nullptr) {
     item_cnt_ = item_cnt;
     for (IDType i = 0; i < item_cnt_; ++i) {
-      // if the metric is cosine, normalize the query
-      if (metric_ == MetricType::COS) {
-        normalize(const_cast<DataType *>(data + (i * dim_)), dim_);
-      }
       data_storage_.insert(data + (i * dim_));
     }
   }
@@ -153,10 +149,6 @@ class RawSpace {
    */
   auto insert(const DataType *data, [[maybe_unused]] const ScalarData *scalar_data = nullptr)
       -> IDType {
-    // if the metric is cosine, normalize the query
-    if (metric_ == MetricType::COS) {
-      normalize(const_cast<DataType *>(data), dim_);
-    }
     item_cnt_++;
     return data_storage_.insert(data);
   }
@@ -281,11 +273,6 @@ class RawSpace {
      */
     QueryComputer(const RawSpace &distance_space, const DataType *query)
         : distance_space_(distance_space) {
-      // if the metric is cosine, normalize the query
-      if (distance_space_.metric_ == MetricType::COS) {
-        normalize(const_cast<DataType *>(query), distance_space_.dim_);
-      }
-
       auto aligned_size = math::round_up_pow2(distance_space_.data_size_, kAlignment);
       query_ = static_cast<DataType *>(alaya_aligned_alloc_impl(aligned_size, kAlignment));
       std::memcpy(query_, query, distance_space.data_size_);

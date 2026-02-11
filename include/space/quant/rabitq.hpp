@@ -21,6 +21,7 @@
 #include <fstream>
 
 #include "utils/log.hpp"
+#include "utils/metric_type.hpp"
 #include "utils/rabitq_utils/defines.hpp"
 #include "utils/rabitq_utils/fastscan.hpp"
 
@@ -65,14 +66,15 @@ struct RaBitQQuantizer {
                       const DataType *centroid,
                       int *binary_code,
                       DataType &f_add,
-                      DataType &f_rescale) {
+                      DataType &f_rescale,
+                      const MetricType metric) {
     // map pointer to array
     ConstRowMajorArrayMap<DataType> data_arr(data, 1, padded_dim_);
     ConstRowMajorArrayMap<DataType> cent_arr(centroid, 1, padded_dim_);
     // P^(-1)·（o_r - c）
     RowMajorArray<DataType> residual_arr = data_arr - cent_arr;
     // |P^(-1)·(or-c)|^2 = |or-c|^2 (Orthogonal transformations preserve Euclidean distance)
-    DataType l2_sqr = ::alaya::l2_sqr<DataType>(residual_arr.data(), padded_dim_);
+    DataType l2_sqr_data_and_centroid = ::alaya::l2_sqr<DataType>(residual_arr.data(), padded_dim_);
 
     // unsigned representation, modifications to y_u will be cast to binary code as well
     RowMajorArrayMap<int> y_u(binary_code, 1, static_cast<long>(padded_dim_));  // NOLINT
@@ -91,9 +93,18 @@ struct RaBitQQuantizer {
       ip_rotated_resi_and_y_bar = std::numeric_limits<DataType>::infinity();
     }
 
-    // calculate factors (for l2 metric type only)
-    f_add = l2_sqr + (2 * l2_sqr * ip_rotated_c_and_y_bar / ip_rotated_resi_and_y_bar);
-    f_rescale = -2 * l2_sqr / ip_rotated_resi_and_y_bar;
+    if (metric == MetricType::L2) {
+      // calculate factors (for l2 metric type only)
+      f_add = l2_sqr_data_and_centroid +
+              (2 * l2_sqr_data_and_centroid * ip_rotated_c_and_y_bar / ip_rotated_resi_and_y_bar);
+      f_rescale = -2 * l2_sqr_data_and_centroid / ip_rotated_resi_and_y_bar;
+    } else if (metric == MetricType::COS || metric == MetricType::IP) {
+      // calculate factors (for cos or ip metric type only)
+      auto ip_residual_centroid = dot_product<DataType>(residual_arr.data(), centroid, padded_dim_);
+      f_add = 1 - ip_residual_centroid +
+              l2_sqr_data_and_centroid * ip_rotated_c_and_y_bar / ip_rotated_resi_and_y_bar;
+      f_rescale = -l2_sqr_data_and_centroid / ip_rotated_resi_and_y_bar;
+    }
   }
 
  public:
@@ -116,7 +127,8 @@ struct RaBitQQuantizer {
                       /* The following pointers point to where the result data is stored */
                       uint8_t *bin_code,
                       DataType *f_add,
-                      DataType *f_rescale) -> void {
+                      DataType *f_rescale,
+                      const MetricType metric) -> void {
     // for compacted quantization code storage
     std::vector<uint8_t> compact_codes(num * padded_dim_ / 8);  // 1 bit/dim
 
@@ -126,7 +138,12 @@ struct RaBitQQuantizer {
 
       // for uncompacted quantization code storage
       std::vector<int> binary_code(padded_dim_);
-      cal_fac_and_qc(rotated_nei, rotated_centroid, binary_code.data(), f_add[i], f_rescale[i]);
+      cal_fac_and_qc(rotated_nei,
+                     rotated_centroid,
+                     binary_code.data(),
+                     f_add[i],
+                     f_rescale[i],
+                     metric);
 
       // the number of bits in every uint8_t
       constexpr size_t kTypeBits = 8;

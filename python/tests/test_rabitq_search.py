@@ -30,6 +30,15 @@ SKIP_RABITQ = platform.machine() not in ("x86_64", "AMD64")
 SKIP_REASON = "RaBitQ requires AVX512 instructions (x86_64 only)"
 
 
+def calc_gt_ip(data, query, topk):
+    """Calculate ground truth using inner product (higher is better)."""
+    gt = np.zeros((query.shape[0], topk), dtype=np.int32)
+    for i in range(query.shape[0]):
+        scores = data.astype(np.float64) @ query[i].astype(np.float64)
+        gt[i] = np.argsort(-scores)[:topk]
+    return gt
+
+
 class TestAlayaLiteRaBitQSearch(unittest.TestCase):
     """Test cases for RaBitQ implementation."""
 
@@ -95,6 +104,57 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         result_load = index.batch_search(queries, 10, 400)
         self.assertEqual(result_load.shape, result.shape)
         # result_load equals result
+        self.assertTrue(np.allclose(result_load, result))
+
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
+    def test_rabitq_search_solo_ip(self):
+        index = self.client.create_index(name="rabitq_ip_index", metric="ip", quantization_type="rabitq")
+        vectors = np.random.rand(1000, 128).astype(np.float32)
+        single_query = np.random.rand(128).astype(np.float32)
+        index.fit(vectors)
+        try:
+            result = index.search(single_query, 10, 400).reshape(1, -1)
+        except RuntimeError as _:
+            print("AVX512 instruction is not supported.")
+            return
+        gt = calc_gt_ip(vectors, single_query.reshape(1, -1), 10)
+        recall = calc_recall(result, gt)
+        self.assertGreaterEqual(recall, 0.95)
+
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
+    def test_rabitq_batch_search_ip(self):
+        index = self.client.create_index(name="rabitq_ip_index", metric="ip", quantization_type="rabitq")
+        vectors = np.random.rand(1000, 128).astype(np.float32)
+        queries = np.random.rand(10, 128).astype(np.float32)
+        index.fit(vectors)
+        try:
+            result = index.batch_search(queries, 10, 400)
+        except RuntimeError as _:
+            print("AVX512 instruction is not supported.")
+            return
+        gt = calc_gt_ip(vectors, queries, 10)
+        recall = calc_recall(result, gt)
+        self.assertGreaterEqual(recall, 0.95)
+
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
+    def test_rabitq_save_load_ip(self):
+        index = self.client.create_index(name="rabitq_ip_index", metric="ip", quantization_type="rabitq")
+        vectors = np.random.rand(1000, 128).astype(np.float32)
+        queries = np.random.rand(10, 128).astype(np.float32)
+        index.fit(vectors)
+        try:
+            result = index.batch_search(queries, 10, 400)
+        except RuntimeError as _:
+            print("AVX512 instruction is not supported.")
+            return
+        gt = calc_gt_ip(vectors, queries, 10)
+        recall = calc_recall(result, gt)
+        self.assertGreaterEqual(recall, 0.95)
+
+        self.client.save_index("rabitq_ip_index")
+        index = Index.load(self.temp_dir, "rabitq_ip_index")
+        result_load = index.batch_search(queries, 10, 400)
+        self.assertEqual(result_load.shape, result.shape)
         self.assertTrue(np.allclose(result_load, result))
 
     @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)

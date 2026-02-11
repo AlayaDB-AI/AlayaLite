@@ -123,16 +123,6 @@ TEST_F(RaBitQSpaceTest, SaveAndLoad) {
   std::filesystem::remove(filename);
 }
 
-TEST_F(RaBitQSpaceTest, InvalidMetric1) {
-  EXPECT_THROW(space_ = std::make_shared<SpaceType>(capacity_, dim_, MetricType::COS),
-               std::runtime_error);
-}
-
-TEST_F(RaBitQSpaceTest, InvalidMetric2) {
-  EXPECT_THROW(space_ = std::make_shared<SpaceType>(capacity_, dim_, MetricType::IP),
-               std::runtime_error);
-}
-
 TEST_F(RaBitQSpaceTest, InvalidMetric3) {
   EXPECT_THROW(space_ = std::make_shared<SpaceType>(capacity_, dim_, MetricType::NONE),
                std::runtime_error);

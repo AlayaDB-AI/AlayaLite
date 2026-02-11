@@ -263,7 +263,7 @@ class PyIndex : public BasePyIndex {
     LOG_INFO("creator task generator success");
   }
 
-  auto fit(py::array_t<DataType> &vectors,
+  auto fit(py::array_t<DataType> vectors,
            uint32_t ef_construction,
            uint32_t num_threads,
            const py::object &item_ids = py::none(),
@@ -366,7 +366,7 @@ class PyIndex : public BasePyIndex {
     LOG_INFO("Create task generator successfully!");
   }
 
-  auto insert(py::array_t<DataType> &insert_data,
+  auto insert(py::array_t<DataType> insert_data,
               uint32_t ef,
               const std::string &item_id = "",
               const std::string &document = "",
@@ -424,8 +424,41 @@ class PyIndex : public BasePyIndex {
     if constexpr (!SearchSpaceType::has_scalar_data) {
       throw std::runtime_error("get_scalar_data requires a space that supports scalar data");
     } else {
-      auto scalar_data = search_space_->get_scalar_data(internal_id);
+      decltype(search_space_->get_scalar_data(internal_id)) scalar_data;
+      {
+        py::gil_scoped_release release;
+        scalar_data = search_space_->get_scalar_data(internal_id);
+      }
       return scalar_data_to_pydict(scalar_data);
+    }
+  }
+
+  /**
+   * @brief Batch get item_ids by internal IDs (lightweight, uses MultiGet)
+   * @param internal_ids numpy array of internal IDs
+   * @return Python list of item_id strings
+   */
+  auto batch_get_item_ids_by_internal_ids(py::array_t<IDType> internal_ids) -> py::list {
+    if constexpr (!SearchSpaceType::has_scalar_data) {
+      throw std::runtime_error("batch_get_item_ids requires a space that supports scalar data");
+    } else {
+      auto buf = internal_ids.request();
+      auto *id_ptr = static_cast<IDType *>(buf.ptr);
+      size_t count = static_cast<size_t>(buf.size);
+      std::vector<IDType> ids(id_ptr, id_ptr + count);
+
+      std::vector<std::string> item_ids;
+      {
+        py::gil_scoped_release release;
+        auto *storage = search_space_->get_scalar_storage();
+        item_ids = storage->batch_get_item_id_only(ids);
+      }
+
+      py::list result;
+      for (auto &item_id : item_ids) {
+        result.append(std::move(item_id));
+      }
+      return result;
     }
   }
 
@@ -442,22 +475,26 @@ class PyIndex : public BasePyIndex {
     return 0;
   }
 
-  auto search(py::array_t<DataType> &query, uint32_t topk, uint32_t ef) -> py::array_t<IDType> {
+  auto search(py::array_t<DataType> query, uint32_t topk, uint32_t ef) -> py::array_t<IDType> {
     auto *query_ptr = static_cast<DataType *>(query.request().ptr);
-    auto ret = py::array_t<IDType>(static_cast<size_t>(topk));
-    auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
+    std::vector<IDType> result_ids(topk);
 
-    if constexpr (is_rabitq_space_v<SearchSpaceType>) {
-      search_job_->rabitq_search_solo(query_ptr, topk, ret_ptr, ef);
-    } else {
-      search_job_->search_solo(query_ptr, ret_ptr, topk, ef);
+    {
+      py::gil_scoped_release release;
+      if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+        search_job_->rabitq_search_solo(query_ptr, topk, result_ids.data(), ef);
+      } else {
+        search_job_->search_solo(query_ptr, result_ids.data(), topk, ef);
+      }
     }
 
+    auto ret = py::array_t<IDType>(static_cast<size_t>(topk));
+    auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
+    std::copy(result_ids.begin(), result_ids.end(), ret_ptr);
     return ret;
   }
 
-  auto search_with_distance(py::array_t<DataType> &query, uint32_t topk, uint32_t ef)
-      -> py::object {
+  auto search_with_distance(py::array_t<DataType> query, uint32_t topk, uint32_t ef) -> py::object {
     if constexpr (is_rabitq_space_v<SearchSpaceType>) {
       throw std::runtime_error("search_with_distance is not supported for RaBitQ space");
     }
@@ -483,26 +520,50 @@ class PyIndex : public BasePyIndex {
    * @param filter Metadata filter for filtering results
    * @return Tuple of (ids, item_ids)
    */
-  auto hybrid_search(py::array_t<DataType> &query,
+  auto hybrid_search(py::array_t<DataType> query,
                      uint32_t topk,
                      uint32_t ef,
-                     const MetadataFilter &filter) -> py::object {
+                     const MetadataFilter &filter,
+                     bool bf = false,
+                     int reseed_time = 3) -> py::object {
     if constexpr (!SearchSpaceType::has_scalar_data) {
       throw std::runtime_error("hybrid_search requires a space that supports scalar data");
     } else {
       auto *query_ptr = static_cast<DataType *>(query.request().ptr);
 
-      auto ret_ids = py::array_t<IDType>(static_cast<size_t>(topk));
-      auto ret_id_ptr = static_cast<IDType *>(ret_ids.request().ptr);
-
+      std::vector<IDType> result_ids(topk);
       std::vector<std::string> item_ids(topk);
 
-      if constexpr (is_rabitq_space_v<SearchSpaceType>) {
-        search_job_
-            ->rabitq_hybrid_search_solo(query_ptr, topk, ret_id_ptr, ef, filter, item_ids.data());
-      } else {
-        search_job_->hybrid_search_solo(query_ptr, ret_id_ptr, topk, ef, filter, item_ids.data());
+      {
+        py::gil_scoped_release release;
+        if (bf) {
+          search_job_->hybrid_search_brute_force_solo(query_ptr,
+                                                      result_ids.data(),
+                                                      topk,
+                                                      filter,
+                                                      item_ids.data());
+        } else if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+          search_job_->rabitq_hybrid_search_solo(query_ptr,
+                                                 topk,
+                                                 result_ids.data(),
+                                                 ef,
+                                                 filter,
+                                                 item_ids.data(),
+                                                 reseed_time);
+        } else {
+          search_job_->hybrid_search_solo(query_ptr,
+                                          result_ids.data(),
+                                          topk,
+                                          ef,
+                                          filter,
+                                          item_ids.data(),
+                                          reseed_time);
+        }
       }
+
+      auto ret_ids = py::array_t<IDType>(static_cast<size_t>(topk));
+      auto ret_id_ptr = static_cast<IDType *>(ret_ids.request().ptr);
+      std::copy(result_ids.begin(), result_ids.end(), ret_id_ptr);
 
       // Convert item_ids to Python list
       py::list item_id_list;
@@ -523,11 +584,13 @@ class PyIndex : public BasePyIndex {
    * @param num_threads Number of threads
    * @return Tuple of (ids_array, item_ids_list_of_lists)
    */
-  auto batch_hybrid_search(py::array_t<DataType> &queries,
+  auto batch_hybrid_search(py::array_t<DataType> queries,
                            uint32_t topk,
                            uint32_t ef,
                            const MetadataFilter &filter,
-                           uint32_t num_threads) -> py::object {
+                           uint32_t num_threads,
+                           bool bf = false,
+                           int reseed_time = 3) -> py::object {
     if constexpr (!SearchSpaceType::has_scalar_data) {
       throw std::runtime_error("batch_hybrid_search requires a space that supports scalar data");
     } else {
@@ -541,39 +604,50 @@ class PyIndex : public BasePyIndex {
       std::vector<std::vector<std::string>> item_id_results(query_size,
                                                             std::vector<std::string>(topk));
 
-      std::vector<CpuID> worker_cpus;
-      std::vector<coro::task<>> coros;
+      {
+        py::gil_scoped_release release;
+        std::vector<CpuID> worker_cpus;
+        std::vector<coro::task<>> coros;
 
-      worker_cpus.reserve(num_threads);
-      coros.reserve(query_size);
+        worker_cpus.reserve(num_threads);
+        coros.reserve(query_size);
 
-      for (uint32_t i = 0; i < num_threads; i++) {
-        worker_cpus.push_back(i);
-      }
-      auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
-      for (uint32_t i = 0; i < query_size; i++) {
-        auto cur_query = query_ptr + i * query_dim;
-        if constexpr (is_rabitq_space_v<SearchSpaceType>) {
-          coros.emplace_back(search_job_->rabitq_hybrid_search(cur_query,
-                                                               topk,
-                                                               id_results[i].data(),
-                                                               ef,
-                                                               filter,
-                                                               item_id_results[i].data()));
-        } else {
-          coros.emplace_back(search_job_->hybrid_search(cur_query,
-                                                        id_results[i].data(),
-                                                        topk,
-                                                        ef,
-                                                        filter,
-                                                        item_id_results[i].data()));
+        for (uint32_t i = 0; i < num_threads; i++) {
+          worker_cpus.push_back(i);
         }
-        scheduler->schedule(coros.back().handle());
+        auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
+        for (uint32_t i = 0; i < query_size; i++) {
+          auto cur_query = query_ptr + i * query_dim;
+          if (bf) {
+            coros.emplace_back(search_job_->hybrid_search_brute_force(cur_query,
+                                                                      id_results[i].data(),
+                                                                      topk,
+                                                                      filter,
+                                                                      item_id_results[i].data()));
+          } else if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+            coros.emplace_back(search_job_->rabitq_hybrid_search(cur_query,
+                                                                 topk,
+                                                                 id_results[i].data(),
+                                                                 ef,
+                                                                 filter,
+                                                                 item_id_results[i].data(),
+                                                                 reseed_time));
+          } else {
+            coros.emplace_back(search_job_->hybrid_search(cur_query,
+                                                          id_results[i].data(),
+                                                          topk,
+                                                          ef,
+                                                          filter,
+                                                          item_id_results[i].data(),
+                                                          reseed_time));
+          }
+          scheduler->schedule(coros.back().handle());
+        }
+        scheduler->begin();
+        scheduler->join();
       }
-      scheduler->begin();
-      scheduler->join();
 
-      // Build result arrays
+      // Build result arrays (GIL re-acquired)
       auto ret_ids = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
       auto ret_id_ptr = static_cast<IDType *>(ret_ids.request().ptr);
       for (size_t i = 0; i < query_size; i++) {
@@ -618,10 +692,8 @@ class PyIndex : public BasePyIndex {
     }
   }
 
-  auto batch_search(py::array_t<DataType> &queries,
-                    uint32_t topk,
-                    uint32_t ef,
-                    uint32_t num_threads) -> py::array_t<IDType> {
+  auto batch_search(py::array_t<DataType> queries, uint32_t topk, uint32_t ef, uint32_t num_threads)
+      -> py::array_t<IDType> {
     auto shape = queries.shape();
     size_t query_size = shape[0];
     size_t query_dim = shape[1];
@@ -631,30 +703,33 @@ class PyIndex : public BasePyIndex {
 #if defined(__linux__)
     std::vector<std::vector<IDType>> res_pool(query_size, std::vector<IDType>(topk));
 
-    std::vector<CpuID> worker_cpus;
-    std::vector<coro::task<>> coros;
+    {
+      py::gil_scoped_release release;
+      std::vector<CpuID> worker_cpus;
+      std::vector<coro::task<>> coros;
 
-    worker_cpus.reserve(num_threads);
-    coros.reserve(query_size);
+      worker_cpus.reserve(num_threads);
+      coros.reserve(query_size);
 
-    for (uint32_t i = 0; i < num_threads; i++) {
-      worker_cpus.push_back(i);
-    }
-    auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
-    for (uint32_t i = 0; i < query_size; i++) {
-      auto cur_query = query_ptr + i * query_dim;
-
-      if constexpr (is_rabitq_space_v<SearchSpaceType>) {
-        coros.emplace_back(search_job_->rabitq_search(cur_query, topk, res_pool[i].data(), ef));
-      } else {
-        // search now handles rerank internally and returns topk results
-        coros.emplace_back(search_job_->search(cur_query, res_pool[i].data(), topk, ef));
+      for (uint32_t i = 0; i < num_threads; i++) {
+        worker_cpus.push_back(i);
       }
+      auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
+      for (uint32_t i = 0; i < query_size; i++) {
+        auto cur_query = query_ptr + i * query_dim;
 
-      scheduler->schedule(coros.back().handle());
+        if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+          coros.emplace_back(search_job_->rabitq_search(cur_query, topk, res_pool[i].data(), ef));
+        } else {
+          // search now handles rerank internally and returns topk results
+          coros.emplace_back(search_job_->search(cur_query, res_pool[i].data(), topk, ef));
+        }
+
+        scheduler->schedule(coros.back().handle());
+      }
+      scheduler->begin();
+      scheduler->join();
     }
-    scheduler->begin();
-    scheduler->join();
 
     auto ret = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
     auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
@@ -663,24 +738,31 @@ class PyIndex : public BasePyIndex {
     }
     return ret;
 #else
+    std::vector<std::vector<IDType>> res_pool(query_size, std::vector<IDType>(topk));
+
+    {
+      py::gil_scoped_release release;
+      for (size_t i = 0; i < query_size; i++) {
+        auto cur_query = query_ptr + i * query_dim;
+        if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+          search_job_->rabitq_search_solo(cur_query, topk, res_pool[i].data(), ef);
+        } else {
+          search_job_->search_solo(cur_query, res_pool[i].data(), topk, ef);
+        }
+      }
+    }
+
     auto ret = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
     auto ret_ptr = static_cast<IDType *>(ret.request().ptr);
     for (size_t i = 0; i < query_size; i++) {
-      auto cur_query = query_ptr + i * query_dim;
-
-      if constexpr (is_rabitq_space_v<SearchSpaceType>) {
-        search_job_->rabitq_search_solo(cur_query, topk, ret_ptr + i * topk, ef);
-      } else {
-        // search_solo now handles rerank internally and returns topk results
-        search_job_->search_solo(cur_query, ret_ptr + i * topk, topk, ef);
-      }
+      std::copy(res_pool[i].begin(), res_pool[i].end(), ret_ptr + i * topk);
     }
     return ret;
 
 #endif
   }
 
-  auto batch_search_with_distance(py::array_t<DataType> &queries,
+  auto batch_search_with_distance(py::array_t<DataType> queries,
                                   uint32_t topk,
                                   uint32_t ef,
                                   uint32_t num_threads) -> py::object {
@@ -694,44 +776,48 @@ class PyIndex : public BasePyIndex {
     std::vector<std::vector<IDType>> topk_ids(query_size, std::vector<IDType>(topk));
     std::vector<std::vector<DistanceType>> topk_dists(query_size, std::vector<DistanceType>(topk));
 
-    std::vector<CpuID> worker_cpus;
-    std::vector<coro::task<>> coros;
+    {
+      py::gil_scoped_release release;
+      std::vector<CpuID> worker_cpus;
+      std::vector<coro::task<>> coros;
 
-    worker_cpus.reserve(num_threads);
-    coros.reserve(query_size);
+      worker_cpus.reserve(num_threads);
+      coros.reserve(query_size);
 
-    for (uint32_t i = 0; i < num_threads; i++) {
-      worker_cpus.push_back(i);
+      for (uint32_t i = 0; i < num_threads; i++) {
+        worker_cpus.push_back(i);
+      }
+      auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
+
+      for (uint32_t i = 0; i < query_size; i++) {
+        auto cur_query = query_ptr + i * query_dim;
+        // search now handles rerank internally and returns topk results with distances
+        coros.emplace_back(
+            search_job_->search(cur_query, topk_ids[i].data(), topk_dists[i].data(), topk, ef));
+        scheduler->schedule(coros.back().handle());
+      }
+
+      scheduler->begin();
+      scheduler->join();
     }
-    auto scheduler = std::make_shared<alaya::Scheduler>(worker_cpus);
-
-    for (uint32_t i = 0; i < query_size; i++) {
-      auto cur_query = query_ptr + i * query_dim;
-      // search now handles rerank internally and returns topk results with distances
-      coros.emplace_back(
-          search_job_->search(cur_query, topk_ids[i].data(), topk_dists[i].data(), topk, ef));
-      scheduler->schedule(coros.back().handle());
-    }
-
-    scheduler->begin();
-    scheduler->join();
 
     auto ret_id = get_topk_array(topk_ids, topk);
     auto ret_dist = get_topk_array(topk_dists, topk);
     return py::make_tuple(ret_id, ret_dist);
 #else
-    auto ret_id = py::array_t<IDType>({query_size, static_cast<size_t>(topk)});
-    auto ret_dist = py::array_t<DistanceType>({query_size, static_cast<size_t>(topk)});
+    std::vector<std::vector<IDType>> topk_ids(query_size, std::vector<IDType>(topk));
+    std::vector<std::vector<DistanceType>> topk_dists(query_size, std::vector<DistanceType>(topk));
 
-    auto ret_id_ptr = static_cast<IDType *>(ret_id.request().ptr);
-    auto ret_dist_ptr = static_cast<DistanceType *>(ret_dist.request().ptr);
-
-    for (size_t i = 0; i < query_size; i++) {
-      auto cur_query = query_ptr + i * query_dim;
-      // search_solo now handles rerank internally and returns topk results with distances
-      search_job_->search_solo(cur_query, ret_id_ptr + i * topk, ret_dist_ptr + i * topk, topk, ef);
+    {
+      py::gil_scoped_release release;
+      for (size_t i = 0; i < query_size; i++) {
+        auto cur_query = query_ptr + i * query_dim;
+        search_job_->search_solo(cur_query, topk_ids[i].data(), topk_dists[i].data(), topk, ef);
+      }
     }
 
+    auto ret_id = get_topk_array(topk_ids, topk);
+    auto ret_dist = get_topk_array(topk_dists, topk);
     return py::make_tuple(ret_id, ret_dist);
 #endif
   }
@@ -837,6 +923,13 @@ class PyIndexInterface {
     DISPATCH_AND_CAST(index, return index->get_scalar_data_by_internal_id(internal_id););
   }
 
+  auto batch_get_item_ids_by_internal_ids(py::array internal_ids) -> py::list {  // NOLINT
+    DISPATCH_AND_CAST(index, {
+      auto typed_ids = internal_ids.cast<py::array_t<uint32_t>>();
+      return index->batch_get_item_ids_by_internal_ids(typed_ids);
+    });
+  }
+
   auto filter_query(const MetadataFilter &filter, uint32_t limit) -> py::object {  // NOLINT
     DISPATCH_AND_CAST(index, return index->filter_query(filter, limit););
   }
@@ -882,19 +975,30 @@ class PyIndexInterface {
 
   auto get_data_dim() -> uint32_t { return index_->data_dim_; }
 
-  auto hybrid_search(py::array &query, uint32_t topk, uint32_t ef, const MetadataFilter &filter)
-      -> py::object {
+  auto hybrid_search(py::array &query,
+                     uint32_t topk,
+                     uint32_t ef,
+                     const MetadataFilter &filter,
+                     bool bf = false,
+                     int reseed_time = 3) -> py::object {
     DISPATCH_AND_CAST_WITH_ARR(query,
                                typed_query,
                                index,
-                               return index->hybrid_search(typed_query, topk, ef, filter););
+                               return index->hybrid_search(typed_query,
+                                                           topk,
+                                                           ef,
+                                                           filter,
+                                                           bf,
+                                                           reseed_time););
   }
 
   auto batch_hybrid_search(py::array &queries,
                            uint32_t topk,
                            uint32_t ef,
                            const MetadataFilter &filter,
-                           uint32_t num_threads) -> py::object {
+                           uint32_t num_threads,
+                           bool bf = false,
+                           int reseed_time = 3) -> py::object {
     DISPATCH_AND_CAST_WITH_ARR(queries,
                                typed_queries,
                                index,
@@ -902,7 +1006,9 @@ class PyIndexInterface {
                                                                  topk,
                                                                  ef,
                                                                  filter,
-                                                                 num_threads););
+                                                                 num_threads,
+                                                                 bf,
+                                                                 reseed_time););
   }
 
   auto close_db() -> void {  // NOLINT

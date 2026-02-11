@@ -86,7 +86,6 @@ struct RocksDBConfig {
   size_t target_file_size_base_ = static_cast<size_t>(64) << 20;  // 64MB
   int max_background_compactions_ = 4;
   int max_background_flushes_ = 2;
-
   size_t block_cache_size_mb_ = 512;  // 512MB
   bool enable_compression_ = false;   // Enable LZ4+ZSTD compression by default
 
@@ -179,41 +178,50 @@ class RocksDBStorage {
   }
 
   /**
-   * @brief Get only item_id by internal ID (lightweight operation)
+   * @brief Batch get only item_ids by internal IDs (lightweight batch operation)
    *
-   * This method only deserializes the item_id field without loading
-   * the full ScalarData, significantly improving performance when
-   * only the item_id is needed.
+   * Uses RocksDB MultiGet for efficiency. Only deserializes the item_id field
+   * from each ScalarData, avoiding the overhead of full deserialization.
    *
-   * @param id Internal ID
-   * @return item_id string (empty if not found or on error)
+   * @param ids Vector of internal IDs
+   * @return Vector of item_id strings (empty string for not-found entries)
    */
-  [[nodiscard]] auto get_item_id_only(IDType id) const -> std::string {
-    std::string key = data_key(id);
-    std::string value;
-    rocksdb::Status status = db_->Get(rocksdb::ReadOptions(), key, &value);
+  [[nodiscard]] auto batch_get_item_id_only(const std::vector<IDType> &ids) const
+      -> std::vector<std::string> {
+    std::vector<std::string> results;
+    results.reserve(ids.size());
 
-    if (!status.ok()) {
-      LOG_ERROR("Failed to access ScalarData for ID {}: {}", id, status.ToString());
-      return "";
+    std::vector<rocksdb::Slice> keys;
+    std::vector<std::string> key_strings;
+    keys.reserve(ids.size());
+    key_strings.reserve(ids.size());
+
+    for (auto id : ids) {
+      key_strings.push_back(data_key(id));
+      keys.emplace_back(key_strings.back());
     }
 
-    // Deserialize only the item_id field (first field in ScalarData)
-    // Format: [uint32_t length][string data]
-    if (value.size() < sizeof(uint32_t)) {
-      return "";
+    std::vector<std::string> values(ids.size());
+    std::vector<rocksdb::Status> statuses = db_->MultiGet(rocksdb::ReadOptions(), keys, &values);
+
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (!statuses[i].ok() || values[i].size() < sizeof(uint32_t)) {
+        results.emplace_back();
+        continue;
+      }
+      // Parse only item_id: [uint32_t length][string data]
+      size_t offset = 0;
+      uint32_t len;
+      std::memcpy(&len, values[i].data() + offset, sizeof(len));
+      offset += sizeof(len);
+      if (offset + len > values[i].size()) {
+        results.emplace_back();
+      } else {
+        results.emplace_back(values[i].data() + offset, len);
+      }
     }
 
-    size_t offset = 0;
-    uint32_t len;
-    std::memcpy(&len, value.data() + offset, sizeof(len));
-    offset += sizeof(len);
-
-    if (offset + len > value.size()) {
-      return "";
-    }
-
-    return {value.data() + offset, len};
+    return results;
   }
 
   /**
@@ -660,6 +668,13 @@ class RocksDBStorage {
     }
 
     rocksdb::Status status = rocksdb::DB::Open(options, config_.db_path_, &db_);
+    if (!status.ok()) {
+      std::string err_msg = status.ToString();
+      if (err_msg.find("lock file") != std::string::npos) {
+        LOG_INFO("Lock conflict, opening RocksDB in read-only mode at {}", config_.db_path_);
+        status = rocksdb::DB::OpenForReadOnly(options, config_.db_path_, &db_);
+      }
+    }
     if (!status.ok()) {
       LOG_ERROR("Failed to open RocksDB at {}: {}", config_.db_path_, status.ToString());
       throw std::runtime_error("Failed to open RocksDB: " + status.ToString());

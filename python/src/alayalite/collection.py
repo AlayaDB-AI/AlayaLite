@@ -84,35 +84,26 @@ class Collection:
         _assert(num_threads > 0, "num_threads must be greater than 0")
         _assert(ef_search >= limit, "ef_search must be greater than or equal to limit")
 
-        cpp_index = self._get_cpp_index()
+        vectors_arr = np.array(vectors, dtype=np.float32)
 
-        # Use batch_search_with_distance for better performance (no filter overhead)
-        ids_arr, dists_arr = cpp_index.batch_search_with_distance(
-            np.array(vectors, dtype=np.float32),
+        # Use Index.batch_search_with_distance (handles cosine normalization internally)
+        ids_arr, dists_arr = self.__index_py.batch_search_with_distance(
+            vectors_arr,
             limit,
             ef_search,
             num_threads,
         )
 
+        cpp_index = self._get_cpp_index()
         ret = {"id": [], "document": [], "metadata": [], "distance": []}
         for ids_row, dists_row in zip(ids_arr, dists_arr):
-            row_ids = []
-            row_docs = []
-            row_metas = []
-            row_dists = []
-            for internal_id, dist in zip(ids_row, dists_row):
-                try:
-                    scalar = cpp_index.get_scalar_data_by_internal_id(int(internal_id))
-                    row_ids.append(scalar.get("item_id", ""))
-                    row_docs.append(scalar.get("document", ""))
-                    row_metas.append(scalar.get("metadata", {}))
-                    row_dists.append(float(dist))
-                except RuntimeError:
-                    # Internal ID not found or no scalar data
-                    row_ids.append("")
-                    row_docs.append("")
-                    row_metas.append({})
-                    row_dists.append(float(dist))
+            # Batch get item_ids via MultiGet (instead of per-item RocksDB Get)
+            item_ids = cpp_index.batch_get_item_ids_by_internal_ids(np.array(ids_row, dtype=np.uint32))
+            row_ids = list(item_ids)
+            row_dists = [float(d) for d in dists_row]
+            # documents and metadata not fetched in batch mode for performance
+            row_docs = [""] * len(row_ids)
+            row_metas = [{}] * len(row_ids)
             ret["id"].append(row_ids)
             ret["document"].append(row_docs)
             ret["metadata"].append(row_metas)
@@ -128,6 +119,8 @@ class Collection:
         metadata_filter: Optional[dict] = None,
         ef_search: int = 100,
         num_threads: int = 1,
+        bf: bool = False,
+        reseed_time: int = 3,
     ) -> dict:
         """
         Queries the index using vectors with metadata filtering.
@@ -139,13 +132,22 @@ class Collection:
         cpp_index = self._get_cpp_index()
         filter_obj = self._build_filter(metadata_filter)
 
+        vectors_arr = np.array(vectors, dtype=np.float32)
+        # Normalize vectors for cosine metric
+        if self.__index_params.metric in ("cos", "cosine"):
+            norms = np.linalg.norm(vectors_arr, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)
+            vectors_arr = vectors_arr / norms
+
         # Returns (ids_array, item_ids_list_of_lists)
         _, item_id_lists = cpp_index.batch_hybrid_search(
-            np.array(vectors, dtype=np.float32),
+            vectors_arr,
             limit,
             ef_search,
             filter_obj,
             num_threads,
+            bf,
+            reseed_time,
         )
 
         # Return item_ids directly without fetching scalar data
@@ -232,8 +234,14 @@ class Collection:
             # Incremental insert with scalar data
             cpp_index = self._get_cpp_index()
             for item_id, document, embedding, metadata in items:
+                vec = np.array(embedding, dtype=self.__index_py.get_dtype())
+                # Normalize vector for cosine metric
+                if self.__index_params.metric in ("cos", "cosine"):
+                    norm = np.linalg.norm(vec)
+                    if norm > 0:
+                        vec = vec / norm
                 cpp_index.insert(
-                    np.array(embedding, dtype=self.__index_py.get_dtype()),
+                    vec,
                     100,  # ef
                     item_id,
                     document,
@@ -258,8 +266,14 @@ class Collection:
             if cpp_index.contains(item_id):
                 # Update: remove old, insert new
                 cpp_index.remove_by_item_id(item_id)
+                vec = np.array(embedding, dtype=self.__index_py.get_dtype())
+                # Normalize vector for cosine metric
+                if self.__index_params.metric in ("cos", "cosine"):
+                    norm = np.linalg.norm(vec)
+                    if norm > 0:
+                        vec = vec / norm
                 cpp_index.insert(
-                    np.array(embedding, dtype=self.__index_py.get_dtype()),
+                    vec,
                     100,  # ef
                     item_id,
                     document,
@@ -462,7 +476,13 @@ class Collection:
         if schema_map.get("type") != "collection":
             raise RuntimeError(f"{name} is not a collection")
 
-        instance = cls(name)
+        # Restore index params from schema (needed by reindex(), etc.)
+        index_params = IndexParams.from_str_dict(schema_map["index"])
+        if not index_params.rocksdb_path:
+            rocksdb_base = os.environ.get("ALAYALITE_ROCKSDB_DIR", "./RocksDB")
+            index_params.rocksdb_path = f"{rocksdb_base}/{name}"
+
+        instance = cls(name, index_params)
         instance.__index_py = Index.load(url, name)
         instance.__cpp_index = instance.__index_py.get_cpp_index()
         return instance

@@ -40,7 +40,7 @@
 #include "utils/metadata_filter.hpp"
 #include "utils/rabitq_utils/search_utils/buffer.hpp"
 #include "utils/rabitq_utils/search_utils/hashset.hpp"
-#include "utils/scalar_data.hpp"
+#include "utils/rabitq_utils/search_utils/visited_pool.hpp"
 
 #if defined(__linux__)
   #include "coro/task.hpp"
@@ -59,6 +59,7 @@ struct GraphSearchJob {
   std::shared_ptr<BuildSpaceType> build_space_ = nullptr;  ///< Build space (raw vectors for rerank)
   std::shared_ptr<Graph<DataType, IDType>> graph_ = nullptr;  ///< The search graph.
   std::shared_ptr<JobContext<IDType>> job_context_;           ///< The shared job context
+  std::unique_ptr<HashSetPool> visited_pool_;                 ///< Pool of visited sets for rabitq
 
   /// Compile-time flag: whether rerank is needed
   static constexpr bool kNeedsRerank = !std::is_same_v<DistanceSpaceType, BuildSpaceType>;
@@ -74,18 +75,18 @@ struct GraphSearchJob {
   void rabitq_supplement_result(SearchBuffer<DistanceType> &result_pool,
                                 HashBasedBooleanSet &vis,
                                 const DataType *query) {
+    auto *sp = space_.get();
+    auto dist_func = sp->get_dist_func();
+    auto dim = sp->get_dim();
     // Add unvisited neighbors of the result nodes as supplementary result nodes
     auto data = result_pool.data();
     for (auto record : data) {
-      auto *ptr_nb = space_->get_edges(record.id_);
+      auto *ptr_nb = sp->get_edges(record.id_);
       for (uint32_t i = 0; i < RaBitQSpace<>::kDegreeBound; ++i) {
         auto cur_neighbor = ptr_nb[i];
         if (!vis.get(cur_neighbor)) {
           vis.set(cur_neighbor);
-          result_pool.insert(cur_neighbor,
-                             space_->get_dist_func()(query,
-                                                     space_->get_data_by_id(cur_neighbor),
-                                                     space_->get_dim()));
+          result_pool.insert(cur_neighbor, dist_func(query, sp->get_data_by_id(cur_neighbor), dim));
         }
       }
       if (result_pool.is_full()) {
@@ -110,6 +111,10 @@ struct GraphSearchJob {
             "build_space is required when SearchSpaceType != BuildSpaceType");
       }
     }
+    // Initialize visited list pool for rabitq search
+    if constexpr (is_rabitq_space_v<DistanceSpaceType>) {
+      visited_pool_ = std::make_unique<HashSetPool>(1, space_->get_data_num());
+    }
   }
 
   /**
@@ -126,6 +131,11 @@ struct GraphSearchJob {
    */
   auto pre_filter(DynamicBitset &vis, const MetadataFilter &filter, std::vector<IDType> &filter_vec)
       -> bool {
+    // Empty filter matches all records, no filtering needed
+    if (filter.is_empty()) {
+      return true;
+    }
+
     // Check if filter is simple: one condition, no sub_filters
     // TODO(ljh): add support for more complex filters
     if (filter.conditions.size() != 1 || !filter.sub_filters.empty()) {
@@ -224,10 +234,10 @@ struct GraphSearchJob {
       vis.reset(id);
     }
 
-    LOG_INFO("pre_filter: {} matching IDs for field '{}' with op {}",
-             filter_vec.size(),
-             cond.field,
-             static_cast<int>(cond.op));
+    // LOG_INFO("pre_filter: {} matching IDs for field '{}' with op {}",
+    //          filter_vec.size(),
+    //          cond.field,
+    //          static_cast<int>(cond.op));
     return true;
   }
 
@@ -308,15 +318,19 @@ struct GraphSearchJob {
     }
 
     uint32_t result_count = std::min(topk, static_cast<uint32_t>(pq.size()));
-    auto *storage = space_->get_scalar_storage();
+    uint32_t actual_count = 0;
     for (uint32_t i = 0; i < result_count; i++) {
       if (pq.empty()) {
         break;
       }
-      auto node = pq.top().second;
-      ids[i] = node;
-      res[i] = storage->get_item_id_only(node);
+      ids[i] = pq.top().second;
       pq.pop();
+      actual_count++;
+    }
+    auto *storage = space_->get_scalar_storage();
+    auto item_ids = storage->batch_get_item_id_only(std::vector<IDType>(ids, ids + actual_count));
+    for (uint32_t i = 0; i < actual_count; i++) {
+      res[i] = std::move(item_ids[i]);
     }
 
     return result_count;
@@ -328,7 +342,7 @@ struct GraphSearchJob {
                             uint32_t ef,
                             const MetadataFilter &filter,
                             std::string *res,
-                            int reseed_time = 5) -> coro::task<> {
+                            int reseed_time = 3) -> coro::task<> {
 #if defined(__AVX512F__)
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");
@@ -338,16 +352,18 @@ struct GraphSearchJob {
       throw std::invalid_argument("ef must be >= k");
     }
 
+    auto *sp = space_.get();
+
     // init
     size_t degree_bound = RaBitQSpace<>::kDegreeBound;
 
-    auto q_computer = space_->get_query_computer(query);
+    auto q_computer = sp->get_query_computer(query);
 
     // sorted by estimated distance
     SearchBuffer<DistanceType> search_pool(ef);
 
     // Use DynamicBitset to support pre_filter optimization
-    DynamicBitset vis(space_->get_data_num());
+    DynamicBitset vis(sp->get_data_num());
 
     // Try pre_filter: if successful, vis has all non-matching IDs marked as visited
     std::vector<IDType> filter_vec;
@@ -356,10 +372,10 @@ struct GraphSearchJob {
       throw std::runtime_error("please remember to construct scalar index.");
     }
 
-    auto entry = space_->get_ep();
+    auto entry = sp->get_ep();
     if (!vis.get(entry)) {
       search_pool.insert(entry, std::numeric_limits<DistanceType>::max());
-      mem_prefetch_l1(space_->get_data_by_id(entry), 10);
+      mem_prefetch_l1(sp->get_data_by_id(entry), 10);
       co_await std::suspend_always{};
     }
 
@@ -383,8 +399,13 @@ struct GraphSearchJob {
           if (!vis.get(id)) {
             search_pool.insert(id, std::numeric_limits<DistanceType>::max());
             ++filter_vec_pos;  // Move to next position before break
-            break;
+            break;             // candidate found, break to start search immediately
           }
+        }
+        // If we've exhausted the filter_vec and still have no candidates, break to avoid invalid
+        // pop
+        if (filter_vec_pos == filter_vec.size() && !search_pool.has_next()) {
+          break;
         }
       }
 
@@ -397,11 +418,11 @@ struct GraphSearchJob {
       // calculate est_dist for centroid's neighbors in batch after loading centroid
       q_computer.load_centroid(cur_node);
 
-      mem_prefetch_l1(space_->get_edges(cur_node), 2);
+      mem_prefetch_l1(sp->get_edges(cur_node), 2);
       co_await std::suspend_always{};
 
       // scan cur_node's neighbors, insert them with estimated distances
-      const IDType *cand_neighbors = space_->get_edges(cur_node);
+      const IDType *cand_neighbors = sp->get_edges(cur_node);
       for (size_t i = 0; i < degree_bound; ++i) {
         auto cand_nei = cand_neighbors[i];
         DistanceType est_dist = q_computer(i);
@@ -410,7 +431,7 @@ struct GraphSearchJob {
         }
         // try insert
         search_pool.insert(cand_nei, est_dist);
-        mem_prefetch_l2(space_->get_data_by_id(search_pool.next_id()), 10);
+        mem_prefetch_l2(sp->get_data_by_id(search_pool.next_id()), 10);
         co_await std::suspend_always{};
       }
 
@@ -421,9 +442,10 @@ struct GraphSearchJob {
     // return result
     res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids));
     auto res_size = res_pool.size();
-    auto *storage = space_->get_scalar_storage();
+    auto *storage = sp->get_scalar_storage();
+    auto item_ids = storage->batch_get_item_id_only(std::vector<IDType>(ids, ids + res_size));
     for (size_t i = 0; i < res_size; ++i) {
-      res[i] = storage->get_item_id_only(ids[i]);
+      res[i] = std::move(item_ids[i]);
     }
     if (res_size < k) {
       LOG_INFO("not enough result, current result number:{}, required topk:{}", res_size, k);
@@ -440,7 +462,7 @@ struct GraphSearchJob {
                                  uint32_t ef,
                                  const MetadataFilter &filter,
                                  std::string *res,
-                                 int reseed_time = 5) {
+                                 int reseed_time = 3) {
 #if defined(__AVX512F__)
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");
@@ -450,15 +472,17 @@ struct GraphSearchJob {
       throw std::invalid_argument("ef must be >= k");
     }
 
+    auto *sp = space_.get();
+
     // init
     size_t degree_bound = RaBitQSpace<>::kDegreeBound;
-    auto q_computer = space_->get_query_computer(query);
+    auto q_computer = sp->get_query_computer(query);
 
     // sorted by estimated distance
     SearchBuffer<DistanceType> search_pool(ef);
 
     // Use DynamicBitset to support pre_filter optimization
-    DynamicBitset vis(space_->get_data_num());
+    DynamicBitset vis(sp->get_data_num());
 
     // Try pre_filter: if successful, vis has all non-matching IDs marked as visited
     std::vector<IDType> filter_vec;
@@ -468,10 +492,10 @@ struct GraphSearchJob {
     }
 
     // Insert entry point if it matches filter
-    auto entry = space_->get_ep();
+    auto entry = sp->get_ep();
     if (!vis.get(entry)) {
       search_pool.insert(entry, std::numeric_limits<DistanceType>::max());
-      mem_prefetch_l1(space_->get_data_by_id(entry), 10);
+      mem_prefetch_l1(sp->get_data_by_id(entry), 10);
     }
 
     // sorted by exact distance (implicit rerank)
@@ -494,8 +518,13 @@ struct GraphSearchJob {
           if (!vis.get(id)) {
             search_pool.insert(id, std::numeric_limits<DistanceType>::max());
             ++filter_vec_pos;  // Move to next position before break
-            break;
+            break;             // candidate found, break to start search immediately
           }
+        }
+        // If we've exhausted the filter_vec and still have no candidates, break to avoid invalid
+        // pop
+        if (filter_vec_pos == filter_vec.size() && !search_pool.has_next()) {
+          break;
         }
       }
 
@@ -509,7 +538,7 @@ struct GraphSearchJob {
       q_computer.load_centroid(cur_node);
 
       // scan cur_node's neighbors, insert them with estimated distances
-      const IDType *cand_neighbors = space_->get_edges(cur_node);
+      const IDType *cand_neighbors = sp->get_edges(cur_node);
       for (size_t i = 0; i < degree_bound; ++i) {
         auto cand_nei = cand_neighbors[i];
         DistanceType est_dist = q_computer(i);
@@ -520,7 +549,7 @@ struct GraphSearchJob {
         search_pool.insert(cand_nei, est_dist);
 
         auto next_id = search_pool.next_id();
-        mem_prefetch_l2(space_->get_data_by_id(next_id), 12);
+        mem_prefetch_l2(sp->get_data_by_id(next_id), 10);
       }
 
       // implicit rerank
@@ -530,9 +559,10 @@ struct GraphSearchJob {
     // return result
     res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids));
     auto res_size = res_pool.size();
-    auto *storage = space_->get_scalar_storage();
+    auto *storage = sp->get_scalar_storage();
+    auto item_ids = storage->batch_get_item_id_only(std::vector<IDType>(ids, ids + res_size));
     for (size_t i = 0; i < res_size; ++i) {
-      res[i] = storage->get_item_id_only(ids[i]);
+      res[i] = std::move(item_ids[i]);
     }
     if (res_size < k) {
       LOG_INFO("not enough result, current result number:{}, required topk:{}", res_size, k);
@@ -552,47 +582,46 @@ struct GraphSearchJob {
       throw std::invalid_argument("ef must be >= k");
     }
 
+    auto *sp = space_.get();
+
     // init
     size_t degree_bound = RaBitQSpace<>::kDegreeBound;
-    auto entry = space_->get_ep();
-    mem_prefetch_l1(space_->get_data_by_id(entry), 10);
-    auto q_computer = space_->get_query_computer(query);
+    auto entry = sp->get_ep();
+    mem_prefetch_l1(sp->get_data_by_id(entry), 10);
+    auto q_computer = sp->get_query_computer(query);
 
     // sorted by estimated distance
     SearchBuffer<DistanceType> search_pool(ef);
     search_pool.insert(entry, std::numeric_limits<DistanceType>::max());
-    auto vis = HashBasedBooleanSet(space_->get_data_num() / 10);
-    // auto vis = DynamicBitset(space_->get_data_num());
+    auto *vis = visited_pool_->acquire();
 
     // sorted by exact distance (implicit rerank)
     SearchBuffer<DistanceType> res_pool(k);
 
     while (search_pool.has_next()) {
       auto cur_node = search_pool.pop();
-      if (vis.get(cur_node)) {
+      if (vis->get(cur_node)) {
         continue;
       }
 
-      vis.set(cur_node);
+      vis->set(cur_node);
 
       // calculate est_dist for centroid's neighbors in batch after loading centroid
       q_computer.load_centroid(cur_node);
 
       // scan cur_node's neighbors, insert them with estimated distances
-      const IDType *cand_neighbors = space_->get_edges(cur_node);
+      const IDType *cand_neighbors = sp->get_edges(cur_node);
       for (size_t i = 0; i < degree_bound; ++i) {
         auto cand_nei = cand_neighbors[i];
         DistanceType est_dist = q_computer(i);
-        if (search_pool.is_full(est_dist) || vis.get(cand_nei)) {
+        if (search_pool.is_full(est_dist) || vis->get(cand_nei)) {
           continue;
         }
         // try insert
         search_pool.insert(cand_nei, est_dist);
 
         auto next_id = search_pool.next_id();
-        mem_prefetch_l2(space_->get_data_by_id(next_id), 12);
-        // mem_prefetch_l2(space_->get_nei_qc_ptr(next_id), 8);
-        // mem_prefetch_l2(space_->get_f_add_ptr(next_id), 6);  // 2+2+2
+        mem_prefetch_l2(sp->get_data_by_id(next_id), 10);
       }
 
       // implicit rerank
@@ -600,8 +629,10 @@ struct GraphSearchJob {
     }
 
     if (!res_pool.is_full()) [[unlikely]] {
-      rabitq_supplement_result(res_pool, vis, query);
+      rabitq_supplement_result(res_pool, *vis, query);
     }
+
+    visited_pool_->release(vis);
 
     // return result
     res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids));
@@ -620,11 +651,13 @@ struct GraphSearchJob {
       throw std::invalid_argument("ef must be >= k");
     }
 
+    auto *sp = space_.get();
+
     // init
     size_t degree_bound = RaBitQSpace<>::kDegreeBound;
-    auto entry = space_->get_ep();
-    mem_prefetch_l1(space_->get_data_by_id(entry), 10);
-    auto q_computer = space_->get_query_computer(query);
+    auto entry = sp->get_ep();
+    mem_prefetch_l1(sp->get_data_by_id(entry), 10);
+    auto q_computer = sp->get_query_computer(query);
 
     // sorted by estimated distance
     SearchBuffer<DistanceType> search_pool(ef);
@@ -632,32 +665,32 @@ struct GraphSearchJob {
 
     // sorted by exact distance (implicit rerank)
     SearchBuffer<DistanceType> res_pool(k);
-    auto vis = HashBasedBooleanSet(space_->get_data_num() / 10);
+    auto *vis = visited_pool_->acquire();
 
     while (search_pool.has_next()) {
       auto cur_node = search_pool.pop();
-      if (vis.get(cur_node)) {
+      if (vis->get(cur_node)) {
         continue;
       }
-      vis.set(cur_node);
+      vis->set(cur_node);
 
       // calculate est_dist for centroid's neighbors in batch after loading centroid
       q_computer.load_centroid(cur_node);
 
-      mem_prefetch_l1(space_->get_edges(cur_node), 2);
+      mem_prefetch_l1(sp->get_edges(cur_node), 2);
       co_await std::suspend_always{};
 
       // scan cur_node's neighbors, insert them with estimated distances
-      const IDType *cand_neighbors = space_->get_edges(cur_node);
+      const IDType *cand_neighbors = sp->get_edges(cur_node);
       for (size_t i = 0; i < degree_bound; ++i) {
         auto cand_nei = cand_neighbors[i];
         DistanceType est_dist = q_computer(i);
-        if (search_pool.is_full(est_dist) || vis.get(cand_nei)) {
+        if (search_pool.is_full(est_dist) || vis->get(cand_nei)) {
           continue;
         }
         // try insert
         search_pool.insert(cand_nei, est_dist);
-        mem_prefetch_l2(space_->get_data_by_id(search_pool.next_id()), 10);
+        mem_prefetch_l2(sp->get_data_by_id(search_pool.next_id()), 10);
         co_await std::suspend_always{};
       }
 
@@ -666,8 +699,10 @@ struct GraphSearchJob {
     }
 
     if (!res_pool.is_full()) [[unlikely]] {
-      rabitq_supplement_result(res_pool, vis, query);
+      rabitq_supplement_result(res_pool, *vis, query);
     }
+
+    visited_pool_->release(vis);
 
     // return result
     res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids));
@@ -684,17 +719,20 @@ struct GraphSearchJob {
                           uint32_t topk,
                           uint32_t ef,
                           const MetadataFilter &filter,
-                          std::string *res)
+                          std::string *res,
+                          int reseed_time = 3)
     requires(DistanceSpaceType::has_scalar_data) {
     // clang-format on
     if (ef < topk) {
       throw std::invalid_argument("ef must be >= topk");
     }
 
-    auto query_computer = space_->get_query_computer(query);
+    auto *sp = space_.get();
+    auto *gr = graph_.get();
+    auto query_computer = sp->get_query_computer(query);
 
     // Use LinearPool with built-in DynamicBitset
-    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
+    LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
 
     // Try pre_filter: get list of matching IDs
     std::vector<IDType> filter_vec;
@@ -704,13 +742,18 @@ struct GraphSearchJob {
     }
 
     // Initialize search with entry point
-    graph_->initialize_search(pool, query_computer);
+    gr->initialize_search(pool, query_computer);
 
     size_t filter_vec_pos = 0;  // Track position in filter_vec
+    int reseed_round = 0;
+    auto should_reseed = [&]() {
+      return filter_vec_pos < filter_vec.size() && reseed_round < reseed_time;
+    };
 
-    while (pool.has_next() || filter_vec_pos < filter_vec.size()) {
+    while (pool.has_next() || should_reseed()) {
       // If search_pool is empty but we have more filtered IDs, insert a batch
       if (!pool.has_next()) {
+        reseed_round++;
         size_t batch_size =
             std::min<size_t>(topk, filter_vec.size() - filter_vec_pos);  // arbitrary batch size
         for (size_t i = 0; i < batch_size; ++i) {
@@ -728,8 +771,8 @@ struct GraphSearchJob {
 
       auto u = pool.pop();
 
-      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
-        auto v = graph_->at(u, i);
+      for (uint32_t i = 0; i < gr->max_nbrs_; ++i) {
+        auto v = gr->at(u, i);
 
         if (v == static_cast<IDType>(-1)) {
           break;
@@ -741,10 +784,10 @@ struct GraphSearchJob {
         pool.vis_.set(v);
 
         auto jump_prefetch = i + 3;
-        if (jump_prefetch < graph_->max_nbrs_) {
-          auto prefetch_id = graph_->at(u, jump_prefetch);
+        if (jump_prefetch < gr->max_nbrs_) {
+          auto prefetch_id = gr->at(u, jump_prefetch);
           if (prefetch_id != static_cast<IDType>(-1)) {
-            space_->prefetch_by_id(prefetch_id);
+            sp->prefetch_by_id(prefetch_id);
           }
         }
         auto cur_dist = query_computer(v);
@@ -767,19 +810,94 @@ struct GraphSearchJob {
     }
   }
 
+  // clang-format off
+  /**
+   * @brief Hybrid search with brute-force exact distance computation
+   *
+   * Pre-filters using scalar index, then computes exact distances from
+   * build_space_ raw data for all matching candidates to find topk.
+   *
+   * @param query Query vector
+   * @param ids Output array for topk result IDs
+   * @param topk Number of results to return
+   * @param filter Metadata filter for pre-filtering
+   * @param res Output array for item_id strings
+   */
+  void hybrid_search_brute_force_solo(const DataType *query,
+                                       IDType *ids,
+                                       uint32_t topk,
+                                       const MetadataFilter &filter,
+                                       std::string *res)
+    requires(DistanceSpaceType::has_scalar_data) {
+    // clang-format on
+    auto *sp = space_.get();
+
+    // Pre-filter to get matching IDs
+    DynamicBitset vis(sp->get_data_num());
+    std::vector<IDType> filter_vec;
+    bool pre_filtered = pre_filter(vis, filter, filter_vec);
+    if (!pre_filtered) {
+      throw std::runtime_error("please remember to construct scalar index.");
+    }
+
+    // Brute-force: compute exact distance for all filtered candidates
+    std::priority_queue<std::pair<DistanceType, IDType>,
+                        std::vector<std::pair<DistanceType, IDType>>,
+                        std::greater<>>
+        pq;
+
+    if constexpr (is_rabitq_space_v<DistanceSpaceType>) {
+      // For RaBitQ, use search_space directly
+      auto dist_func = sp->get_dist_func();
+      auto dim = sp->get_dim();
+      for (auto id : filter_vec) {
+        pq.push({dist_func(query, sp->get_data_by_id(id), dim), id});
+      }
+    } else {
+      // For quantized spaces (SQ4, SQ8), use build_space
+      auto dist_func = build_space_->get_dist_func();
+      auto dim = build_space_->get_dim();
+      for (auto id : filter_vec) {
+        pq.push({dist_func(query, build_space_->get_data_by_id(id), dim), id});
+      }
+    }
+
+    uint32_t result_count = std::min(topk, static_cast<uint32_t>(pq.size()));
+    for (uint32_t i = 0; i < result_count; i++) {
+      ids[i] = pq.top().second;
+      pq.pop();
+    }
+
+    // Get item_ids from scalar storage
+    auto *storage = sp->get_scalar_storage();
+    auto item_ids = storage->batch_get_item_id_only(std::vector<IDType>(ids, ids + result_count));
+    for (uint32_t i = 0; i < result_count; i++) {
+      res[i] = std::move(item_ids[i]);
+    }
+
+    if (result_count < topk) {
+      LOG_INFO("hybrid_search_brute_force: Only found {} results, requested {}",
+               result_count,
+               topk);
+    }
+  }
+
 #if defined(__linux__)
   auto hybrid_search(DataType *query,
                      IDType *ids,
                      uint32_t topk,
                      uint32_t ef,
                      const MetadataFilter &filter,
-                     std::string *res) -> coro::task<> {
+                     std::string *res,
+                     int reseed_time = 3) -> coro::task<> {
     if (ef < topk) {
       throw std::invalid_argument("ef must be >= topk");
     }
-    space_->prefetch_by_address(query);
+    auto *sp = space_.get();
+    auto *gr = graph_.get();
+    sp->prefetch_by_address(query);
 
-    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
+    LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
     // Try pre_filter: get list of matching IDs
     std::vector<IDType> filter_vec;
     bool pre_filtered = pre_filter(pool.vis_, filter, filter_vec);
@@ -787,15 +905,20 @@ struct GraphSearchJob {
       throw std::runtime_error("please remember to construct scalar index.");
     }
 
-    auto query_computer = space_->get_query_computer(query);
+    auto query_computer = sp->get_query_computer(query);
 
-    graph_->initialize_search(pool, query_computer);
+    gr->initialize_search(pool, query_computer);
 
     size_t filter_vec_pos = 0;  // Track position in filter_vec
+    int reseed_round = 0;
+    auto should_reseed = [&]() {
+      return filter_vec_pos < filter_vec.size() && reseed_round < reseed_time;
+    };
 
-    while (pool.has_next() || filter_vec_pos < filter_vec.size()) {
+    while (pool.has_next() || should_reseed()) {
       // If search_pool is empty but we have more filtered IDs, insert a batch
       if (!pool.has_next()) {
+        reseed_round++;
         size_t batch_size =
             std::min<size_t>(topk, filter_vec.size() - filter_vec_pos);  // arbitrary batch size
         for (size_t i = 0; i < batch_size; ++i) {
@@ -812,11 +935,11 @@ struct GraphSearchJob {
       }
 
       auto u = pool.pop();
-      mem_prefetch_l1(graph_->edges(u), graph_->max_nbrs_ * sizeof(IDType) / 64);
+      mem_prefetch_l1(gr->edges(u), gr->max_nbrs_ * sizeof(IDType) / 64);
       co_await std::suspend_always{};
 
-      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
-        auto v = graph_->at(u, i);
+      for (uint32_t i = 0; i < gr->max_nbrs_; ++i) {
+        auto v = gr->at(u, i);
 
         if (v == static_cast<IDType>(-1)) {
           break;
@@ -827,7 +950,7 @@ struct GraphSearchJob {
         }
         pool.vis_.set(v);
 
-        space_->prefetch_by_id(v);
+        sp->prefetch_by_id(v);
         co_await std::suspend_always{};
 
         auto cur_dist = query_computer(v);
@@ -850,6 +973,74 @@ struct GraphSearchJob {
     co_return;
   }
 
+  // clang-format off
+  /**
+   * @brief Hybrid search with brute-force exact distance computation (coroutine version)
+   *
+   * Pre-filters using scalar index, then computes exact distances from
+   * build_space_ raw data for all matching candidates to find topk.
+   */
+  auto hybrid_search_brute_force(const DataType *query,
+                                  IDType *ids,
+                                  uint32_t topk,
+                                  const MetadataFilter &filter,
+                                  std::string *res) -> coro::task<>
+    requires(DistanceSpaceType::has_scalar_data) {
+    // clang-format on
+    auto *sp = space_.get();
+
+    // Pre-filter to get matching IDs
+    DynamicBitset vis(sp->get_data_num());
+    std::vector<IDType> filter_vec;
+    bool pre_filtered = pre_filter(vis, filter, filter_vec);
+    if (!pre_filtered) {
+      throw std::runtime_error("please remember to construct scalar index.");
+    }
+
+    // Brute-force: compute exact distance for all filtered candidates
+    std::priority_queue<std::pair<DistanceType, IDType>,
+                        std::vector<std::pair<DistanceType, IDType>>,
+                        std::greater<>>
+        pq;
+
+    if constexpr (is_rabitq_space_v<DistanceSpaceType>) {
+      // For RaBitQ, use search_space directly
+      auto dist_func = sp->get_dist_func();
+      auto dim = sp->get_dim();
+      for (auto id : filter_vec) {
+        pq.push({dist_func(query, sp->get_data_by_id(id), dim), id});
+      }
+    } else {
+      // For quantized spaces (SQ4, SQ8), use build_space
+      auto dist_func = build_space_->get_dist_func();
+      auto dim = build_space_->get_dim();
+      for (auto id : filter_vec) {
+        pq.push({dist_func(query, build_space_->get_data_by_id(id), dim), id});
+      }
+    }
+
+    uint32_t result_count = std::min(topk, static_cast<uint32_t>(pq.size()));
+    for (uint32_t i = 0; i < result_count; i++) {
+      ids[i] = pq.top().second;
+      pq.pop();
+    }
+
+    // Get item_ids from scalar storage
+    auto *storage = sp->get_scalar_storage();
+    auto item_ids = storage->batch_get_item_id_only(std::vector<IDType>(ids, ids + result_count));
+    for (uint32_t i = 0; i < result_count; i++) {
+      res[i] = std::move(item_ids[i]);
+    }
+
+    if (result_count < topk) {
+      LOG_INFO("hybrid_search_brute_force: Only found {} results, requested {}",
+               result_count,
+               topk);
+    }
+
+    co_return;
+  }
+
   /**
    * @brief Search for nearest neighbors (coroutine version with async prefetching)
    *
@@ -866,22 +1057,24 @@ struct GraphSearchJob {
       throw std::invalid_argument("ef must be >= topk");
     }
 
+    auto *sp = space_.get();
+    auto *gr = graph_.get();
     std::vector<IDType> res_pool(ef);
 
-    auto query_computer = space_->get_query_computer(query);
-    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
-    graph_->initialize_search(pool, query_computer);
+    auto query_computer = sp->get_query_computer(query);
+    LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
+    gr->initialize_search(pool, query_computer);
 
-    space_->prefetch_by_address(query);
+    sp->prefetch_by_address(query);
 
     while (pool.has_next()) {
       auto u = pool.pop();
 
-      mem_prefetch_l1(graph_->edges(u), graph_->max_nbrs_ * sizeof(IDType) / 64);
+      mem_prefetch_l1(gr->edges(u), gr->max_nbrs_ * sizeof(IDType) / 64);
       co_await std::suspend_always{};
 
-      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
-        auto v = graph_->at(u, i);
+      for (uint32_t i = 0; i < gr->max_nbrs_; ++i) {
+        auto v = gr->at(u, i);
 
         if (v == static_cast<IDType>(-1)) {
           break;
@@ -892,7 +1085,7 @@ struct GraphSearchJob {
         }
         pool.vis_.set(v);
 
-        space_->prefetch_by_id(v);
+        sp->prefetch_by_id(v);
         co_await std::suspend_always{};
 
         auto cur_dist = query_computer(v);
@@ -933,23 +1126,25 @@ struct GraphSearchJob {
       throw std::invalid_argument("ef must be >= topk");
     }
 
+    auto *sp = space_.get();
+    auto *gr = graph_.get();
     std::vector<IDType> res_pool(ef);
     std::vector<DistanceType> dist_pool(ef);
 
-    auto query_computer = space_->get_query_computer(query);
-    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
-    graph_->initialize_search(pool, query_computer);
+    auto query_computer = sp->get_query_computer(query);
+    LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
+    gr->initialize_search(pool, query_computer);
 
-    space_->prefetch_by_address(query);
+    sp->prefetch_by_address(query);
 
     while (pool.has_next()) {
       auto u = pool.pop();
 
-      mem_prefetch_l1(graph_->edges(u), graph_->max_nbrs_ * sizeof(IDType) / 64);
+      mem_prefetch_l1(gr->edges(u), gr->max_nbrs_ * sizeof(IDType) / 64);
       co_await std::suspend_always{};
 
-      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
-        auto v = graph_->at(u, i);
+      for (uint32_t i = 0; i < gr->max_nbrs_; ++i) {
+        auto v = gr->at(u, i);
 
         if (v == static_cast<IDType>(-1)) {
           break;
@@ -960,7 +1155,7 @@ struct GraphSearchJob {
         }
         pool.vis_.set(v);
 
-        space_->prefetch_by_id(v);
+        sp->prefetch_by_id(v);
         co_await std::suspend_always{};
 
         auto cur_dist = query_computer(v);
@@ -1002,16 +1197,18 @@ struct GraphSearchJob {
       throw std::invalid_argument("ef must be >= topk");
     }
 
+    auto *sp = space_.get();
+    auto *gr = graph_.get();
     std::vector<IDType> res_pool(ef);
 
-    auto query_computer = space_->get_query_computer(query);
-    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
-    graph_->initialize_search(pool, query_computer);
+    auto query_computer = sp->get_query_computer(query);
+    LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
+    gr->initialize_search(pool, query_computer);
 
     while (pool.has_next()) {
       auto u = pool.pop();
-      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
-        auto v = graph_->at(u, i);
+      for (uint32_t i = 0; i < gr->max_nbrs_; ++i) {
+        auto v = gr->at(u, i);
 
         if (v == static_cast<IDType>(-1)) {
           break;
@@ -1023,10 +1220,10 @@ struct GraphSearchJob {
         pool.vis_.set(v);
 
         auto jump_prefetch = i + 3;
-        if (jump_prefetch < graph_->max_nbrs_) {
-          auto prefetch_id = graph_->at(u, jump_prefetch);
+        if (jump_prefetch < gr->max_nbrs_) {
+          auto prefetch_id = gr->at(u, jump_prefetch);
           if (prefetch_id != static_cast<IDType>(-1)) {
-            space_->prefetch_by_id(prefetch_id);
+            sp->prefetch_by_id(prefetch_id);
           }
         }
         auto cur_dist = query_computer(v);
@@ -1068,17 +1265,19 @@ struct GraphSearchJob {
       throw std::invalid_argument("ef must be >= topk");
     }
 
+    auto *sp = space_.get();
+    auto *gr = graph_.get();
     std::vector<IDType> res_pool(ef);
     std::vector<DistanceType> dist_pool(ef);
 
-    auto query_computer = space_->get_query_computer(query);
-    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
-    graph_->initialize_search(pool, query_computer);
+    auto query_computer = sp->get_query_computer(query);
+    LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
+    gr->initialize_search(pool, query_computer);
 
     while (pool.has_next()) {
       auto u = pool.pop();
-      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
-        auto v = graph_->at(u, i);
+      for (uint32_t i = 0; i < gr->max_nbrs_; ++i) {
+        auto v = gr->at(u, i);
 
         if (v == static_cast<IDType>(-1)) {
           break;
@@ -1090,10 +1289,10 @@ struct GraphSearchJob {
         pool.vis_.set(v);
 
         auto jump_prefetch = i + 3;
-        if (jump_prefetch < graph_->max_nbrs_) {
-          auto prefetch_id = graph_->at(u, jump_prefetch);
+        if (jump_prefetch < gr->max_nbrs_) {
+          auto prefetch_id = gr->at(u, jump_prefetch);
           if (prefetch_id != static_cast<IDType>(-1)) {
-            space_->prefetch_by_id(prefetch_id);
+            sp->prefetch_by_id(prefetch_id);
           }
         }
         auto cur_dist = query_computer(v);
@@ -1121,9 +1320,11 @@ struct GraphSearchJob {
       throw std::invalid_argument("ef must be >= topk");
     }
 
-    auto query_computer = space_->get_query_computer(query);
-    LinearPool<DistanceType, IDType> pool(space_->get_data_num(), ef);
-    graph_->initialize_search(pool, query_computer);
+    auto *sp = space_.get();
+    auto *gr = graph_.get();
+    auto query_computer = sp->get_query_computer(query);
+    LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
+    gr->initialize_search(pool, query_computer);
 
     while (pool.has_next()) {
       auto u = pool.pop();
@@ -1138,8 +1339,8 @@ struct GraphSearchJob {
         }
         continue;
       }
-      for (uint32_t i = 0; i < graph_->max_nbrs_; ++i) {
-        auto v = graph_->at(u, i);
+      for (uint32_t i = 0; i < gr->max_nbrs_; ++i) {
+        auto v = gr->at(u, i);
 
         if (v == static_cast<IDType>(-1)) {
           break;
@@ -1151,10 +1352,10 @@ struct GraphSearchJob {
         pool.vis_.set(v);
 
         auto jump_prefetch = i + 3;
-        if (jump_prefetch < graph_->max_nbrs_) {
-          auto prefetch_id = graph_->at(u, jump_prefetch);
+        if (jump_prefetch < gr->max_nbrs_) {
+          auto prefetch_id = gr->at(u, jump_prefetch);
           if (prefetch_id != static_cast<IDType>(-1)) {
-            space_->prefetch_by_id(prefetch_id);
+            sp->prefetch_by_id(prefetch_id);
           }
         }
         auto cur_dist = query_computer(v);

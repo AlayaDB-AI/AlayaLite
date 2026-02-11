@@ -110,6 +110,21 @@ inline auto deep1m(const std::filesystem::path &data_dir) -> DatasetConfig {
 }
 
 /**
+ * @brief Create config for T2I-1M dataset (1M vectors, 200 dim, IP metric).
+ * This dataset must be prepared locally; no automatic download is available.
+ */
+inline auto t2i1m(const std::filesystem::path &data_dir) -> DatasetConfig {
+  auto dir = data_dir / "t2i-1m";
+  return DatasetConfig{
+      .name_ = "t2i-1m",
+      .dir_ = dir,
+      .data_file_ = dir / "base.fvecs",
+      .query_file_ = dir / "query.fvecs",
+      .gt_file_ = dir / "groundtruth.ivecs",
+  };
+}
+
+/**
  * @brief Load dataset from config. Downloads if needed.
  *
  * Uses file locking to prevent concurrent downloads when multiple tests run in parallel.
@@ -135,6 +150,10 @@ inline auto load_dataset(const DatasetConfig &config) -> Dataset {
                      std::filesystem::exists(config.query_file_) &&
                      std::filesystem::exists(config.gt_file_);
   if (!files_exist) {
+    if (config.download_url_.empty()) {
+      throw std::runtime_error("Dataset '" + config.name_ + "' not found at " +
+                               config.dir_.string() + " and no download URL provided.");
+    }
     if (!std::filesystem::exists(config.dir_)) {
       std::filesystem::create_directories(config.dir_);
     }

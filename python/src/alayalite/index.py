@@ -109,6 +109,12 @@ class Index:
         self.__index = _PyIndexInterface(self.__params.to_cpp_params())
         self.__is_initialized = True
 
+        # Normalize vectors for cosine metric
+        if self.__params.metric in ("cos", "cosine"):
+            norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)
+            vectors = vectors / norms
+
         print(
             f"fitting index with the following parameters: \n"
             f"  vectors.shape: {vectors.shape}, num_threads: {num_threads}, ef_construction: {ef_construction}\n"
@@ -127,6 +133,11 @@ class Index:
             f"vectors dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, vectors dimension: {vectors.shape[0]}",
         )
+        # Normalize vector for cosine metric
+        if self.__params.metric in ("cos", "cosine"):
+            norm = np.linalg.norm(vectors)
+            if norm > 0:
+                vectors = vectors / norm
         ret = self.__index.insert(vectors, ef)
         is_full_uint32 = self.__params.id_type == np.uint32 and ret == 4294967295
         is_full_uint64 = self.__params.id_type == np.uint64 and ret == 18446744073709551615
@@ -153,6 +164,11 @@ class Index:
             f"query dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, query dimension: {query.shape[0]}",
         )
+        # Normalize query for cosine metric
+        if self.__params.metric in ("cos", "cosine"):
+            norm = np.linalg.norm(query)
+            if norm > 0:
+                query = query / norm
         return self.__index.search(query, topk, ef_search)
 
     def batch_search(
@@ -172,6 +188,11 @@ class Index:
             f"query dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, query dimension: {queries.shape[1]}",
         )
+        # Normalize queries for cosine metric
+        if self.__params.metric in ("cos", "cosine"):
+            norms = np.linalg.norm(queries, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)
+            queries = queries / norms
         return self.__index.batch_search(queries, topk, ef_search, num_threads)
 
     def batch_search_with_distance(
@@ -191,6 +212,11 @@ class Index:
             f"query dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, query dimension: {queries.shape[1]}",
         )
+        # Normalize queries for cosine metric
+        if self.__params.metric in ("cos", "cosine"):
+            norms = np.linalg.norm(queries, axis=1, keepdims=True)
+            norms = np.where(norms == 0, 1, norms)
+            queries = queries / norms
         return self.__index.batch_search_with_distance(queries, topk, ef_search, num_threads)
 
     def get_dim(self):

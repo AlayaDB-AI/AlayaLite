@@ -17,6 +17,7 @@
 #pragma once
 
 #include <sys/types.h>
+#include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +27,7 @@
 #include <vector>
 
 #include "index/neighbor.hpp"
+#include "simd/distance_ip.hpp"
 #include "simd/distance_l2.hpp"
 #include "space/quant/rabitq.hpp"
 #include "space/space_concepts.hpp"
@@ -47,8 +49,8 @@ template <typename DataType = float,
           typename ScalarDataType = EmptyScalarData>
 class RaBitQSpace {
  public:
-  static constexpr bool has_scalar_data =
-      !std::is_same_v<ScalarDataType, EmptyScalarData>;  // NOLINT
+  static constexpr bool has_scalar_data =  // NOLINT
+      !std::is_same_v<ScalarDataType, EmptyScalarData>;
 
  private:
   IDType capacity_{0};                 ///< The maximum number of data points (nodes)
@@ -121,6 +123,15 @@ class RaBitQSpace {
     // Save bool as uint8_t for cross-platform compatibility
     uint8_t enable_compression = config_.enable_compression_ ? 1 : 0;
     writer.write(reinterpret_cast<char *>(&enable_compression), sizeof(enable_compression));
+
+    // Save indexed_fields_ for secondary index support
+    size_t fields_count = config_.indexed_fields_.size();
+    writer.write(reinterpret_cast<const char *>(&fields_count), sizeof(fields_count));
+    for (const auto &field : config_.indexed_fields_) {
+      size_t field_len = field.size();
+      writer.write(reinterpret_cast<const char *>(&field_len), sizeof(field_len));
+      writer.write(field.data(), field_len);
+    }
   }
 
   void load_scalar_config(std::ifstream &reader) {
@@ -150,6 +161,20 @@ class RaBitQSpace {
     uint8_t enable_compression = 1;  // default to true
     reader.read(reinterpret_cast<char *>(&enable_compression), sizeof(enable_compression));
     config_.enable_compression_ = (enable_compression != 0);
+
+    // Load indexed_fields_ for secondary index support
+    size_t fields_count = 0;
+    reader.read(reinterpret_cast<char *>(&fields_count), sizeof(fields_count));
+    if (reader.good() && fields_count < 1000) {
+      config_.indexed_fields_.clear();
+      for (size_t i = 0; i < fields_count; i++) {
+        size_t field_len = 0;
+        reader.read(reinterpret_cast<char *>(&field_len), sizeof(field_len));
+        std::string field(field_len, '\0');
+        reader.read(field.data(), field_len);
+        config_.indexed_fields_.push_back(std::move(field));
+      }
+    }
   }
 
  public:
@@ -172,6 +197,9 @@ class RaBitQSpace {
               RocksDBConfig config = RocksDBConfig::default_config(),
               RotatorType type = RotatorType::FhtKacRotator)
       : capacity_(capacity), dim_(dim), metric_(metric), type_(type), config_(std::move(config)) {
+    if constexpr (!std::is_same_v<DataType, float> || !std::is_same_v<DistanceType, float>) {
+      throw std::runtime_error("RaBitQSpace only supports float as DataType and DistanceType");
+    }
     rotator_ = choose_rotator<DataType>(dim_, type_, alaya::math::round_up_pow2<size_t>(dim_, 64));
     quantizer_ = std::make_unique<RaBitQQuantizer<DataType>>(dim_, rotator_->size());
     initialize_offsets();
@@ -202,11 +230,11 @@ class RaBitQSpace {
   void set_metric_function() {
     switch (metric_) {
       case MetricType::L2:
-        distance_cal_func_ = simd::l2_sqr<DataType, DistanceType>;
+        distance_cal_func_ = simd::get_l2_sqr_func();
         break;
       case MetricType::COS:
       case MetricType::IP:
-        throw std::runtime_error("inner product or cosine is not supported yet!");
+        distance_cal_func_ = simd::get_ip_sqr_func();
         break;
       default:
         throw std::runtime_error("invalid metric type.");
@@ -236,7 +264,8 @@ class RaBitQSpace {
                                kDegreeBound,
                                get_nei_qc_ptr(c),
                                get_f_add_ptr(c),
-                               get_f_rescale_ptr(c));
+                               get_f_rescale_ptr(c),
+                               metric_);
   }
 
   void fit(const DataType *data, IDType item_cnt, const ScalarDataType *scalar_data = nullptr) {
@@ -433,7 +462,17 @@ class RaBitQSpace {
 
   struct QueryComputer {
    private:
-    const RaBitQSpace &distance_space_;
+    // Cached hot-path data (avoid distance_space_ indirection chain)
+    const char *storage_ptr_;                           ///< Raw storage data pointer
+    size_t data_chunk_size_;                            ///< Node chunk size in bytes
+    size_t qc_offset_;                                  ///< Quantization codes offset
+    size_t f_add_offset_;                               ///< f_add offset
+    size_t f_rescale_offset_;                           ///< f_rescale offset
+    size_t nei_id_offset_;                              ///< Neighbor ID offset
+    DistFuncRaBitQ<DataType, DistanceType> dist_func_;  ///< Distance function
+    uint32_t dim_;                                      ///< Original dimension
+    size_t padded_dim_;                                 ///< Padded dimension
+
     const DataType *query_;
     IDType c_;
 
@@ -442,18 +481,20 @@ class RaBitQSpace {
     DataType g_add_ = 0;
     DataType g_k1xsumq_ = 0;
 
-    std::vector<uint16_t> accu_res_;
-    std::vector<DataType> est_dists_;
+    alignas(64) std::array<uint16_t, fastscan::kBatchSize> accu_res_{};
+    alignas(64) std::array<DataType, kDegreeBound> est_dists_{};
 
     void batch_est_dist() {
-      size_t padded_dim = distance_space_.get_padded_dim();
-      const uint8_t *ALAYA_RESTRICT qc_ptr = distance_space_.get_nei_qc_ptr(c_);
-      const DataType *ALAYA_RESTRICT f_add_ptr = distance_space_.get_f_add_ptr(c_);
-      const DataType *ALAYA_RESTRICT f_rescale_ptr = distance_space_.get_f_rescale_ptr(c_);
+      const char *base = storage_ptr_ + data_chunk_size_ * c_;
+      const uint8_t *ALAYA_RESTRICT qc_ptr = reinterpret_cast<const uint8_t *>(base + qc_offset_);
+      const DataType *ALAYA_RESTRICT f_add_ptr =
+          reinterpret_cast<const DataType *>(base + f_add_offset_);
+      const DataType *ALAYA_RESTRICT f_rescale_ptr =
+          reinterpret_cast<const DataType *>(base + f_rescale_offset_);
       DataType *ALAYA_RESTRICT est_ptr = est_dists_.data();
 
       // look up, get sum(nth_segment)
-      fastscan::accumulate(qc_ptr, lookup_table_.lut(), accu_res_.data(), padded_dim);
+      fastscan::accumulate(qc_ptr, lookup_table_.lut(), accu_res_.data(), padded_dim_);
 
       ConstRowMajorArrayMap<uint16_t> n_th_segment_arr(accu_res_.data(), 1, fastscan::kBatchSize);
       ConstRowMajorArrayMap<DataType> f_add_arr(f_add_ptr, 1, fastscan::kBatchSize);
@@ -476,23 +517,27 @@ class RaBitQSpace {
     QueryComputer(const QueryComputer &) = delete;
     auto operator=(const QueryComputer &) -> QueryComputer & = delete;
 
-    /// todo: align?
     QueryComputer(const RaBitQSpace &distance_space, const DataType *query)
-        : distance_space_(distance_space),
-          query_(query),
-          accu_res_(fastscan::kBatchSize),
-          est_dists_(RaBitQSpace<>::kDegreeBound) {
+        : storage_ptr_(reinterpret_cast<const char *>(distance_space.storage_.data())),
+          data_chunk_size_(distance_space.data_chunk_size_),
+          qc_offset_(distance_space.quant_codes_offset_),
+          f_add_offset_(distance_space.f_add_offset_),
+          f_rescale_offset_(distance_space.f_rescale_offset_),
+          nei_id_offset_(distance_space.nei_id_offset_),
+          dist_func_(distance_space.distance_cal_func_),
+          dim_(distance_space.dim_),
+          padded_dim_(distance_space.get_padded_dim()),
+          query_(query) {
       // rotate query vector
-      size_t padded_dim = distance_space_.get_padded_dim();
-      std::vector<DataType> rotated_query(padded_dim);
-      distance_space_.rotate_vec(query, rotated_query.data());
+      std::vector<DataType> rotated_query(padded_dim_);
+      distance_space.rotate_vec(query, rotated_query.data());
 
-      lookup_table_ = std::move(Lut<DataType>(rotated_query.data(), padded_dim));
+      lookup_table_ = std::move(Lut<DataType>(rotated_query.data(), padded_dim_));
 
       constexpr float c_1 = -((1 << 1) - 1) / 2.F;  // -0.5F NOLINT
 
       auto sumq = std::accumulate(rotated_query.begin(),
-                                  rotated_query.begin() + padded_dim,
+                                  rotated_query.begin() + padded_dim_,
                                   static_cast<DataType>(0));
 
       g_k1xsumq_ = sumq * c_1;
@@ -501,13 +546,21 @@ class RaBitQSpace {
     void load_centroid(IDType c) {
       c_ = c;
 
-      auto centroid_vec = distance_space_.get_data_by_id(c_);  // len: dim, not padded_dim
-      g_add_ = distance_space_.get_dist_func()(query_, centroid_vec, distance_space_.get_dim());
+      const char *base = storage_ptr_ + data_chunk_size_ * c_;
+      const auto *centroid_vec = reinterpret_cast<const DataType *>(base);
+      g_add_ = dist_func_(query_, centroid_vec, dim_);
 
       batch_est_dist();
     }
 
+    [[nodiscard]] auto get_edges() const -> const IDType * {
+      const char *base = storage_ptr_ + data_chunk_size_ * c_;
+      return reinterpret_cast<const IDType *>(base + nei_id_offset_);
+    }
+
     auto get_exact_qr_c_dist() const -> DataType { return g_add_; }
+
+    [[nodiscard]] auto est_data() const -> const DataType * { return est_dists_.data(); }
 
     /**
      * @brief Pass neighbors' index in centroid's edges instead of neighbors' id to avoid using

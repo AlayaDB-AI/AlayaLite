@@ -514,6 +514,15 @@ class SQ8Space {
     // Save bool as uint8_t for cross-platform compatibility
     uint8_t enable_compression = config_.enable_compression_ ? 1 : 0;
     writer.write(reinterpret_cast<char *>(&enable_compression), sizeof(enable_compression));
+
+    // Save indexed_fields_ for secondary index support
+    size_t fields_count = config_.indexed_fields_.size();
+    writer.write(reinterpret_cast<const char *>(&fields_count), sizeof(fields_count));
+    for (const auto &field : config_.indexed_fields_) {
+      size_t field_len = field.size();
+      writer.write(reinterpret_cast<const char *>(&field_len), sizeof(field_len));
+      writer.write(field.data(), field_len);
+    }
   }
 
   void load_scalar_config(std::ifstream &reader) {
@@ -543,6 +552,20 @@ class SQ8Space {
     uint8_t enable_compression = 1;  // default to true
     reader.read(reinterpret_cast<char *>(&enable_compression), sizeof(enable_compression));
     config_.enable_compression_ = (enable_compression != 0);
+
+    // Load indexed_fields_ for secondary index support
+    size_t fields_count = 0;
+    reader.read(reinterpret_cast<char *>(&fields_count), sizeof(fields_count));
+    if (reader.good() && fields_count < 1000) {
+      config_.indexed_fields_.clear();
+      for (size_t i = 0; i < fields_count; i++) {
+        size_t field_len = 0;
+        reader.read(reinterpret_cast<char *>(&field_len), sizeof(field_len));
+        std::string field(field_len, '\0');
+        reader.read(field.data(), field_len);
+        config_.indexed_fields_.push_back(std::move(field));
+      }
+    }
   }
 };
 }  // namespace alaya

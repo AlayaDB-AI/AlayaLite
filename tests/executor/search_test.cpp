@@ -288,7 +288,7 @@ TEST_F(HybridSearchTest, HybridSearchSoloWithEmptyFilter) {
   // Test with empty filter (should match all)
   MetadataFilter empty_filter = MetadataFilter::empty();
   std::vector<uint32_t> ids(topk);
-  std::vector<ScalarData> results(topk);
+  std::vector<std::string> results(topk);
   auto query = ds_.queries_.data();
 
   search_job->hybrid_search_solo(query, ids.data(), topk, ef, empty_filter, results.data());
@@ -297,9 +297,9 @@ TEST_F(HybridSearchTest, HybridSearchSoloWithEmptyFilter) {
   std::set<uint32_t> unique_ids(ids.begin(), ids.end());
   EXPECT_EQ(unique_ids.size(), topk);
 
-  // Verify ScalarData was returned
+  // Verify item_id was returned
   for (uint32_t i = 0; i < topk; i++) {
-    EXPECT_FALSE(results[i].item_id.empty());
+    EXPECT_FALSE(results[i].empty());
   }
 }
 
@@ -315,6 +315,7 @@ TEST_F(HybridSearchTest, HybridSearchSoloWithCategoryFilter) {
 
   RocksDBConfig config;
   config.db_path_ = db_path_;
+  config.indexed_fields_ = {"category"};
   auto search_space =
       std::make_shared<SQ8SpaceWithScalar>(ds_.data_num_, ds_.dim_, MetricType::L2, config);
   auto metadata = make_test_metadata(ds_.data_num_);
@@ -330,17 +331,14 @@ TEST_F(HybridSearchTest, HybridSearchSoloWithCategoryFilter) {
   filter.add_eq("category", static_cast<int64_t>(0));
 
   std::vector<uint32_t> ids(topk);
-  std::vector<ScalarData> results(topk);
+  std::vector<std::string> results(topk);
   auto query = ds_.queries_.data();
 
   search_job->hybrid_search_solo(query, ids.data(), topk, ef, filter, results.data());
 
-  // Verify all results match the filter
+  // Verify all results have valid item IDs
   for (uint32_t i = 0; i < topk; i++) {
-    if (ids[i] != static_cast<uint32_t>(-1) && !results[i].metadata.empty()) {
-      auto category = std::get<int64_t>(results[i].metadata.at("category"));
-      EXPECT_EQ(category, 0);
-    }
+    EXPECT_FALSE(results[i].empty());
   }
 }
 
@@ -365,7 +363,7 @@ TEST_F(HybridSearchTest, HybridSearchSoloThrowsWhenEfLessThanTopk) {
 
   MetadataFilter filter = MetadataFilter::empty();
   std::vector<uint32_t> ids(10);
-  std::vector<ScalarData> results(10);
+  std::vector<std::string> results(10);
   auto query = ds_.queries_.data();
 
   // ef=5, topk=10 should throw
@@ -434,7 +432,7 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithEmptyFilter) {
 
   MetadataFilter empty_filter = MetadataFilter::empty();
   std::vector<uint32_t> ids(topk);
-  std::vector<ScalarData> results(topk);
+  std::vector<std::string> results(topk);
   auto query = ds_.queries_.data();
 
   search_job->rabitq_hybrid_search_solo(query, topk, ids.data(), ef, empty_filter, results.data());
@@ -455,6 +453,7 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithCategoryFilter) {
 
   RocksDBConfig config;
   config.db_path_ = db_path_;
+  config.indexed_fields_ = {"category"};
 
   auto space = std::make_shared<RaBitQSpaceWithScalar>(ds_.data_num_,
                                                        ds_.dim_,
@@ -473,17 +472,14 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithCategoryFilter) {
   filter.add_eq("category", static_cast<int64_t>(2));
 
   std::vector<uint32_t> ids(topk);
-  std::vector<ScalarData> results(topk);
+  std::vector<std::string> results(topk);
   auto query = ds_.queries_.data();
 
   search_job->rabitq_hybrid_search_solo(query, topk, ids.data(), ef, filter, results.data());
 
-  // Verify results match filter
+  // Verify results have valid item IDs
   for (uint32_t i = 0; i < topk; i++) {
-    if (ids[i] != static_cast<uint32_t>(-1) && !results[i].metadata.empty()) {
-      auto category = std::get<int64_t>(results[i].metadata.at("category"));
-      EXPECT_EQ(category, 2);
-    }
+    EXPECT_FALSE(results[i].empty());
   }
 }
 
@@ -505,7 +501,7 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloThrowsWhenEfLessThanK) {
 
   MetadataFilter filter = MetadataFilter::empty();
   std::vector<uint32_t> ids(10);
-  std::vector<ScalarData> results(10);
+  std::vector<std::string> results(10);
   auto query = ds_.queries_.data();
 
   // k=10, ef=5 should throw
