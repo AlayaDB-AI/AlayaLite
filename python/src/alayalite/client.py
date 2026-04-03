@@ -18,6 +18,7 @@ managing indices and collections.
 """
 
 import json
+import logging
 import os
 import shutil
 
@@ -26,6 +27,8 @@ from .index import Index
 from .schema import IndexParams, is_collection_url, is_index_url
 
 __all__ = ["Client"]
+
+logger = logging.getLogger(__name__)
 
 
 class Client:
@@ -50,19 +53,19 @@ class Client:
             if not os.path.exists(self.__url):
                 os.makedirs(self.__url)
 
-            print(f"Load AlayaLite data from {self.__url}")
+            logger.info("Loading AlayaLite data from %s", self.__url)
             all_names = [f for f in os.listdir(self.__url) if os.path.isdir(os.path.join(self.__url, f))]
-            print(f"{all_names=}")
+            logger.debug("Discovered entries under client url: %s", all_names)
             for name in all_names:
                 full_url = os.path.join(self.__url, name)
                 if is_collection_url(full_url):
                     self.__collection_map[name] = Collection.load(self.__url, name)
-                    print(f"Collection {name} is loaded")
+                    logger.info("Loaded collection %s", name)
                 elif is_index_url(full_url):
                     self.__index_map[name] = Index.load(self.__url, name)
-                    print(f"Index {name} is loaded")
+                    logger.info("Loaded index %s", name)
                 else:
-                    print(f"Unknown url: {full_url} is found")
+                    logger.warning("Ignoring unknown storage entry at %s", full_url)
 
     def list_collections(self):
         """
@@ -107,7 +110,7 @@ class Client:
         if name in self.__index_map:
             return self.__index_map[name]
         else:
-            print(f"Index {name} does not exist")
+            logger.info("Index %s does not exist", name)
             return None
 
     def create_collection(self, name: str = "default", **kwargs) -> Collection:
@@ -128,6 +131,8 @@ class Client:
             raise RuntimeError(f"A collection or index with name '{name}' already exists")
 
         index_params = IndexParams.from_kwargs(**kwargs)
+        if not index_params.rocksdb_path and self.__url is not None:
+            index_params.rocksdb_path = os.path.join(self.__url, name, "rocksdb")
         collection = Collection(name, index_params)
         self.__collection_map[name] = collection
         return collection
@@ -206,7 +211,7 @@ class Client:
             collection_url = os.path.join(self.__url, collection_name)
             if os.path.exists(collection_url):
                 shutil.rmtree(collection_url)
-                print(f"Collection '{collection_name}' is deleted from disk")
+                logger.info("Deleted collection '%s' from disk", collection_name)
 
     def delete_index(self, index_name: str, delete_on_disk: bool = False):
         """
@@ -228,8 +233,7 @@ class Client:
             index_url = os.path.join(self.__url, index_name)
             if os.path.exists(index_url):
                 shutil.rmtree(index_url)
-                # TODO: change all print to log
-                print(f"Index '{index_name}' is deleted from disk")
+                logger.info("Deleted index '%s' from disk", index_name)
 
     def reset(self, delete_on_disk: bool = False):
         """
@@ -268,7 +272,7 @@ class Client:
         index_schema_url = os.path.join(index_url, "schema.json")
         with open(index_schema_url, "w", encoding="utf-8") as f:
             json.dump(schema_map, f, indent=4)
-        print(f"Index '{index_name}' is saved")
+        logger.info("Saved index '%s'", index_name)
 
     def save_collection(self, collection_name: str):
         """
@@ -291,4 +295,4 @@ class Client:
 
         with open(collection_schema_url, "w", encoding="utf-8") as f:
             json.dump(schema_map, f, indent=4)
-        print(f"Collection '{collection_name}' is saved")
+        logger.info("Saved collection '%s'", collection_name)
