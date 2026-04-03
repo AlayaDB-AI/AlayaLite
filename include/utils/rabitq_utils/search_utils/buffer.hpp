@@ -16,10 +16,14 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <type_traits>
 #include <vector>
 
-#include "index/neighbor.hpp"
 #include "utils/memory.hpp"
 
 namespace alaya {
@@ -31,7 +35,14 @@ namespace alaya {
 template <typename T = float>
 class SearchBuffer {
   using PID = uint32_t;
-  using ANNCand = Neighbor<PID, T>;
+
+  struct ANNCand {
+    PID id_;
+    T distance_;
+
+    ANNCand() = default;
+    ANNCand(PID id, T distance) : id_(id), distance_(distance) {}
+  };
 
  private:
   std::vector<ANNCand, AlignedAlloc<ANNCand>> data_;
@@ -50,21 +61,24 @@ class SearchBuffer {
   }
 
   // set top bit to 1 as checked
-  static void set_checked(PID &data_id) { data_id |= (1 << 31); }
+  static void set_checked(PID &data_id) { data_id |= (1U << 31); }
 
   [[nodiscard]] static auto is_checked(PID data_id) -> bool {
     return static_cast<bool>(data_id >> 31);
   }
 
  public:
+  static_assert(std::is_trivially_copyable_v<ANNCand>,
+                "SearchBuffer candidates must remain trivially copyable for memmove.");
+
   SearchBuffer() = default;
 
   explicit SearchBuffer(size_t capacity) : data_(capacity + 1), capacity_(capacity) {}
 
   // insert a data point into buffer
-  void insert(PID data_id, T dist) {
+  auto insert(PID data_id, T dist) -> bool {
     if (is_full(dist)) {
-      return;
+      return false;
     }
 
     size_t lo = binary_search(dist);
@@ -72,6 +86,7 @@ class SearchBuffer {
     data_[lo] = ANNCand(data_id, dist);
     size_ += static_cast<size_t>(size_ < capacity_);
     cur_ = lo < cur_ ? lo : cur_;
+    return true;
   }
 
   // get unchecked candidate with minimum distance
@@ -100,6 +115,12 @@ class SearchBuffer {
     data_ = std::vector<ANNCand, AlignedAlloc<ANNCand>>(capacity_ + 1);
   }
 
+  void copy_results_to(PID *knn, size_t knn_size) const {
+    for (size_t i = 0; i < std::min(size_, knn_size); ++i) {
+      knn[i] = data_[i].id_;
+    }
+  }
+
   void copy_results_to(PID *knn) const {
     for (size_t i = 0; i < size_; ++i) {
       knn[i] = data_[i].id_;
@@ -117,6 +138,6 @@ class SearchBuffer {
 
   auto data() -> const std::vector<ANNCand, AlignedAlloc<ANNCand>> & { return data_; }
 
-  auto size() -> size_t { return size_; }
+  auto size() const -> size_t { return size_; }
 };
 }  // namespace alaya

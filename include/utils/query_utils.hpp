@@ -248,7 +248,7 @@ class HierarchicalBitset {
   }
 };
 
-// todo test this class.
+/// todo test this class.
 template <typename DistanceType, typename IDType>
 struct LinearPool {
   LinearPool(IDType n, int capacity) : nb_(n), capacity_(capacity), data_(capacity_ + 1), vis_(n) {}
@@ -297,15 +297,19 @@ struct LinearPool {
   }
 
   auto top() -> IDType { return data_[cur_].id_; }
-  auto pop() -> IDType {
+  auto pop(DistanceType &dist) -> IDType {
     set_checked(data_[cur_].id_);
     int pre = cur_;
     while (cur_ < size_ && is_checked(data_[cur_].id_)) {
       cur_++;
     }
-
-    // LOG_INFO("pop idx is {} , {}",data_[pre].id_, get_id(data_[pre].id_));
+    dist = data_[pre].distance_;
     return get_id(data_[pre].id_);
+  }
+
+  auto pop() -> IDType {
+    DistanceType dummy;
+    return pop(dummy);
   }
 
   auto has_next() const -> bool { return cur_ < size_; }
