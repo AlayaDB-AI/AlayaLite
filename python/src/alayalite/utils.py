@@ -18,10 +18,19 @@ including loading vector files, calculating recall, and generating ground truth 
 """
 
 import hashlib
+from typing import Optional
 
 import numpy as np
 
-__all__ = ["load_fvecs", "load_ivecs", "calc_recall", "calc_gt", "md5"]
+__all__ = [
+    "load_fvecs",
+    "load_ivecs",
+    "calc_recall",
+    "calc_gt",
+    "md5",
+    "normalize_vectors_for_cosine_metric",
+    "normalize_vectors_for_metric",
+]
 
 
 def load_fvecs(file_path):
@@ -84,18 +93,6 @@ def calc_recall(result, gt_data):
     return 1.0 * cnt / (row * col)
 
 
-# def calc_recall(result, gt_data):
-#     cnt = 0
-#     for i in range(result.shape[0]):
-#         for j in range(result.shape[1]):
-#             for k in range(result.shape[1]):
-#                 if result[i][j] == gt_data[i][k]:
-#                     cnt += 1
-#                     break
-
-#     return 1.0 * cnt / (len(result) * result.shape[1])
-
-
 def calc_gt(data, query, topk):
     gt = np.zeros((query.shape[0], topk), dtype=np.int32)
     for i in range(query.shape[0]):
@@ -113,3 +110,24 @@ def md5(arr, chunk_size=1024 * 1024):
         md5_hash.update(chunk)
 
     return md5_hash.hexdigest()
+
+
+def normalize_vectors_for_cosine_metric(vectors: np.ndarray, metric: Optional[str]) -> np.ndarray:
+    """Normalize vectors only when cosine similarity is configured."""
+    if metric not in ("cos", "cosine"):
+        return vectors
+
+    if vectors.ndim == 1:
+        norms = np.linalg.norm(vectors)
+        if norms == 0:
+            return vectors
+        return vectors / norms
+
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1, norms)
+    return vectors / norms
+
+
+def normalize_vectors_for_metric(vectors: np.ndarray, metric: Optional[str]) -> np.ndarray:
+    """Backward-compatible alias for cosine-only normalization."""
+    return normalize_vectors_for_cosine_metric(vectors, metric)

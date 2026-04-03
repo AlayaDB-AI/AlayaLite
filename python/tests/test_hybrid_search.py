@@ -28,6 +28,7 @@ from alayalite.schema import IndexParams
 # Skip RaBitQ tests on non-x86 platforms (AVX512 required)
 SKIP_RABITQ = platform.machine() not in ("x86_64", "AMD64")
 SKIP_REASON = "RaBitQ requires AVX512 instructions (x86_64 only)"
+LONG_TEST_REASON = "Long-running 1M hybrid-search benchmark test; skipped in routine test runs"
 
 N_TOTAL = 1000000
 N_TARGET = 10000
@@ -45,6 +46,7 @@ def _calc_cosine_gt(vectors, target_indices, query, topk):
     return set(target_ids[top_idx].tolist())
 
 
+@unittest.skip(LONG_TEST_REASON)
 class TestHybridSearch(unittest.TestCase):
     """Test suite for hybrid_query with metadata filtering."""
 
@@ -82,7 +84,7 @@ class TestHybridSearch(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
 
-    def _run_hybrid_search_test(self, collection_name, quant_type, ef_search=300, reseed_time=3):
+    def _run_hybrid_search_test(self, collection_name, quant_type, ef_search=300):
         """Build index, run hybrid search, return recall and QPS."""
         params = IndexParams()
         params.quantization_type = quant_type
@@ -97,7 +99,10 @@ class TestHybridSearch(unittest.TestCase):
 
         start = time.perf_counter()
         result = collection.hybrid_query(
-            query, limit=TOP_K, metadata_filter={"label": "target_label"}, ef_search=ef_search, reseed_time=reseed_time
+            query,
+            limit=TOP_K,
+            metadata_filter={"label": "target_label"},
+            ef_search=ef_search,
         )
         elapsed = time.perf_counter() - start
 
@@ -115,7 +120,7 @@ class TestHybridSearch(unittest.TestCase):
     @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_hybrid_search_with_cosine(self):
         """Test hybrid query with RaBitQ quantization using cosine metric."""
-        recall, qps = self._run_hybrid_search_test("test_rabitq_cos", "rabitq", ef_search=100, reseed_time=1)
+        recall, qps = self._run_hybrid_search_test("test_rabitq_cos", "rabitq", ef_search=100)
         print(f"\nRaBitQ + cosine: recall={recall:.4f}, QPS={qps:.2f}")
         self.assertGreaterEqual(recall, 0.90, f"RaBitQ cosine recall too low: {recall:.4f}")
 
@@ -123,9 +128,7 @@ class TestHybridSearch(unittest.TestCase):
         """Test hybrid search recall with SQ4/SQ8 quantization using cosine metric."""
         for quant_type in ["sq4", "sq8"]:
             with self.subTest(quant=quant_type):
-                recall, qps = self._run_hybrid_search_test(
-                    f"test_{quant_type}_cos", quant_type, ef_search=150, reseed_time=2
-                )
+                recall, qps = self._run_hybrid_search_test(f"test_{quant_type}_cos", quant_type, ef_search=150)
                 print(f"\n{quant_type.upper()} + cosine: recall={recall:.4f}, QPS={qps:.2f}")
                 self.assertGreaterEqual(recall, 0.90, f"{quant_type} cosine recall too low: {recall:.4f}")
 
@@ -137,6 +140,7 @@ DIM_LARGE = 256
 TOP_K_LARGE = 100
 
 
+@unittest.skip(LONG_TEST_REASON)
 class TestRaBitQBruteForceLarge(unittest.TestCase):
     """Test suite for RaBitQ hybrid_query with brute-force on 1M dataset (0.1% target)."""
 
@@ -174,7 +178,7 @@ class TestRaBitQBruteForceLarge(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
 
-    def _run_rabitq_bf_test(self, collection_name, use_bf=False, ef_search=300, reseed_time=3):
+    def _run_rabitq_bf_test(self, collection_name, use_bf=False, ef_search=300):
         """Build RaBitQ index, run hybrid search with/without BF, return recall and QPS."""
         params = IndexParams()
         params.quantization_type = "rabitq"
@@ -188,16 +192,27 @@ class TestRaBitQBruteForceLarge(unittest.TestCase):
 
         query = [self.query_vec.tolist()]
 
-        print(f"  Running hybrid_query (bf={use_bf}, ef_search={ef_search}, reseed_time={reseed_time})...")
+        print(f"  Running hybrid query (bf={use_bf}, ef_search={ef_search})...")
         start = time.perf_counter()
-        result = collection.hybrid_query(
-            query,
-            limit=TOP_K_LARGE,
-            metadata_filter={"label": "target_label"},
-            ef_search=ef_search,
-            bf=use_bf,
-            reseed_time=reseed_time,
-        )
+        if use_bf:
+            cpp_index = collection.get_cpp_index()
+            filter_obj = collection.build_filter({"label": "target_label"})
+            _, item_ids = cpp_index.hybrid_search(
+                np.asarray(query, dtype=np.float32)[0],
+                TOP_K_LARGE,
+                ef_search,
+                filter_obj,
+                True,
+                "",
+            )
+            result = {"id": [list(item_ids)]}
+        else:
+            result = collection.hybrid_query(
+                query,
+                limit=TOP_K_LARGE,
+                metadata_filter={"label": "target_label"},
+                ef_search=ef_search,
+            )
         elapsed = time.perf_counter() - start
 
         self.assertEqual(len(result["id"]), 1)
@@ -227,18 +242,14 @@ class TestRaBitQBruteForceLarge(unittest.TestCase):
 
         query = [self.query_vec.tolist()]
         ef_search = 100
-        reseed_time = 0
-
         # Search 1: Graph-based
-        print(f"  Running hybrid_query (bf=False, ef_search={ef_search}, reseed_time={reseed_time})...")
+        print(f"  Running hybrid_query (bf=False, ef_search={ef_search})...")
         start = time.perf_counter()
         result = collection.hybrid_query(
             query,
             limit=TOP_K_LARGE,
             metadata_filter={"label": "target_label"},
             ef_search=ef_search,
-            bf=False,
-            reseed_time=reseed_time,
         )
         time_graph = time.perf_counter() - start
 
@@ -251,14 +262,19 @@ class TestRaBitQBruteForceLarge(unittest.TestCase):
         qps_graph = 1.0 / time_graph if time_graph > 0 else float("inf")
 
         # Search 2: Brute-force
-        print(f"  Running hybrid_query (bf=True, ef_search={ef_search}, reseed_time={reseed_time})...")
+        print(f"  Running hybrid_query (bf=True, ef_search={ef_search})...")
         start = time.perf_counter()
-        result = collection.hybrid_query(
-            query,
-            limit=TOP_K_LARGE,
-            metadata_filter={"label": "target_label"},
-            bf=True,
+        cpp_index = collection.get_cpp_index()
+        filter_obj = collection.build_filter({"label": "target_label"})
+        _, item_ids = cpp_index.hybrid_search(
+            np.asarray(query, dtype=np.float32)[0],
+            TOP_K_LARGE,
+            ef_search,
+            filter_obj,
+            True,
+            "",
         )
+        result = {"id": [list(item_ids)]}
         time_bf = time.perf_counter() - start
 
         self.assertEqual(len(result["id"]), 1)

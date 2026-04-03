@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Literal, Type, Union
+from typing import Literal, Optional, Type, Union
 
 import numpy as np
 from numpy import typing as npt
@@ -28,6 +28,7 @@ from numpy import typing as npt
 from ._alayalitepy import IndexType as _IndexType
 from ._alayalitepy import MetricType as _MetricType
 from ._alayalitepy import QuantizationType as _QuantizationType
+from .utils import normalize_vectors_for_cosine_metric
 
 # TypeAlias is only available in Python 3.10+
 if sys.version_info >= (3, 10):
@@ -74,7 +75,49 @@ __all__ = [
     "valid_capacity_type",
     "valid_quantization_type",
     "valid_max_nbrs",
+    "valid_thread_count",
 ]
+
+
+def _validate_query_vectors(
+    vectors,
+    expected_dim: int,
+    *,
+    allow_1d: bool = True,
+    name: str = "vectors",
+    metric: Optional[str] = None,
+) -> tuple[np.ndarray, bool]:
+    """Validate query vectors and return a 2D float32 array plus single-query flag."""
+    vectors_arr = np.asarray(vectors, dtype=np.float32)
+    is_single_query = vectors_arr.ndim == 1
+    if is_single_query:
+        _assert(allow_1d, f"{name} must be a 2D array")
+        vectors_arr = vectors_arr.reshape(1, -1)
+
+    expected_ndim_message = f"{name} must be a 2D array"
+    if allow_1d:
+        expected_ndim_message = f"{name} must be a 2D array-like object"
+
+    _assert(vectors_arr.ndim == 2, expected_ndim_message)
+    _assert(vectors_arr.shape[0] > 0, f"{name} must not be empty")
+    _assert(vectors_arr.shape[1] == expected_dim, "Vector dimension must match the index dimension.")
+    return normalize_vectors_for_cosine_metric(vectors_arr, metric), is_single_query
+
+
+def normalize_filter_execution_hint(filter_execution_hint: Optional[str]) -> str:
+    """Validate and normalize hybrid-search filter execution hints."""
+    if filter_execution_hint is None:
+        return ""
+
+    hint = str(filter_execution_hint).strip().lower()
+    if hint in ("", "auto"):
+        return ""
+
+    _assert(
+        hint in ("disable", "bitset_prefilter", "iterative_filter"),
+        "filter_execution_hint must be one of: None, 'auto', 'disable', 'bitset_prefilter', 'iterative_filter'",
+    )
+    return hint
 
 
 def valid_dtype(dtype) -> np.dtype:
@@ -165,6 +208,13 @@ def valid_max_nbrs(max_nbrs: np.uint32) -> np.uint32:
         "Max neighbors must be greater than 0 and less than 1000",
     )
     return max_nbrs
+
+
+def valid_thread_count(thread_count: Optional[int]) -> Optional[int]:
+    if thread_count is None:
+        return None
+    _assert(thread_count > 0, "Thread count must be greater than 0")
+    return thread_count
 
 
 def valid_index_path(index_path: str) -> None:
