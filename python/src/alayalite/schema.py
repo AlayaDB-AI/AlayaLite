@@ -21,6 +21,7 @@ import json
 import os
 import shutil
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -38,6 +39,7 @@ from .common import (
     valid_max_nbrs,
     valid_metric_type,
     valid_quantization_type,
+    valid_thread_count,
 )
 
 __all__ = ["IndexParams", "load_schema", "save_schema"]
@@ -54,6 +56,8 @@ class IndexParams:
     metric: str = None
     capacity: np.uint32 = None
     max_nbrs: int = None
+    build_threads: Optional[int] = None
+    materialized_view_build_threads: Optional[int] = None
     rocksdb_path: str = ""  # Path for RocksDB storage (for scalar data)
     has_scalar_data: bool = False  # Whether to enable scalar data storage
     indexed_fields: list = None  # Fields to create secondary indexes for (for fast filtering)
@@ -93,6 +97,9 @@ class IndexParams:
         native_metric_type = valid_metric_type(self.metric)
         native_quantization_type = valid_quantization_type(self.quantization_type)
         capacity = valid_capacity_type(self.capacity)
+        max_nbrs = valid_max_nbrs(self.max_nbrs)
+        build_threads = valid_thread_count(self.build_threads)
+        materialized_view_build_threads = valid_thread_count(self.materialized_view_build_threads)
 
         return _IndexParams(
             index_type_=native_index_type,
@@ -101,12 +108,15 @@ class IndexParams:
             quantization_type_=native_quantization_type,
             metric_=native_metric_type,
             capacity_=capacity,
+            max_nbrs_=max_nbrs,
+            build_threads_=build_threads or 0,
+            materialized_view_build_threads_=materialized_view_build_threads or 0,
             rocksdb_path_=self.rocksdb_path if self.rocksdb_path else "",
             has_scalar_data_=self.has_scalar_data,
             indexed_fields_=self.indexed_fields if self.indexed_fields else [],
         )
 
-    def to_json_dict(self) -> str:
+    def to_json_dict(self) -> dict:
         return {
             "index_type": self.index_type,
             "data_type": np.dtype(self.data_type).name,  # Convert dtype to string
@@ -115,13 +125,16 @@ class IndexParams:
             "metric": self.metric,
             "capacity": self.capacity,
             "max_nbrs": self.max_nbrs,
+            "build_threads": self.build_threads,
+            "materialized_view_build_threads": self.materialized_view_build_threads,
+            "rocksdb_path": self.rocksdb_path,
             "has_scalar_data": self.has_scalar_data,
             "indexed_fields": self.indexed_fields if self.indexed_fields else [],
         }
 
     @classmethod
-    def from_str_dict(cls, data: str) -> "IndexParams":
-        """Deserialize from a JSON string."""
+    def from_str_dict(cls, data: dict) -> "IndexParams":
+        """Deserialize from a JSON-compatible dict."""
         return cls(
             index_type=data["index_type"],
             data_type=np.dtype(data["data_type"]).type,  # Convert back to dtype
@@ -130,6 +143,9 @@ class IndexParams:
             metric=data["metric"],
             capacity=data["capacity"],
             max_nbrs=data["max_nbrs"],
+            build_threads=data.get("build_threads") or None,
+            materialized_view_build_threads=data.get("materialized_view_build_threads") or None,
+            rocksdb_path=data.get("rocksdb_path", ""),
             has_scalar_data=data.get("has_scalar_data", False),  # Default to False for backward compatibility
             indexed_fields=data.get("indexed_fields", []),  # Default to empty list for backward compatibility
         )
@@ -143,6 +159,9 @@ class IndexParams:
         metric = None
         capacity = None
         max_nbrs = None
+        build_threads = None
+        materialized_view_build_threads = None
+        rocksdb_path = ""
         indexed_fields = None
 
         if kwargs.get("index_type") is not None:
@@ -165,6 +184,12 @@ class IndexParams:
             capacity = valid_capacity_type(kwargs.get("capacity"))
         if kwargs.get("max_nbrs") is not None:
             max_nbrs = valid_max_nbrs(kwargs.get("max_nbrs"))
+        if kwargs.get("build_threads") is not None:
+            build_threads = valid_thread_count(kwargs.get("build_threads"))
+        if kwargs.get("materialized_view_build_threads") is not None:
+            materialized_view_build_threads = valid_thread_count(kwargs.get("materialized_view_build_threads"))
+        if kwargs.get("rocksdb_path") is not None:
+            rocksdb_path = str(kwargs.get("rocksdb_path"))
         if kwargs.get("indexed_fields") is not None:
             indexed_fields = list(kwargs.get("indexed_fields"))
         return cls(
@@ -175,6 +200,9 @@ class IndexParams:
             metric=metric,
             capacity=capacity,
             max_nbrs=max_nbrs,
+            build_threads=build_threads,
+            materialized_view_build_threads=materialized_view_build_threads,
+            rocksdb_path=rocksdb_path,
             indexed_fields=indexed_fields,
         )
 

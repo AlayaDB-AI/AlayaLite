@@ -15,22 +15,29 @@
 """
 This module defines the Collection class, which manages documents,
 their embeddings, and the associated vector index.
-
-Refactored: Data is now stored in C++ Space layer instead of Python DataFrame.
 """
 
 import os
 import shutil
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import numpy as np
 
 from ._alayalitepy import LogicOp as _LogicOp
 from ._alayalitepy import MetadataFilter as _MetadataFilter
 from ._alayalitepy import PyIndexInterface as _PyIndexInterface
-from .common import _assert
+from .common import _assert, _validate_query_vectors, normalize_filter_execution_hint
 from .index import Index
 from .schema import IndexParams, load_schema
+from .utils import normalize_vectors_for_cosine_metric
+
+
+def _default_rocksdb_path(collection_name: str, base_dir: Optional[str] = None) -> str:
+    if base_dir is not None:
+        return os.path.join(base_dir, collection_name, "rocksdb")
+
+    rocksdb_base = os.environ.get("ALAYALITE_ROCKSDB_DIR", "./RocksDB")
+    return os.path.join(rocksdb_base, collection_name)
 
 
 # pylint: disable=unused-private-member
@@ -53,13 +60,35 @@ class Collection:
         """
         self.__name = name
         self.__index_params = index_params if index_params is not None else IndexParams()
+        if not self.__index_params.rocksdb_path:
+            self.__index_params.rocksdb_path = _default_rocksdb_path(name)
         self.__index_py: Optional[Index] = None
         self.__cpp_index: Optional[_PyIndexInterface] = None
 
+    def get_cpp_index(self) -> _PyIndexInterface:
+        """
+        Get the underlying native index.
+        """
+        return self._get_cpp_index()
+
+    def build_filter(self, filter_dict: Optional[Union[dict, _MetadataFilter]]) -> _MetadataFilter:
+        """
+        Compile a Python metadata filter into the native representation.
+        """
+        return self._build_filter(filter_dict)
+
     def _get_cpp_index(self) -> _PyIndexInterface:
         """Get the C++ index, raising error if not initialized."""
+        if self.__index_py is None:
+            raise RuntimeError(
+                "Collection index is not initialized yet. Call insert() with the first batch of data first."
+            )
         if self.__cpp_index is None:
-            raise RuntimeError("Index is not initialized yet")
+            self.__cpp_index = self.__index_py.get_cpp_index()
+        if self.__cpp_index is None:
+            raise RuntimeError(
+                "Collection index backend is unavailable. Call insert() with the first batch of data first."
+            )
         return self.__cpp_index
 
     def batch_query(
@@ -76,43 +105,39 @@ class Collection:
             dict with keys: id, document, metadata, distance
         """
         _assert(self.__index_py is not None, "Index is not initialized yet")
-        _assert(len(vectors) > 0, "vectors must not be empty")
-        _assert(
-            len(vectors[0]) == self.__index_py.get_dim(),
-            "Vector dimension must match the index dimension.",
-        )
         _assert(num_threads > 0, "num_threads must be greater than 0")
         _assert(ef_search >= limit, "ef_search must be greater than or equal to limit")
 
-        cpp_index = self._get_cpp_index()
+        vectors_arr, _ = _validate_query_vectors(vectors, self.__index_py.get_dim(), metric=self.__index_params.metric)
 
-        # Use batch_search_with_distance for better performance (no filter overhead)
-        ids_arr, dists_arr = cpp_index.batch_search_with_distance(
-            np.array(vectors, dtype=np.float32),
+        # Query validation already normalizes cosine queries before they reach the native index.
+        ids_arr, dists_arr = self.__index_py.batch_search_with_distance(
+            vectors_arr,
             limit,
             ef_search,
             num_threads,
         )
 
+        cpp_index = self._get_cpp_index()
         ret = {"id": [], "document": [], "metadata": [], "distance": []}
         for ids_row, dists_row in zip(ids_arr, dists_arr):
             row_ids = []
             row_docs = []
             row_metas = []
-            row_dists = []
-            for internal_id, dist in zip(ids_row, dists_row):
+            row_dists = [float(d) for d in dists_row]
+
+            for internal_id in ids_row:
                 try:
                     scalar = cpp_index.get_scalar_data_by_internal_id(int(internal_id))
                     row_ids.append(scalar.get("item_id", ""))
                     row_docs.append(scalar.get("document", ""))
                     row_metas.append(scalar.get("metadata", {}))
-                    row_dists.append(float(dist))
                 except RuntimeError:
-                    # Internal ID not found or no scalar data
+                    # Keep result alignment when graph results include deleted/invalid ids.
                     row_ids.append("")
                     row_docs.append("")
                     row_metas.append({})
-                    row_dists.append(float(dist))
+
             ret["id"].append(row_ids)
             ret["document"].append(row_docs)
             ret["metadata"].append(row_metas)
@@ -125,33 +150,63 @@ class Collection:
         vectors: List[List[float]],
         limit: int,
         *,
-        metadata_filter: Optional[dict] = None,
+        metadata_filter: Optional[Union[dict, _MetadataFilter]] = None,
         ef_search: int = 100,
         num_threads: int = 1,
+        filter_execution_hint: Optional[str] = None,
     ) -> dict:
         """
         Queries the index using vectors with metadata filtering.
+
+        Args:
+            vectors: Query vectors.
+            limit: Result size per query.
+            metadata_filter: Metadata predicate.
+            ef_search: ANN ef parameter.
+            num_threads: Thread count for batch query.
+            filter_execution_hint: Optional hybrid-search execution hint.
+                Supported values: ``None``/``"auto"``, ``"disable"``,
+                ``"bitset_prefilter"``, ``"iterative_filter"``.
+
+        Returns:
+            dict with a single key ``id`` containing item-id rows for each query.
         """
         _assert(self.__index_py is not None, "Index is not initialized yet")
-        _assert(len(vectors) > 0, "vectors must not be empty")
         _assert(ef_search >= limit, "ef_search must be >= limit")
+        _assert(num_threads > 0, "num_threads must be greater than 0")
 
         cpp_index = self._get_cpp_index()
         filter_obj = self._build_filter(metadata_filter)
-
-        # Returns (ids_array, item_ids_list_of_lists)
-        _, item_id_lists = cpp_index.batch_hybrid_search(
-            np.array(vectors, dtype=np.float32),
-            limit,
-            ef_search,
-            filter_obj,
-            num_threads,
+        filter_hint = normalize_filter_execution_hint(filter_execution_hint)
+        vectors_arr, is_single_query = _validate_query_vectors(
+            vectors,
+            self.__index_py.get_dim(),
+            metric=self.__index_params.metric,
         )
 
-        # Return item_ids directly without fetching scalar data
-        return {"id": item_id_lists}
+        if is_single_query:
+            _, item_ids = cpp_index.hybrid_search(
+                vectors_arr[0],
+                limit,
+                ef_search,
+                filter_obj,
+                bf=False,
+                filter_execution_hint=filter_hint,
+            )
+            return {"id": [list(item_ids)]}
+        else:
+            _, item_ids = cpp_index.batch_hybrid_search(
+                vectors_arr,
+                limit,
+                ef_search,
+                filter_obj,
+                num_threads,
+                bf=False,
+                filter_execution_hint=filter_hint,
+            )
+            return {"id": [list(row) for row in item_ids]}
 
-    def filter_query(self, metadata_filter: dict, limit: int = 100) -> dict:
+    def filter_query(self, metadata_filter: Union[dict, _MetadataFilter], limit: int = 100) -> dict:
         """
         Filters records based on metadata conditions (without vector search).
 
@@ -196,19 +251,10 @@ class Collection:
             dt = np.array(first_embedding).dtype
             self.__index_params.data_type = dt
 
-            # Check quantization type - Collection requires scalar data support
             self.__index_params.fill_none_values()
-            if self.__index_params.quantization_type == "none":
-                # Collection requires scalar data, use sq4 as default
-                self.__index_params.quantization_type = "sq4"
 
             # Collection always requires scalar data storage
             self.__index_params.has_scalar_data = True
-
-            # Set RocksDB path based on collection name for isolated storage
-            if not self.__index_params.rocksdb_path:
-                rocksdb_base = os.environ.get("ALAYALITE_ROCKSDB_DIR", "./RocksDB")
-                self.__index_params.rocksdb_path = f"{rocksdb_base}/{self.__name}"
 
             self.__index_py = Index(self.__name, self.__index_params)
 
@@ -219,10 +265,15 @@ class Collection:
             metadata_list = [item[3] for item in items]
 
             # Fit with scalar data
+            build_threads = self.__index_params.build_threads
+            if build_threads is None:
+                build_threads = 1
+            else:
+                _assert(build_threads > 0, "index_params.build_threads must be greater than 0")
             self.__index_py.fit(
                 vectors,
                 ef_construction=400,
-                num_threads=1,
+                num_threads=build_threads,
                 item_ids=item_ids,
                 documents=documents,
                 metadata_list=metadata_list,
@@ -232,8 +283,10 @@ class Collection:
             # Incremental insert with scalar data
             cpp_index = self._get_cpp_index()
             for item_id, document, embedding, metadata in items:
+                vec = np.array(embedding, dtype=self.__index_py.get_dtype())
+                vec = normalize_vectors_for_cosine_metric(vec, self.__index_params.metric)
                 cpp_index.insert(
-                    np.array(embedding, dtype=self.__index_py.get_dtype()),
+                    vec,
                     100,  # ef
                     item_id,
                     document,
@@ -258,8 +311,10 @@ class Collection:
             if cpp_index.contains(item_id):
                 # Update: remove old, insert new
                 cpp_index.remove_by_item_id(item_id)
+                vec = np.array(embedding, dtype=self.__index_py.get_dtype())
+                vec = normalize_vectors_for_cosine_metric(vec, self.__index_params.metric)
                 cpp_index.insert(
-                    np.array(embedding, dtype=self.__index_py.get_dtype()),
+                    vec,
                     100,  # ef
                     item_id,
                     document,
@@ -332,7 +387,7 @@ class Collection:
 
         return total_deleted
 
-    def reindex(self, ef_construction: int = 400, num_threads: int = 1):
+    def reindex(self, ef_construction: int = 400, num_threads: Optional[int] = None):
         """
         Rebuilds the index while preserving all data.
 
@@ -391,23 +446,34 @@ class Collection:
 
         # Create new index with same parameters
         self.__index_py = Index(self.__name, self.__index_params)
+        if num_threads is None:
+            rebuild_threads = self.__index_params.build_threads
+            if rebuild_threads is None:
+                rebuild_threads = 1
+            else:
+                _assert(rebuild_threads > 0, "index_params.build_threads must be greater than 0")
+        else:
+            _assert(num_threads > 0, "num_threads must be greater than 0")
+            rebuild_threads = num_threads
         self.__index_py.fit(
             vectors,
             ef_construction=ef_construction,
-            num_threads=num_threads,
+            num_threads=rebuild_threads,
             item_ids=item_ids,
             documents=documents,
             metadata_list=metadata_list,
         )
         self.__cpp_index = self.__index_py.get_cpp_index()
 
-    def _build_filter(self, filter_dict: Optional[dict]) -> _MetadataFilter:
+    def _build_filter(self, filter_dict: Optional[Union[dict, _MetadataFilter]]) -> _MetadataFilter:
         """
         Convert Python dict to C++ MetadataFilter.
         """
         mf = _MetadataFilter()
         if filter_dict is None:
             return mf
+        if isinstance(filter_dict, _MetadataFilter):
+            return filter_dict
 
         for key, value in filter_dict.items():
             if key == "$and":
@@ -425,8 +491,12 @@ class Collection:
                         mf.add_eq(key, op_value)
                     elif op == "$gt":
                         mf.add_gt(key, op_value)
+                    elif op == "$ge":
+                        mf.add_ge(key, op_value)
                     elif op == "$lt":
                         mf.add_lt(key, op_value)
+                    elif op == "$le":
+                        mf.add_le(key, op_value)
                     elif op == "$in":
                         mf.add_in(key, op_value)
                     else:
@@ -462,7 +532,12 @@ class Collection:
         if schema_map.get("type") != "collection":
             raise RuntimeError(f"{name} is not a collection")
 
-        instance = cls(name)
+        # Restore index params from schema (needed by reindex(), etc.)
+        index_params = IndexParams.from_str_dict(schema_map["index"])
+        if not index_params.rocksdb_path:
+            index_params.rocksdb_path = _default_rocksdb_path(name, url)
+
+        instance = cls(name, index_params)
         instance.__index_py = Index.load(url, name)
         instance.__cpp_index = instance.__index_py.get_cpp_index()
         return instance
@@ -492,8 +567,11 @@ class Collection:
         """
         Explicitly close and release RocksDB resources.
         """
-        if self.__cpp_index is not None:
-            self.__cpp_index.close_db()
+        cpp_index = self.__cpp_index
+        if cpp_index is None and self.__index_py is not None:
+            cpp_index = self.__index_py.get_cpp_index()
+        if cpp_index is not None:
+            cpp_index.close_db()
             self.__cpp_index = None
         self.__index_py = None
 

@@ -99,7 +99,9 @@ PYBIND11_MODULE(_alayalitepy, m) {
       .def("is_empty", &alaya::MetadataFilter::is_empty)
       .def("add_eq", &alaya::MetadataFilter::add_eq, py::arg("field"), py::arg("value"))
       .def("add_gt", &alaya::MetadataFilter::add_gt, py::arg("field"), py::arg("value"))
+      .def("add_ge", &alaya::MetadataFilter::add_ge, py::arg("field"), py::arg("value"))
       .def("add_lt", &alaya::MetadataFilter::add_lt, py::arg("field"), py::arg("value"))
+      .def("add_le", &alaya::MetadataFilter::add_le, py::arg("field"), py::arg("value"))
       .def("add_in", &alaya::MetadataFilter::add_in, py::arg("field"), py::arg("values"))
       .def("add_sub_filter", &alaya::MetadataFilter::add_sub_filter, py::arg("sub_filter"));
 
@@ -112,6 +114,8 @@ PYBIND11_MODULE(_alayalitepy, m) {
                     alaya::MetricType,
                     uint32_t,
                     uint32_t,
+                    uint32_t,
+                    uint32_t,
                     std::string,
                     bool,
                     std::vector<std::string>>(),
@@ -120,8 +124,10 @@ PYBIND11_MODULE(_alayalitepy, m) {
            py::arg("id_type_") = py::dtype::of<uint32_t>(),
            py::arg("quantization_type_") = alaya::QuantizationType::NONE,
            py::arg("metric_") = alaya::MetricType::L2,
-           py::arg("capacity_") = py::dtype::of<uint32_t>(),
+           py::arg("capacity_") = 100000,
            py::arg("max_nbrs_") = 32,
+           py::arg("build_threads_") = 0,
+           py::arg("materialized_view_build_threads_") = 0,
            py::arg("rocksdb_path_") = "",
            py::arg("has_scalar_data_") = false,
            py::arg("indexed_fields_") = std::vector<std::string>{})
@@ -131,6 +137,10 @@ PYBIND11_MODULE(_alayalitepy, m) {
       .def_readwrite("quantization_type_", &alaya::IndexParams::quantization_type_)
       .def_readwrite("metric_", &alaya::IndexParams::metric_)
       .def_readwrite("capacity_", &alaya::IndexParams::capacity_)
+      .def_readwrite("max_nbrs_", &alaya::IndexParams::max_nbrs_)
+      .def_readwrite("build_threads_", &alaya::IndexParams::build_threads_)
+      .def_readwrite("materialized_view_build_threads_",
+                     &alaya::IndexParams::materialized_view_build_threads_)
       .def_readwrite("rocksdb_path_", &alaya::IndexParams::rocksdb_path_)
       .def_readwrite("has_scalar_data_", &alaya::IndexParams::has_scalar_data_)
       .def_readwrite("indexed_fields_", &alaya::IndexParams::indexed_fields_);
@@ -155,6 +165,7 @@ PYBIND11_MODULE(_alayalitepy, m) {
                                                                                 "PyIndexInterface")
       .def(py::init<alaya::IndexParams>(), py::arg("params"))
       .def("to_string", &alaya::PyIndexInterface::to_string)
+      .def("has_scalar_data", &alaya::PyIndexInterface::has_scalar_data)
       .def("fit",
            &alaya::PyIndexInterface::fit,
            py::arg("vectors"),
@@ -186,6 +197,10 @@ PYBIND11_MODULE(_alayalitepy, m) {
       .def("get_scalar_data_by_internal_id",
            &alaya::PyIndexInterface::get_scalar_data_by_internal_id,
            py::arg("internal_id"))
+      .def("batch_get_item_ids_by_internal_ids",
+           &alaya::PyIndexInterface::batch_get_item_ids_by_internal_ids,
+           py::arg("internal_ids"),
+           "Batch get item_ids by internal IDs using RocksDB MultiGet")
       .def("filter_query",
            &alaya::PyIndexInterface::filter_query,
            py::arg("filter"),
@@ -214,18 +229,49 @@ PYBIND11_MODULE(_alayalitepy, m) {
            py::arg("data_path"),            //
            py::arg("quant_path") = std::string())
       .def("get_data_dim", &alaya::PyIndexInterface::get_data_dim)
-      .def("hybrid_search",
-           &alaya::PyIndexInterface::hybrid_search,
-           py::arg("query"),
-           py::arg("topk"),
-           py::arg("ef"),
-           py::arg("filter"))
-      .def("batch_hybrid_search",
-           &alaya::PyIndexInterface::batch_hybrid_search,
-           py::arg("queries"),
-           py::arg("topk"),
-           py::arg("ef"),
-           py::arg("filter"),
-           py::arg("num_threads"))
+      .def("get_materialized_view_partition_count",
+           &alaya::PyIndexInterface::get_materialized_view_partition_count)
+      .def(
+          "hybrid_search",
+          [](alaya::PyIndexInterface &self,
+             py::array &query,
+             uint32_t topk,
+             uint32_t ef,
+             const alaya::MetadataFilter &filter,
+             bool bf,
+             const std::string &filter_execution_hint) {
+            return self.hybrid_search(query, topk, ef, filter, bf, filter_execution_hint);
+          },
+          py::arg("query"),
+          py::arg("topk"),
+          py::arg("ef"),
+          py::arg("filter"),
+          py::arg("bf") = false,
+          py::arg("filter_execution_hint") = std::string())
+      .def(
+          "batch_hybrid_search",
+          [](alaya::PyIndexInterface &self,
+             py::array &queries,
+             uint32_t topk,
+             uint32_t ef,
+             const alaya::MetadataFilter &filter,
+             uint32_t num_threads,
+             bool bf,
+             const std::string &filter_execution_hint) {
+            return self.batch_hybrid_search(queries,
+                                            topk,
+                                            ef,
+                                            filter,
+                                            num_threads,
+                                            bf,
+                                            filter_execution_hint);
+          },
+          py::arg("queries"),
+          py::arg("topk"),
+          py::arg("ef"),
+          py::arg("filter"),
+          py::arg("num_threads"),
+          py::arg("bf") = false,
+          py::arg("filter_execution_hint") = std::string())
       .def("close_db", &alaya::PyIndexInterface::close_db, "Close and release RocksDB resources");
 }

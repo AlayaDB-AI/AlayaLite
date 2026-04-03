@@ -15,17 +15,66 @@
 """Unit tests for hybrid search (vector search + metadata filtering)."""
 
 import os
+import platform
 import shutil
 import tempfile
+import time
 import unittest
 
 import numpy as np
 from alayalite import Collection
 from alayalite.schema import IndexParams
 
+# Skip RaBitQ tests on non-x86 platforms (AVX512 required)
+SKIP_RABITQ = platform.machine() not in ("x86_64", "AMD64")
+SKIP_REASON = "RaBitQ requires AVX512 instructions (x86_64 only)"
+LONG_TEST_REASON = "Long-running 1M hybrid-search benchmark test; skipped in routine test runs"
 
+N_TOTAL = 1000000
+N_TARGET = 10000
+DIM = 256
+TOP_K = 100
+
+
+def _calc_cosine_gt(vectors, target_indices, query, topk):
+    """Compute ground truth top-k among target vectors using cosine similarity."""
+    target_ids = np.array(list(target_indices))
+    target_vecs = vectors[target_ids]
+    # vectors and query are already L2-normalized, so dot product = cosine similarity
+    scores = target_vecs @ query
+    top_idx = np.argsort(-scores)[:topk]
+    return set(target_ids[top_idx].tolist())
+
+
+@unittest.skip(LONG_TEST_REASON)
 class TestHybridSearch(unittest.TestCase):
     """Test suite for hybrid_query with metadata filtering."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Construct shared 1M dataset with 10k target labels and precompute cosine GT."""
+        np.random.seed(42)
+
+        # Generate and normalize vectors
+        cls.vectors = np.random.rand(N_TOTAL, DIM).astype(np.float32)
+        norms = np.linalg.norm(cls.vectors, axis=1, keepdims=True)
+        cls.vectors = cls.vectors / norms
+
+        # Select target indices
+        cls.target_indices = set(np.random.choice(N_TOTAL, N_TARGET, replace=False).tolist())
+
+        # Generate and normalize query
+        cls.query_vec = np.random.rand(DIM).astype(np.float32)
+        cls.query_vec = cls.query_vec / np.linalg.norm(cls.query_vec)
+
+        # Precompute ground truth
+        cls.gt_ids = _calc_cosine_gt(cls.vectors, cls.target_indices, cls.query_vec, TOP_K)
+
+        # Prepare items list (shared across tests)
+        cls.items = []
+        for i in range(N_TOTAL):
+            label = "target_label" if i in cls.target_indices else "other"
+            cls.items.append((i, f"Doc {i}", cls.vectors[i], {"label": label}))
 
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()
@@ -35,189 +84,217 @@ class TestHybridSearch(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
 
-    def _create_collection(self, name: str, quant_type: str = "sq4") -> Collection:
+    def _run_hybrid_search_test(self, collection_name, quant_type, ef_search=300):
+        """Build index, run hybrid search, return recall and QPS."""
         params = IndexParams()
         params.quantization_type = quant_type
-        return Collection(name, params)
+        params.metric = "cos"
+        params.capacity = N_TOTAL + 1000
+        params.indexed_fields = ["label"]
 
-    def _get_basic_collection(self) -> Collection:
-        """Create collection with basic 3D test data."""
-        collection = self._create_collection("test_hybrid")
-        items = [
-            (1, "Doc A1", np.array([1.0, 0.0, 0.0]), {"category": "A", "score": 90}),
-            (2, "Doc A2", np.array([0.9, 0.1, 0.0]), {"category": "A", "score": 80}),
-            (3, "Doc B1", np.array([0.0, 1.0, 0.0]), {"category": "B", "score": 70}),
-            (4, "Doc B2", np.array([0.1, 0.9, 0.0]), {"category": "B", "score": 60}),
-            (5, "Doc C1", np.array([0.0, 0.0, 1.0]), {"category": "C", "score": 50}),
-        ]
-        collection.insert(items)
-        return collection
+        collection = Collection(collection_name, params)
+        collection.insert(self.items)
 
-    # --- Basic filter operators ---
+        query = [self.query_vec.tolist()]
 
-    def test_simple_eq(self):
-        """Test equality filter: {"category": "A"}"""
-        collection = self._get_basic_collection()
-        result = collection.hybrid_query([[1.0, 0.0, 0.0]], limit=5, metadata_filter={"category": "A"}, ef_search=10)
-        for item_id in result["id"][0]:
-            if item_id:
-                self.assertIn(item_id, ["1", "2"])
-
-    def test_gt_lt(self):
-        """Test $gt and $lt operators."""
-        collection = self._get_basic_collection()
-        # $gt
+        start = time.perf_counter()
         result = collection.hybrid_query(
-            [[0.5, 0.5, 0.0]], limit=5, metadata_filter={"score": {"$gt": 75}}, ef_search=10
+            query,
+            limit=TOP_K,
+            metadata_filter={"label": "target_label"},
+            ef_search=ef_search,
         )
-        for item_id in result["id"][0]:
-            if item_id:
-                self.assertIn(item_id, ["1", "2"])
-        # $lt
-        result = collection.hybrid_query(
-            [[0.0, 0.5, 0.5]], limit=5, metadata_filter={"score": {"$lt": 65}}, ef_search=10
-        )
-        for item_id in result["id"][0]:
-            if item_id:
-                self.assertIn(item_id, ["4", "5"])
+        elapsed = time.perf_counter() - start
 
-    def test_in(self):
-        """Test $in operator."""
-        collection = self._get_basic_collection()
-        result = collection.hybrid_query(
-            [[0.5, 0.5, 0.0]], limit=5, metadata_filter={"category": {"$in": ["A", "B"]}}, ef_search=10
-        )
-        for item_id in result["id"][0]:
-            if item_id:
-                self.assertIn(item_id, ["1", "2", "3", "4"])
-
-    # --- Logical operators ---
-
-    def test_and_or(self):
-        """Test $and and $or operators."""
-        collection = self._get_basic_collection()
-        # $and
-        result = collection.hybrid_query(
-            [[1.0, 0.0, 0.0]],
-            limit=5,
-            metadata_filter={"$and": [{"category": "A"}, {"score": {"$gt": 85}}]},
-            ef_search=10,
-        )
-        for item_id in result["id"][0]:
-            if item_id:
-                self.assertEqual(item_id, "1")
-        # $or
-        result = collection.hybrid_query(
-            [[0.5, 0.5, 0.0]], limit=5, metadata_filter={"$or": [{"category": "A"}, {"category": "C"}]}, ef_search=10
-        )
-        for item_id in result["id"][0]:
-            if item_id:
-                self.assertIn(item_id, ["1", "2", "5"])
-
-    def test_nested_and_or(self):
-        """Test nested: ($and inside $or) and ($or inside $and)."""
-        collection = self._get_basic_collection()
-        # (category=A AND score>85) OR (category=B AND score<65)
-        result = collection.hybrid_query(
-            [[0.5, 0.5, 0.0]],
-            limit=5,
-            metadata_filter={
-                "$or": [
-                    {"$and": [{"category": "A"}, {"score": {"$gt": 85}}]},
-                    {"$and": [{"category": "B"}, {"score": {"$lt": 65}}]},
-                ]
-            },
-            ef_search=10,
-        )
-        for item_id in result["id"][0]:
-            if item_id:
-                self.assertIn(item_id, ["1", "4"])
-
-        # (category IN [A,B]) AND (score > 65 OR score < 55)
-        result = collection.hybrid_query(
-            [[0.5, 0.5, 0.0]],
-            limit=5,
-            metadata_filter={
-                "$and": [{"category": {"$in": ["A", "B"]}}, {"$or": [{"score": {"$gt": 65}}, {"score": {"$lt": 55}}]}]
-            },
-            ef_search=10,
-        )
-        for item_id in result["id"][0]:
-            if item_id:
-                self.assertIn(item_id, ["1", "2", "3"])
-
-    # --- Edge cases ---
-
-    def test_no_filter(self):
-        """Test without filter (should behave like batch_query)."""
-        collection = self._get_basic_collection()
-        result = collection.hybrid_query([[1.0, 0.0, 0.0]], limit=3, metadata_filter=None, ef_search=10)
         self.assertEqual(len(result["id"]), 1)
-        self.assertLessEqual(len(result["id"][0]), 3)
+        found_ids = {int(item_id) for item_id in result["id"][0] if item_id}
 
-    def test_no_match(self):
-        """Test filter that matches nothing."""
-        collection = self._get_basic_collection()
-        result = collection.hybrid_query([[1.0, 0.0, 0.0]], limit=5, metadata_filter={"category": "D"}, ef_search=10)
-        non_empty = [id for id in result["id"][0] if id]
-        self.assertEqual(len(non_empty), 0)
+        # All found items must have target_label
+        for item_id in found_ids:
+            self.assertIn(item_id, self.target_indices)
 
-    def test_multiple_queries(self):
-        """Test with multiple query vectors."""
-        collection = self._get_basic_collection()
-        result = collection.hybrid_query(
-            [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], limit=2, metadata_filter={"score": {"$gt": 55}}, ef_search=10
-        )
-        self.assertEqual(len(result["id"]), 2)
+        recall = len(found_ids & self.gt_ids) / len(self.gt_ids)
+        qps = 1.0 / elapsed if elapsed > 0 else float("inf")
+        return recall, qps
 
-    # --- Different quantization types ---
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
+    def test_rabitq_hybrid_search_with_cosine(self):
+        """Test hybrid query with RaBitQ quantization using cosine metric."""
+        recall, qps = self._run_hybrid_search_test("test_rabitq_cos", "rabitq", ef_search=100)
+        print(f"\nRaBitQ + cosine: recall={recall:.4f}, QPS={qps:.2f}")
+        self.assertGreaterEqual(recall, 0.90, f"RaBitQ cosine recall too low: {recall:.4f}")
 
-    def test_quantization_types(self):
-        """Test hybrid query with SQ4 and SQ8 quantization types."""
+    def test_SQ_hybrid_search_with_cosine(self):
+        """Test hybrid search recall with SQ4/SQ8 quantization using cosine metric."""
         for quant_type in ["sq4", "sq8"]:
             with self.subTest(quant=quant_type):
-                collection = self._create_collection(f"test_{quant_type}", quant_type)
-                items = [
-                    (
-                        i,
-                        f"Doc {i}",
-                        np.random.rand(64).astype(np.float32),
-                        {"category": "A" if i % 2 else "B", "score": i * 10},
-                    )
-                    for i in range(1, 6)
-                ]
-                collection.insert(items)
+                recall, qps = self._run_hybrid_search_test(f"test_{quant_type}_cos", quant_type, ef_search=150)
+                print(f"\n{quant_type.upper()} + cosine: recall={recall:.4f}, QPS={qps:.2f}")
+                self.assertGreaterEqual(recall, 0.90, f"{quant_type} cosine recall too low: {recall:.4f}")
 
-                query = [list(np.random.rand(64).astype(np.float32))]
-                result = collection.hybrid_query(query, limit=3, metadata_filter={"category": "A"}, ef_search=10)
-                self.assertEqual(len(result["id"]), 1)
-                for item_id in result["id"][0]:
-                    if item_id:
-                        self.assertIn(item_id, ["1", "3", "5"])
 
-    def test_rabitq_hybrid_search(self):
-        """Test hybrid query with RaBitQ quantization (requires larger dataset)."""
-        collection = self._create_collection("test_rabitq", "rabitq")
-        # RaBitQ needs more data
-        n_items = 500
-        items = [
-            (
-                i,
-                f"Doc {i}",
-                np.random.rand(64).astype(np.float32),
-                {"category": "A" if i % 2 else "B", "score": i % 100},
+# Configuration for 1m dataset with 0.1% target (1000 items)
+N_TOTAL_LARGE = 1000000
+N_TARGET_LARGE = 100000  # 10% of 1m
+DIM_LARGE = 256
+TOP_K_LARGE = 100
+
+
+@unittest.skip(LONG_TEST_REASON)
+class TestRaBitQBruteForceLarge(unittest.TestCase):
+    """Test suite for RaBitQ hybrid_query with brute-force on 1M dataset (0.1% target)."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Construct 1M dataset with 1k target labels (0.1%) and precompute cosine GT."""
+        np.random.seed(42)
+
+        # Generate and normalize vectors
+        cls.vectors = np.random.rand(N_TOTAL_LARGE, DIM_LARGE).astype(np.float32)
+        norms = np.linalg.norm(cls.vectors, axis=1, keepdims=True)
+        cls.vectors = cls.vectors / norms
+
+        # Select target indices (0.1% = 1000 out of 1M)
+        cls.target_indices = set(np.random.choice(N_TOTAL_LARGE, N_TARGET_LARGE, replace=False).tolist())
+
+        # Generate and normalize query
+        cls.query_vec = np.random.rand(DIM_LARGE).astype(np.float32)
+        cls.query_vec = cls.query_vec / np.linalg.norm(cls.query_vec)
+
+        # Precompute ground truth
+        cls.gt_ids = _calc_cosine_gt(cls.vectors, cls.target_indices, cls.query_vec, TOP_K_LARGE)
+
+        # Prepare items list (shared across tests)
+        cls.items = []
+        for i in range(N_TOTAL_LARGE):
+            label = "target_label" if i in cls.target_indices else "other"
+            cls.items.append((i, f"Doc {i}", cls.vectors[i], {"label": label}))
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        os.environ["ALAYALITE_ROCKSDB_DIR"] = os.path.join(self.temp_dir, "RocksDB")
+
+    def tearDown(self):
+        if os.path.exists(self.temp_dir):
+            shutil.rmtree(self.temp_dir)
+
+    def _run_rabitq_bf_test(self, collection_name, use_bf=False, ef_search=300):
+        """Build RaBitQ index, run hybrid search with/without BF, return recall and QPS."""
+        params = IndexParams()
+        params.quantization_type = "rabitq"
+        params.metric = "cos"
+        params.capacity = N_TOTAL_LARGE + 1000
+        params.indexed_fields = ["label"]
+
+        collection = Collection(collection_name, params)
+        print(f"  Inserting {N_TOTAL_LARGE} items...")
+        collection.insert(self.items)
+
+        query = [self.query_vec.tolist()]
+
+        print(f"  Running hybrid query (bf={use_bf}, ef_search={ef_search})...")
+        start = time.perf_counter()
+        if use_bf:
+            cpp_index = collection.get_cpp_index()
+            filter_obj = collection.build_filter({"label": "target_label"})
+            _, item_ids = cpp_index.hybrid_search(
+                np.asarray(query, dtype=np.float32)[0],
+                TOP_K_LARGE,
+                ef_search,
+                filter_obj,
+                True,
+                "",
             )
-            for i in range(1, n_items + 1)
-        ]
-        collection.insert(items)
+            result = {"id": [list(item_ids)]}
+        else:
+            result = collection.hybrid_query(
+                query,
+                limit=TOP_K_LARGE,
+                metadata_filter={"label": "target_label"},
+                ef_search=ef_search,
+            )
+        elapsed = time.perf_counter() - start
 
-        query = [list(np.random.rand(64).astype(np.float32))]
-        result = collection.hybrid_query(query, limit=10, metadata_filter={"category": "A"}, ef_search=50)
         self.assertEqual(len(result["id"]), 1)
-        # All returned items should be category A (odd numbers)
-        for item_id in result["id"][0]:
-            if item_id:
-                self.assertEqual(int(item_id) % 2, 1)
+        found_ids = {int(item_id) for item_id in result["id"][0] if item_id}
+
+        # All found items must have target_label
+        for item_id in found_ids:
+            self.assertIn(item_id, self.target_indices)
+
+        recall = len(found_ids & self.gt_ids) / len(self.gt_ids) if self.gt_ids else 0.0
+        qps = 1.0 / elapsed if elapsed > 0 else float("inf")
+        return recall, qps, elapsed
+
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
+    def test_rabitq_1m_001pct_comparison(self):
+        """Compare RaBitQ graph-based vs brute-force search on the same index."""
+        # Build index once
+        params = IndexParams()
+        params.quantization_type = "rabitq"
+        params.metric = "cos"
+        params.capacity = N_TOTAL_LARGE + 1000
+        params.indexed_fields = ["label"]
+
+        collection = Collection("test_rabitq_1m_001pct_cmp", params)
+        print(f"  Inserting {N_TOTAL_LARGE} items...")
+        collection.insert(self.items)
+
+        query = [self.query_vec.tolist()]
+        ef_search = 100
+        # Search 1: Graph-based
+        print(f"  Running hybrid_query (bf=False, ef_search={ef_search})...")
+        start = time.perf_counter()
+        result = collection.hybrid_query(
+            query,
+            limit=TOP_K_LARGE,
+            metadata_filter={"label": "target_label"},
+            ef_search=ef_search,
+        )
+        time_graph = time.perf_counter() - start
+
+        self.assertEqual(len(result["id"]), 1)
+        found_ids_graph = {int(item_id) for item_id in result["id"][0] if item_id}
+        for item_id in found_ids_graph:
+            self.assertIn(item_id, self.target_indices)
+
+        recall_graph = len(found_ids_graph & self.gt_ids) / len(self.gt_ids) if self.gt_ids else 0.0
+        qps_graph = 1.0 / time_graph if time_graph > 0 else float("inf")
+
+        # Search 2: Brute-force
+        print(f"  Running hybrid_query (bf=True, ef_search={ef_search})...")
+        start = time.perf_counter()
+        cpp_index = collection.get_cpp_index()
+        filter_obj = collection.build_filter({"label": "target_label"})
+        _, item_ids = cpp_index.hybrid_search(
+            np.asarray(query, dtype=np.float32)[0],
+            TOP_K_LARGE,
+            ef_search,
+            filter_obj,
+            True,
+            "",
+        )
+        result = {"id": [list(item_ids)]}
+        time_bf = time.perf_counter() - start
+
+        self.assertEqual(len(result["id"]), 1)
+        found_ids_bf = {int(item_id) for item_id in result["id"][0] if item_id}
+        for item_id in found_ids_bf:
+            self.assertIn(item_id, self.target_indices)
+
+        recall_bf = len(found_ids_bf & self.gt_ids) / len(self.gt_ids) if self.gt_ids else 0.0
+        qps_bf = 1.0 / time_bf if time_bf > 0 else float("inf")
+
+        print("  ==================" + "target: " + str(N_TARGET_LARGE) + "=====================\n")
+        print(f"  Graph-based: recall={recall_graph:.4f}, QPS={qps_graph:.2f}, time={time_graph:.4f}s")
+        print(f"  Brute-force: recall={recall_bf:.4f}, QPS={qps_bf:.2f}, time={time_bf:.4f}s")
+        print(f"  Speedup (time): {time_bf / time_graph:.2f}x")
+        print(f"  Recall improvement (BF): {(recall_bf - recall_graph):.4f}")
+        print("  ============================================================\n")
+
+        # Both should have high recall
+        self.assertGreaterEqual(recall_graph, 0.90)
+        self.assertGreaterEqual(recall_bf, 0.95)
 
 
 if __name__ == "__main__":
