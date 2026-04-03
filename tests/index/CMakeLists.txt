@@ -5,6 +5,10 @@ add_executable(nndescent_test ${CMAKE_CURRENT_SOURCE_DIR}/nndescent_test.cpp)
 add_executable(nsg_test ${CMAKE_CURRENT_SOURCE_DIR}/nsg_test.cpp)
 add_executable(rabitq_test ${CMAKE_CURRENT_SOURCE_DIR}/rabitq_test.cpp)
 add_executable(rabitq_performance_test ${CMAKE_CURRENT_SOURCE_DIR}/rabitq_performance_test.cpp)
+add_executable(rabitq_benchmark ${CMAKE_CURRENT_SOURCE_DIR}/rabitq_benchmark.cpp)
+add_executable(
+  hybrid_quantization_performance_test ${CMAKE_CURRENT_SOURCE_DIR}/hybrid_quantization_performance_test.cpp
+)
 
 target_link_libraries(fusion_graph_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 target_link_libraries(graph_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
@@ -13,6 +17,9 @@ target_link_libraries(nndescent_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 target_link_libraries(nsg_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 target_link_libraries(rabitq_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 target_link_libraries(rabitq_performance_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(rabitq_benchmark PRIVATE ${THIRD_PARTY_LIBS})
+target_link_libraries(hybrid_quantization_performance_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+
 add_coverage_to_target(fusion_graph_test)
 add_coverage_to_target(graph_test)
 add_coverage_to_target(hnsw_test)
@@ -20,6 +27,7 @@ add_coverage_to_target(nndescent_test)
 add_coverage_to_target(nsg_test)
 add_coverage_to_target(rabitq_test)
 add_coverage_to_target(rabitq_performance_test)
+add_coverage_to_target(hybrid_quantization_performance_test)
 
 add_test(NAME index_test_fusion_graph COMMAND $<TARGET_FILE:fusion_graph_test>)
 add_test(NAME index_test_graph COMMAND $<TARGET_FILE:graph_test>)

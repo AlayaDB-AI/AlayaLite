@@ -24,6 +24,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
+#include <type_traits>
 
 #include "utils/rabitq_utils/defines.hpp"
 
@@ -255,6 +257,117 @@ inline void accumulate(const uint8_t *ALAYA_RESTRICT codes,
 #endif
 }
 // NOLINTEND
+
+template <typename T>
+inline void estimate_distances(const uint16_t *ALAYA_RESTRICT nth_segments,
+                               const T *ALAYA_RESTRICT f_add,
+                               const T *ALAYA_RESTRICT f_rescale,
+                               T g_add,
+                               T lut_delta,
+                               T lut_bias,
+                               T *ALAYA_RESTRICT result) {
+  static_assert(std::is_same_v<T, float>, "fastscan::estimate_distances only supports float.");
+#if defined(__AVX512F__)
+  const __m512 v_delta = _mm512_set1_ps(lut_delta);
+  const __m512 v_bias = _mm512_set1_ps(lut_bias);
+  const __m512 v_gadd = _mm512_set1_ps(g_add);
+
+  for (size_t off = 0; off < kBatchSize; off += 16) {
+    const __m256i nth_u16 =
+        _mm256_load_si256(reinterpret_cast<const __m256i *>(nth_segments + off));
+    const __m512 nth_f = _mm512_cvtepi32_ps(_mm512_cvtepu16_epi32(nth_u16));
+
+    const __m512 f_add_v = _mm512_loadu_ps(f_add + off);
+    const __m512 f_rescale_v = _mm512_loadu_ps(f_rescale + off);
+
+    const __m512 inner = _mm512_fmadd_ps(v_delta, nth_f, v_bias);
+    const __m512 est = _mm512_fmadd_ps(f_rescale_v, inner, _mm512_add_ps(f_add_v, v_gadd));
+
+    _mm512_store_ps(result + off, est);
+  }
+#else
+  throw std::runtime_error("Avx512 instruction is not supported!");
+#endif
+}
+
+template <typename T>
+inline void accumulate_and_estimate_distances(const uint8_t *ALAYA_RESTRICT codes,
+                                              const uint8_t *ALAYA_RESTRICT lp_table,
+                                              const T *ALAYA_RESTRICT f_add,
+                                              const T *ALAYA_RESTRICT f_rescale,
+                                              T g_add,
+                                              T lut_delta,
+                                              T lut_bias,
+                                              T *ALAYA_RESTRICT result,
+                                              size_t dim) {
+  static_assert(std::is_same_v<T, float>,
+                "fastscan::accumulate_and_estimate_distances only supports float.");
+  size_t code_length = dim << 2;
+#if defined(__AVX512F__)
+  __m512i c;
+  __m512i lo;
+  __m512i hi;
+  __m512i lut;
+  __m512i res_lo;
+  __m512i res_hi;
+
+  const __m512i lo_mask = _mm512_set1_epi8(0x0f);
+  __m512i accu0 = _mm512_setzero_si512();
+  __m512i accu1 = _mm512_setzero_si512();
+  __m512i accu2 = _mm512_setzero_si512();
+  __m512i accu3 = _mm512_setzero_si512();
+
+  for (size_t i = 0; i < code_length; i += 64) {
+    c = _mm512_loadu_si512(&codes[i]);
+    lut = _mm512_loadu_si512(&lp_table[i]);
+    lo = _mm512_and_si512(c, lo_mask);
+    hi = _mm512_and_si512(_mm512_srli_epi16(c, 4), lo_mask);
+
+    res_lo = _mm512_shuffle_epi8(lut, lo);
+    res_hi = _mm512_shuffle_epi8(lut, hi);
+
+    accu0 = _mm512_add_epi16(accu0, res_lo);
+    accu1 = _mm512_add_epi16(accu1, _mm512_srli_epi16(res_lo, 8));
+    accu2 = _mm512_add_epi16(accu2, res_hi);
+    accu3 = _mm512_add_epi16(accu3, _mm512_srli_epi16(res_hi, 8));
+  }
+
+  accu0 = _mm512_sub_epi16(accu0, _mm512_slli_epi16(accu1, 8));
+  accu2 = _mm512_sub_epi16(accu2, _mm512_slli_epi16(accu3, 8));
+
+  const __m512i ret1 = _mm512_add_epi16(_mm512_mask_blend_epi64(0b11110000, accu0, accu1),
+                                        _mm512_shuffle_i64x2(accu0, accu1, 0b01001110));
+  const __m512i ret2 = _mm512_add_epi16(_mm512_mask_blend_epi64(0b11110000, accu2, accu3),
+                                        _mm512_shuffle_i64x2(accu2, accu3, 0b01001110));
+  __m512i ret = _mm512_setzero_si512();
+
+  ret = _mm512_add_epi16(ret, _mm512_shuffle_i64x2(ret1, ret2, 0b10001000));
+  ret = _mm512_add_epi16(ret, _mm512_shuffle_i64x2(ret1, ret2, 0b11011101));
+
+  const __m512 v_delta = _mm512_set1_ps(lut_delta);
+  const __m512 v_bias = _mm512_set1_ps(lut_bias);
+  const __m512 v_gadd = _mm512_set1_ps(g_add);
+
+  const __m256i nth_u16_lo = _mm512_castsi512_si256(ret);
+  const __m256i nth_u16_hi = _mm512_extracti64x4_epi64(ret, 1);
+
+  const __m512 nth_f_lo = _mm512_cvtepi32_ps(_mm512_cvtepu16_epi32(nth_u16_lo));
+  const __m512 f_add_lo = _mm512_loadu_ps(f_add);
+  const __m512 f_rescale_lo = _mm512_loadu_ps(f_rescale);
+  const __m512 inner_lo = _mm512_fmadd_ps(v_delta, nth_f_lo, v_bias);
+  const __m512 est_lo = _mm512_fmadd_ps(f_rescale_lo, inner_lo, _mm512_add_ps(f_add_lo, v_gadd));
+  _mm512_storeu_ps(result, est_lo);
+
+  const __m512 nth_f_hi = _mm512_cvtepi32_ps(_mm512_cvtepu16_epi32(nth_u16_hi));
+  const __m512 f_add_hi = _mm512_loadu_ps(f_add + 16);
+  const __m512 f_rescale_hi = _mm512_loadu_ps(f_rescale + 16);
+  const __m512 inner_hi = _mm512_fmadd_ps(v_delta, nth_f_hi, v_bias);
+  const __m512 est_hi = _mm512_fmadd_ps(f_rescale_hi, inner_hi, _mm512_add_ps(f_add_hi, v_gadd));
+  _mm512_storeu_ps(result + 16, est_hi);
+#else
+  throw std::runtime_error("Avx512 instruction is not supported!");
+#endif
+}
 
 // pack lookup table for fastscan, for each 4 dim, we have 16 (2^4) different results
 // ! dim % 4 == 0

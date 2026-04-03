@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <numeric>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -243,16 +244,21 @@ class RaBitQSpace {
   }
 
   void update_nei(IDType c, const std::vector<Neighbor<IDType, DistanceType>> &new_neighbors) {
+    size_t cur_degree = new_neighbors.size();
+    if (cur_degree == 0) {
+      return;
+    }
+
     auto nei_ptr = get_edges(c);
     // update neighbors' IDs
-    for (size_t i = 0; i < kDegreeBound; ++i) {
+    for (size_t i = 0; i < cur_degree; ++i) {
       *(nei_ptr + i) = new_neighbors[i].id_;
     }
 
     // rotate data before quantization
-    std::vector<DataType> rotated_neighbors(kDegreeBound * get_padded_dim());
+    std::vector<DataType> rotated_neighbors(cur_degree * get_padded_dim());
     std::vector<DataType> rotated_centroid(get_padded_dim());
-    for (size_t i = 0; i < kDegreeBound; ++i) {
+    for (size_t i = 0; i < cur_degree; ++i) {
       const auto *neighbor_vec = get_data_by_id(new_neighbors[i].id_);
       this->rotator_->rotate(neighbor_vec, &rotated_neighbors[i * get_padded_dim()]);
     }
@@ -261,7 +267,7 @@ class RaBitQSpace {
     // quantize data and update batch data
     quantizer_->batch_quantize(rotated_neighbors.data(),
                                rotated_centroid.data(),
-                               kDegreeBound,
+                               cur_degree,
                                get_nei_qc_ptr(c),
                                get_f_add_ptr(c),
                                get_f_rescale_ptr(c),
@@ -480,31 +486,30 @@ class RaBitQSpace {
 
     DataType g_add_ = 0;
     DataType g_k1xsumq_ = 0;
+    DataType lut_delta_ = 0;
+    DataType lut_bias_ = 0;
 
-    alignas(64) std::array<uint16_t, fastscan::kBatchSize> accu_res_{};
+    // alignas(64) std::array<uint16_t, fastscan::kBatchSize> accu_res_{};
     alignas(64) std::array<DataType, kDegreeBound> est_dists_{};
 
     void batch_est_dist() {
       const char *base = storage_ptr_ + data_chunk_size_ * c_;
-      const uint8_t *ALAYA_RESTRICT qc_ptr = reinterpret_cast<const uint8_t *>(base + qc_offset_);
-      const DataType *ALAYA_RESTRICT f_add_ptr =
+      const auto *ALAYA_RESTRICT qc_ptr = reinterpret_cast<const uint8_t *>(base + qc_offset_);
+      const auto *ALAYA_RESTRICT f_add_ptr =
           reinterpret_cast<const DataType *>(base + f_add_offset_);
-      const DataType *ALAYA_RESTRICT f_rescale_ptr =
+      const auto *ALAYA_RESTRICT f_rescale_ptr =
           reinterpret_cast<const DataType *>(base + f_rescale_offset_);
       DataType *ALAYA_RESTRICT est_ptr = est_dists_.data();
 
-      // look up, get sum(nth_segment)
-      fastscan::accumulate(qc_ptr, lookup_table_.lut(), accu_res_.data(), padded_dim_);
-
-      ConstRowMajorArrayMap<uint16_t> n_th_segment_arr(accu_res_.data(), 1, fastscan::kBatchSize);
-      ConstRowMajorArrayMap<DataType> f_add_arr(f_add_ptr, 1, fastscan::kBatchSize);
-      ConstRowMajorArrayMap<DataType> f_rescale_arr(f_rescale_ptr, 1, fastscan::kBatchSize);
-
-      RowMajorArrayMap<DistDataType> est_dist_arr(est_ptr, 1, fastscan::kBatchSize);
-      est_dist_arr =
-          f_add_arr + g_add_ +
-          (f_rescale_arr * (lookup_table_.delta() * (n_th_segment_arr.template cast<DataType>()) +
-                            lookup_table_.sum_vl() + g_k1xsumq_));
+      fastscan::accumulate_and_estimate_distances(qc_ptr,
+                                                  lookup_table_.lut(),
+                                                  f_add_ptr,
+                                                  f_rescale_ptr,
+                                                  g_add_,
+                                                  lut_delta_,
+                                                  lut_bias_,
+                                                  est_ptr,
+                                                  padded_dim_);
     }
 
    public:
@@ -541,6 +546,8 @@ class RaBitQSpace {
                                   static_cast<DataType>(0));
 
       g_k1xsumq_ = sumq * c_1;
+      lut_delta_ = lookup_table_.delta();
+      lut_bias_ = lookup_table_.sum_vl() + g_k1xsumq_;
     }
 
     void load_centroid(IDType c) {

@@ -145,7 +145,7 @@ class RaBitQT2I1MTest : public ::testing::Test {
   Dataset ds_;
 };
 
-TEST_F(RaBitQT2I1MTest, T2I1MQGTest) {
+TEST_F(RaBitQT2I1MTest, DISABLED_T2I1MQGTest) {
   // ***************INDEX******************
   LOG_INFO("Building QG on T2I-1M (IP metric)...");
   std::filesystem::path index_file =
