@@ -22,9 +22,11 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "executor/jobs/graph_hybrid_search_job.hpp"
 #include "executor/jobs/graph_search_job.hpp"
 #include "index/graph/graph.hpp"
 #include "index/graph/hnsw/hnsw_builder.hpp"
+#include "index/graph/qg/qg_builder.hpp"
 #include "space/rabitq_space.hpp"
 #include "space/raw_space.hpp"
 #include "space/sq8_space.hpp"
@@ -246,6 +248,7 @@ class HybridSearchTest : public ::testing::Test {
     std::vector<ScalarData> metadata(item_cnt);
     for (uint32_t i = 0; i < item_cnt; ++i) {
       MetadataMap meta;
+      meta["id"] = static_cast<int64_t>(i);
       meta["category"] = static_cast<int64_t>(i % 5);
       meta["score"] = static_cast<double>(i) * 10.0;
       meta["name"] = std::string("item_") + std::to_string(i);
@@ -261,7 +264,7 @@ class HybridSearchTest : public ::testing::Test {
 
 TEST_F(HybridSearchTest, HybridSearchSoloWithEmptyFilter) {
   uint32_t topk = 10;
-  uint32_t ef = 50;
+  uint32_t ef = 86;
 
   // Create build space (RawSpace for graph construction)
   auto build_space = std::make_shared<RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
@@ -280,10 +283,9 @@ TEST_F(HybridSearchTest, HybridSearchSoloWithEmptyFilter) {
   search_space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
 
   // Create search job with both spaces (search space for distance, build space for rerank)
-  auto search_job = std::make_shared<GraphSearchJob<SQ8SpaceWithScalar, RawSpace<>>>(search_space,
-                                                                                     graph,
-                                                                                     nullptr,
-                                                                                     build_space);
+  auto hybrid_search_job =
+      std::make_shared<GraphHybridSearchJob<SQ8SpaceWithScalar, RawSpace<>>>(
+          search_space, graph, build_space);
 
   // Test with empty filter (should match all)
   MetadataFilter empty_filter = MetadataFilter::empty();
@@ -291,7 +293,7 @@ TEST_F(HybridSearchTest, HybridSearchSoloWithEmptyFilter) {
   std::vector<std::string> results(topk);
   auto query = ds_.queries_.data();
 
-  search_job->hybrid_search_solo(query, ids.data(), topk, ef, empty_filter, results.data());
+  hybrid_search_job->hybrid_search_solo(query, ids.data(), topk, ef, empty_filter, results.data());
 
   // Verify results
   std::set<uint32_t> unique_ids(ids.begin(), ids.end());
@@ -305,7 +307,7 @@ TEST_F(HybridSearchTest, HybridSearchSoloWithEmptyFilter) {
 
 TEST_F(HybridSearchTest, HybridSearchSoloWithCategoryFilter) {
   uint32_t topk = 5;
-  uint32_t ef = 100;
+  uint32_t ef = 86;
 
   auto build_space = std::make_shared<RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
   build_space->fit(ds_.data_.data(), ds_.data_num_);
@@ -321,10 +323,9 @@ TEST_F(HybridSearchTest, HybridSearchSoloWithCategoryFilter) {
   auto metadata = make_test_metadata(ds_.data_num_);
   search_space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
 
-  auto search_job = std::make_shared<GraphSearchJob<SQ8SpaceWithScalar, RawSpace<>>>(search_space,
-                                                                                     graph,
-                                                                                     nullptr,
-                                                                                     build_space);
+  auto hybrid_search_job =
+      std::make_shared<GraphHybridSearchJob<SQ8SpaceWithScalar, RawSpace<>>>(
+          search_space, graph, build_space);
 
   // Filter: category == 0 (every 5th item)
   MetadataFilter filter;
@@ -334,15 +335,193 @@ TEST_F(HybridSearchTest, HybridSearchSoloWithCategoryFilter) {
   std::vector<std::string> results(topk);
   auto query = ds_.queries_.data();
 
-  search_job->hybrid_search_solo(query, ids.data(), topk, ef, filter, results.data());
+  hybrid_search_job->hybrid_search_solo(query, ids.data(), topk, ef, filter, results.data());
 
-  // Verify all results have valid item IDs
+  // Verify indexed prefilter path keeps filter semantics.
   for (uint32_t i = 0; i < topk; i++) {
+    EXPECT_EQ(ids[i] % 5, 0U);
     EXPECT_FALSE(results[i].empty());
   }
 }
 
-TEST_F(HybridSearchTest, HybridSearchSoloThrowsWhenEfLessThanTopk) {
+TEST_F(HybridSearchTest, HybridSearchSoloWithNonIndexedScoreFilter) {
+  uint32_t topk = 5;
+  uint32_t ef = 86;
+
+  auto build_space = std::make_shared<RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
+  build_space->fit(ds_.data_.data(), ds_.data_num_);
+
+  HNSWBuilder<RawSpace<>> hnsw(build_space);
+  auto graph = std::shared_ptr<Graph<>>(hnsw.build_graph(max_thread_num_).release());
+
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.indexed_fields_ = {"category"};
+  auto search_space =
+      std::make_shared<SQ8SpaceWithScalar>(ds_.data_num_, ds_.dim_, MetricType::L2, config);
+  auto metadata = make_test_metadata(ds_.data_num_);
+  search_space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+
+  auto hybrid_search_job =
+      std::make_shared<GraphHybridSearchJob<SQ8SpaceWithScalar, RawSpace<>>>(
+          search_space, graph, build_space);
+
+  MetadataFilter filter;
+  filter.add_gt("score", 500.0);
+
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  auto query = ds_.queries_.data();
+
+  hybrid_search_job->hybrid_search_solo(query, ids.data(), topk, ef, filter, results.data());
+
+  uint32_t valid_count = 0;
+  for (uint32_t i = 0; i < topk; ++i) {
+    if (ids[i] == static_cast<uint32_t>(-1)) {
+      continue;
+    }
+    EXPECT_GT(ids[i], 50U);
+    EXPECT_FALSE(results[i].empty());
+    ++valid_count;
+  }
+  EXPECT_GT(valid_count, 0U);
+}
+
+TEST_F(HybridSearchTest, HybridSearchSoloWithIterativeFilterHint) {
+  uint32_t topk = 5;
+  uint32_t ef = 86;
+
+  auto build_space = std::make_shared<RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
+  build_space->fit(ds_.data_.data(), ds_.data_num_);
+
+  HNSWBuilder<RawSpace<>> hnsw(build_space);
+  auto graph = std::shared_ptr<Graph<>>(hnsw.build_graph(max_thread_num_).release());
+
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.indexed_fields_ = {"category"};
+  auto search_space =
+      std::make_shared<SQ8SpaceWithScalar>(ds_.data_num_, ds_.dim_, MetricType::L2, config);
+  auto metadata = make_test_metadata(ds_.data_num_);
+  search_space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+
+  auto hybrid_search_job =
+      std::make_shared<GraphHybridSearchJob<SQ8SpaceWithScalar, RawSpace<>>>(
+          search_space, graph, build_space);
+
+  MetadataFilter filter;
+  filter.add_gt("score", 500.0);
+
+  SearchInfo search_info{topk, ef, FilterExecHint::kIterativeFilter};
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  auto query = ds_.queries_.data();
+
+  hybrid_search_job->hybrid_search_solo(query, ids.data(), search_info, filter, results.data());
+
+  uint32_t valid_count = 0;
+  for (uint32_t i = 0; i < topk; ++i) {
+    if (ids[i] == static_cast<uint32_t>(-1)) {
+      continue;
+    }
+    EXPECT_GT(ids[i], 50U);
+    EXPECT_FALSE(results[i].empty());
+    ++valid_count;
+  }
+  EXPECT_GT(valid_count, 0U);
+}
+
+TEST_F(HybridSearchTest, HybridSearchSoloMatchesBruteForceForHighlySelectiveFilter) {
+  uint32_t topk = 5;
+  uint32_t ef = 86;
+
+  auto build_space = std::make_shared<RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
+  build_space->fit(ds_.data_.data(), ds_.data_num_);
+
+  HNSWBuilder<RawSpace<>> hnsw(build_space);
+  auto graph = std::shared_ptr<Graph<>>(hnsw.build_graph(max_thread_num_).release());
+
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.indexed_fields_ = {"category"};
+  auto search_space =
+      std::make_shared<SQ8SpaceWithScalar>(ds_.data_num_, ds_.dim_, MetricType::L2, config);
+  auto metadata = make_test_metadata(ds_.data_num_);
+  search_space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+
+  auto hybrid_search_job =
+      std::make_shared<GraphHybridSearchJob<SQ8SpaceWithScalar, RawSpace<>>>(
+          search_space, graph, build_space);
+
+  MetadataFilter filter;
+  filter.add_gt("score", 95000.0);
+
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  std::vector<uint32_t> brute_force_ids(topk);
+  std::vector<std::string> brute_force_results(topk);
+  auto query = ds_.queries_.data();
+
+  hybrid_search_job->hybrid_search_solo(query, ids.data(), topk, ef, filter, results.data());
+  hybrid_search_job->hybrid_search_brute_force_solo(
+      query, brute_force_ids.data(), topk, filter, brute_force_results.data());
+
+  EXPECT_EQ(ids, brute_force_ids);
+  EXPECT_EQ(results, brute_force_results);
+}
+
+TEST_F(HybridSearchTest, HybridSearchSoloAutoPlannerUsesIndexedExactForSparseIdFilter) {
+  constexpr uint32_t topk = 20;
+  constexpr uint32_t ef = 50;
+
+  auto build_space = std::make_shared<RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
+  build_space->fit(ds_.data_.data(), ds_.data_num_);
+
+  HNSWBuilder<RawSpace<>> hnsw(build_space);
+  auto graph = std::shared_ptr<Graph<>>(hnsw.build_graph(max_thread_num_).release());
+
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.indexed_fields_ = {"id", "category"};
+  auto search_space =
+      std::make_shared<SQ8SpaceWithScalar>(ds_.data_num_, ds_.dim_, MetricType::L2, config);
+  auto metadata = make_test_metadata(ds_.data_num_);
+  search_space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+
+  using HybridJobType = GraphHybridSearchJob<SQ8SpaceWithScalar, RawSpace<>>;
+  auto hybrid_search_job =
+      std::make_shared<HybridJobType>(search_space, graph, build_space);
+
+  auto threshold = static_cast<int64_t>(ds_.data_num_ - 500);
+  MetadataFilter filter;
+  filter.add_ge("id", threshold);
+
+  auto filter_executor = hybrid_search_job->make_filter_executor(filter);
+  SearchInfo search_info{topk, ef, FilterExecHint::kAuto};
+  EXPECT_EQ(hybrid_search_job->build_search_mode(filter_executor, search_info),
+            HybridJobType::Mode::kIndexedExact);
+
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  std::vector<uint32_t> brute_force_ids(topk);
+  std::vector<std::string> brute_force_results(topk);
+  auto query = ds_.queries_.data();
+
+  hybrid_search_job->hybrid_search_solo(query, ids.data(), search_info, filter, results.data());
+  hybrid_search_job->hybrid_search_brute_force_solo(
+      query, brute_force_ids.data(), topk, filter, brute_force_results.data());
+
+  EXPECT_EQ(ids, brute_force_ids);
+  EXPECT_EQ(results, brute_force_results);
+  for (uint32_t i = 0; i < topk; ++i) {
+    if (ids[i] == static_cast<uint32_t>(-1)) {
+      continue;
+    }
+    EXPECT_GE(static_cast<int64_t>(ids[i]), threshold);
+  }
+}
+
+TEST_F(HybridSearchTest, HybridSearchSoloRejectsEfLessThanTopk) {
   auto build_space = std::make_shared<RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
   build_space->fit(ds_.data_.data(), ds_.data_num_);
 
@@ -356,19 +535,55 @@ TEST_F(HybridSearchTest, HybridSearchSoloThrowsWhenEfLessThanTopk) {
   auto metadata = make_test_metadata(ds_.data_num_);
   search_space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
 
-  auto search_job = std::make_shared<GraphSearchJob<SQ8SpaceWithScalar, RawSpace<>>>(search_space,
-                                                                                     graph,
-                                                                                     nullptr,
-                                                                                     build_space);
+  auto hybrid_search_job =
+      std::make_shared<GraphHybridSearchJob<SQ8SpaceWithScalar, RawSpace<>>>(
+          search_space, graph, build_space);
 
   MetadataFilter filter = MetadataFilter::empty();
   std::vector<uint32_t> ids(10);
   std::vector<std::string> results(10);
   auto query = ds_.queries_.data();
 
-  // ef=5, topk=10 should throw
-  EXPECT_THROW(search_job->hybrid_search_solo(query, ids.data(), 10, 5, filter, results.data()),
-               std::invalid_argument);
+  EXPECT_THROW(
+      hybrid_search_job->hybrid_search_solo(query, ids.data(), 10, 5, filter, results.data()),
+      std::invalid_argument);
+}
+
+TEST_F(HybridSearchTest, HybridSearchSoloRetriesThenFallsBackWhenFilterMatchesNothing) {
+  uint32_t topk = 5;
+  uint32_t ef = 5;
+
+  auto build_space = std::make_shared<RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
+  build_space->fit(ds_.data_.data(), ds_.data_num_);
+
+  HNSWBuilder<RawSpace<>> hnsw(build_space);
+  auto graph = std::shared_ptr<Graph<>>(hnsw.build_graph(max_thread_num_).release());
+
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.indexed_fields_ = {"category"};
+  auto search_space =
+      std::make_shared<SQ8SpaceWithScalar>(ds_.data_num_, ds_.dim_, MetricType::L2, config);
+  auto metadata = make_test_metadata(ds_.data_num_);
+  search_space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+
+  auto hybrid_search_job =
+      std::make_shared<GraphHybridSearchJob<SQ8SpaceWithScalar, RawSpace<>>>(
+          search_space, graph, build_space);
+
+  MetadataFilter filter;
+  filter.add_eq("category", static_cast<int64_t>(99));
+
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  auto query = ds_.queries_.data();
+
+  hybrid_search_job->hybrid_search_solo(query, ids.data(), topk, ef, filter, results.data());
+
+  for (uint32_t i = 0; i < topk; ++i) {
+    EXPECT_EQ(ids[i], static_cast<uint32_t>(-1));
+    EXPECT_TRUE(results[i].empty());
+  }
 }
 
 // ============================================================================
@@ -399,6 +614,7 @@ class RaBitQHybridSearchTest : public ::testing::Test {
     std::vector<ScalarData> metadata(item_cnt);
     for (uint32_t i = 0; i < item_cnt; ++i) {
       MetadataMap meta;
+      meta["id"] = static_cast<int64_t>(i);
       meta["category"] = static_cast<int64_t>(i % 5);
       meta["score"] = static_cast<double>(i) * 10.0;
       metadata[i] = ScalarData("id_" + std::to_string(i), "doc_" + std::to_string(i), meta);
@@ -410,9 +626,48 @@ class RaBitQHybridSearchTest : public ::testing::Test {
   std::string db_path_;
 };
 
+TEST(RaBitQGraphSearchJobTest, AllowsNullBuildSpaceForScalarMetadataVariant) {
+  using SearchSpaceType = RaBitQSpace<float, float, uint32_t, ScalarData>;
+  using BuildSpaceType = RaBitQSpace<float, float, uint32_t, EmptyScalarData>;
+  using SearchJobType = GraphSearchJob<SearchSpaceType, BuildSpaceType>;
+
+  auto db_path = std::filesystem::path("./test_rabitq_graph_search_job_rocksdb");
+  std::filesystem::remove_all(db_path);
+  {
+    RocksDBConfig config;
+    config.db_path_ = db_path.string();
+
+    constexpr uint32_t kDim = 64;
+    constexpr uint32_t kCount = 4;
+    auto search_space = std::make_shared<SearchSpaceType>(kCount, kDim, MetricType::L2, config);
+
+    std::vector<float> vectors(kCount * kDim, 0.0f);
+    for (uint32_t i = 0; i < kCount; ++i) {
+      vectors[i * kDim + i] = 1.0f;
+    }
+
+    std::vector<ScalarData> metadata;
+    metadata.reserve(kCount);
+    for (uint32_t i = 0; i < kCount; ++i) {
+      MetadataMap meta;
+      meta["category"] = static_cast<int64_t>(i % 2);
+      metadata.emplace_back("id_" + std::to_string(i), "doc_" + std::to_string(i), std::move(meta));
+    }
+
+    search_space->fit(vectors.data(), kCount, metadata.data());
+
+    EXPECT_NO_THROW((void)std::make_unique<SearchJobType>(search_space, nullptr));
+
+    auto search_job = std::make_unique<SearchJobType>(search_space, nullptr);
+    EXPECT_NE(search_job, nullptr);
+  }
+
+  std::filesystem::remove_all(db_path);
+}
+
 TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithEmptyFilter) {
   uint32_t topk = 10;
-  uint32_t ef = 50;
+  uint32_t ef = 86;
 
   RocksDBConfig config;
   config.db_path_ = db_path_;
@@ -424,18 +679,25 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithEmptyFilter) {
                                                        RotatorType::MatrixRotator);
   auto metadata = make_test_metadata(ds_.data_num_);
   space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+  QGBuilder<RaBitQSpaceWithScalar> qg(space);
+  qg.build_graph();
 
-  // RaBitQ uses its own graph structure, create a dummy graph for the search job
   auto graph = std::make_shared<Graph<>>(ds_.data_num_, RaBitQSpace<>::kDegreeBound);
 
-  auto search_job = std::make_shared<GraphSearchJob<RaBitQSpaceWithScalar>>(space, graph);
+  auto hybrid_search_job = std::make_shared<GraphHybridSearchJob<RaBitQSpaceWithScalar>>(space,
+                                                                                          graph);
 
   MetadataFilter empty_filter = MetadataFilter::empty();
   std::vector<uint32_t> ids(topk);
   std::vector<std::string> results(topk);
   auto query = ds_.queries_.data();
 
-  search_job->rabitq_hybrid_search_solo(query, topk, ids.data(), ef, empty_filter, results.data());
+  hybrid_search_job->rabitq_hybrid_search_solo(query,
+                                               topk,
+                                               ids.data(),
+                                               ef,
+                                               empty_filter,
+                                               results.data());
 
   // Verify results are valid
   uint32_t valid_count = 0;
@@ -449,7 +711,7 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithEmptyFilter) {
 
 TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithCategoryFilter) {
   uint32_t topk = 5;
-  uint32_t ef = 100;
+  uint32_t ef = 86;
 
   RocksDBConfig config;
   config.db_path_ = db_path_;
@@ -462,10 +724,13 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithCategoryFilter) {
                                                        RotatorType::MatrixRotator);
   auto metadata = make_test_metadata(ds_.data_num_);
   space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+  QGBuilder<RaBitQSpaceWithScalar> qg(space);
+  qg.build_graph();
 
   auto graph = std::make_shared<Graph<>>(ds_.data_num_, RaBitQSpace<>::kDegreeBound);
 
-  auto search_job = std::make_shared<GraphSearchJob<RaBitQSpaceWithScalar>>(space, graph);
+  auto hybrid_search_job = std::make_shared<GraphHybridSearchJob<RaBitQSpaceWithScalar>>(space,
+                                                                                          graph);
 
   // Filter: category == 2
   MetadataFilter filter;
@@ -475,15 +740,113 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithCategoryFilter) {
   std::vector<std::string> results(topk);
   auto query = ds_.queries_.data();
 
-  search_job->rabitq_hybrid_search_solo(query, topk, ids.data(), ef, filter, results.data());
+  hybrid_search_job->rabitq_hybrid_search_solo(query,
+                                               topk,
+                                               ids.data(),
+                                               ef,
+                                               filter,
+                                               results.data());
 
-  // Verify results have valid item IDs
+  // Verify indexed prefilter path keeps filter semantics.
   for (uint32_t i = 0; i < topk; i++) {
+    EXPECT_EQ(ids[i] % 5, 2U);
     EXPECT_FALSE(results[i].empty());
   }
 }
 
-TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloThrowsWhenEfLessThanK) {
+TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithNonIndexedScoreFilter) {
+  uint32_t topk = 5;
+  uint32_t ef = 86;
+
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.indexed_fields_ = {"category"};
+
+  auto space = std::make_shared<RaBitQSpaceWithScalar>(ds_.data_num_,
+                                                       ds_.dim_,
+                                                       MetricType::L2,
+                                                       config,
+                                                       RotatorType::MatrixRotator);
+  auto metadata = make_test_metadata(ds_.data_num_);
+  space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+  QGBuilder<RaBitQSpaceWithScalar> qg(space);
+  qg.build_graph();
+
+  auto graph = std::make_shared<Graph<>>(ds_.data_num_, RaBitQSpace<>::kDegreeBound);
+  auto hybrid_search_job = std::make_shared<GraphHybridSearchJob<RaBitQSpaceWithScalar>>(space,
+                                                                                          graph);
+
+  MetadataFilter filter;
+  filter.add_gt("score", 500.0);
+
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  auto query = ds_.queries_.data();
+
+  hybrid_search_job->rabitq_hybrid_search_solo(query,
+                                               topk,
+                                               ids.data(),
+                                               ef,
+                                               filter,
+                                               results.data());
+
+  uint32_t valid_count = 0;
+  for (uint32_t i = 0; i < topk; ++i) {
+    if (ids[i] == static_cast<uint32_t>(-1)) {
+      continue;
+    }
+    EXPECT_GT(ids[i], 50U);
+    EXPECT_FALSE(results[i].empty());
+    ++valid_count;
+  }
+  EXPECT_GT(valid_count, 0U);
+}
+
+TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithIterativeFilterHint) {
+  uint32_t topk = 5;
+  uint32_t ef = 86;
+
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.indexed_fields_ = {"category"};
+
+  auto space = std::make_shared<RaBitQSpaceWithScalar>(ds_.data_num_,
+                                                       ds_.dim_,
+                                                       MetricType::L2,
+                                                       config,
+                                                       RotatorType::MatrixRotator);
+  auto metadata = make_test_metadata(ds_.data_num_);
+  space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+  QGBuilder<RaBitQSpaceWithScalar> qg(space);
+  qg.build_graph();
+
+  auto graph = std::make_shared<Graph<>>(ds_.data_num_, RaBitQSpace<>::kDegreeBound);
+  auto hybrid_search_job = std::make_shared<GraphHybridSearchJob<RaBitQSpaceWithScalar>>(space,
+                                                                                          graph);
+
+  MetadataFilter filter;
+  filter.add_gt("score", 500.0);
+
+  SearchInfo search_info{topk, ef, FilterExecHint::kIterativeFilter};
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  auto query = ds_.queries_.data();
+
+  hybrid_search_job->rabitq_hybrid_search_solo(query, search_info, ids.data(), filter, results.data());
+
+  uint32_t valid_count = 0;
+  for (uint32_t i = 0; i < topk; ++i) {
+    if (ids[i] == static_cast<uint32_t>(-1)) {
+      continue;
+    }
+    EXPECT_GT(ids[i], 50U);
+    EXPECT_FALSE(results[i].empty());
+    ++valid_count;
+  }
+  EXPECT_GT(valid_count, 0U);
+}
+
+TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloRejectsEfLessThanK) {
   RocksDBConfig config;
   config.db_path_ = db_path_;
 
@@ -494,20 +857,154 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloThrowsWhenEfLessThanK) {
                                                        RotatorType::MatrixRotator);
   auto metadata = make_test_metadata(ds_.data_num_);
   space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+  QGBuilder<RaBitQSpaceWithScalar> qg(space);
+  qg.build_graph();
 
   auto graph = std::make_shared<Graph<>>(ds_.data_num_, RaBitQSpace<>::kDegreeBound);
 
-  auto search_job = std::make_shared<GraphSearchJob<RaBitQSpaceWithScalar>>(space, graph);
+  auto hybrid_search_job = std::make_shared<GraphHybridSearchJob<RaBitQSpaceWithScalar>>(space,
+                                                                                          graph);
 
   MetadataFilter filter = MetadataFilter::empty();
   std::vector<uint32_t> ids(10);
   std::vector<std::string> results(10);
   auto query = ds_.queries_.data();
 
-  // k=10, ef=5 should throw
-  EXPECT_THROW(search_job
-                   ->rabitq_hybrid_search_solo(query, 10, ids.data(), 5, filter, results.data()),
-               std::invalid_argument);
+  EXPECT_THROW(
+      hybrid_search_job->rabitq_hybrid_search_solo(query, 10, ids.data(), 5, filter, results.data()),
+      std::invalid_argument);
+}
+
+TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloRetriesThenFallsBackWhenFilterMatchesNothing) {
+  uint32_t topk = 5;
+  uint32_t ef = 5;
+
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.indexed_fields_ = {"category"};
+
+  auto space = std::make_shared<RaBitQSpaceWithScalar>(ds_.data_num_,
+                                                       ds_.dim_,
+                                                       MetricType::L2,
+                                                       config,
+                                                       RotatorType::MatrixRotator);
+  auto metadata = make_test_metadata(ds_.data_num_);
+  space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+  QGBuilder<RaBitQSpaceWithScalar> qg(space);
+  qg.build_graph();
+
+  auto graph = std::make_shared<Graph<>>(ds_.data_num_, RaBitQSpace<>::kDegreeBound);
+  auto hybrid_search_job = std::make_shared<GraphHybridSearchJob<RaBitQSpaceWithScalar>>(space,
+                                                                                          graph);
+
+  MetadataFilter filter;
+  filter.add_eq("category", static_cast<int64_t>(99));
+
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  auto query = ds_.queries_.data();
+
+  hybrid_search_job->rabitq_hybrid_search_solo(query, topk, ids.data(), ef, filter, results.data());
+
+  for (uint32_t i = 0; i < topk; ++i) {
+    EXPECT_EQ(ids[i], static_cast<uint32_t>(-1));
+    EXPECT_TRUE(results[i].empty());
+  }
+}
+
+TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchBruteForceFallbackHandlesSparseIdFilter) {
+  constexpr uint32_t topk = 20;
+  constexpr uint32_t ef = 50;
+
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.indexed_fields_ = {"id", "category"};
+
+  auto space = std::make_shared<RaBitQSpaceWithScalar>(ds_.data_num_,
+                                                       ds_.dim_,
+                                                       MetricType::L2,
+                                                       config,
+                                                       RotatorType::MatrixRotator);
+  auto metadata = make_test_metadata(ds_.data_num_);
+  space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+  QGBuilder<RaBitQSpaceWithScalar> qg(space);
+  qg.build_graph();
+
+  auto graph = std::make_shared<Graph<>>(ds_.data_num_, RaBitQSpace<>::kDegreeBound);
+  auto hybrid_search_job = std::make_shared<GraphHybridSearchJob<RaBitQSpaceWithScalar>>(space,
+                                                                                          graph);
+
+  auto threshold = static_cast<int64_t>(ds_.data_num_ - 500);
+  MetadataFilter filter;
+  filter.add_ge("id", threshold);
+
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  auto query = ds_.queries_.data();
+
+  hybrid_search_job->rabitq_hybrid_search_solo(query, topk, ids.data(), ef, filter, results.data());
+
+  uint32_t valid_count = 0;
+  for (uint32_t i = 0; i < topk; ++i) {
+    if (ids[i] == static_cast<uint32_t>(-1)) {
+      continue;
+    }
+    EXPECT_GE(static_cast<int64_t>(ids[i]), threshold);
+    EXPECT_FALSE(results[i].empty());
+    ++valid_count;
+  }
+  EXPECT_GT(valid_count, 0U);
+}
+
+TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchAutoPlannerUsesIndexedExactForSparseIdFilter) {
+  constexpr uint32_t topk = 20;
+  constexpr uint32_t ef = 50;
+
+  RocksDBConfig config;
+  config.db_path_ = db_path_;
+  config.indexed_fields_ = {"id", "category"};
+
+  auto space = std::make_shared<RaBitQSpaceWithScalar>(ds_.data_num_,
+                                                       ds_.dim_,
+                                                       MetricType::L2,
+                                                       config,
+                                                       RotatorType::MatrixRotator);
+  auto metadata = make_test_metadata(ds_.data_num_);
+  space->fit(ds_.data_.data(), ds_.data_num_, metadata.data());
+  QGBuilder<RaBitQSpaceWithScalar> qg(space);
+  qg.build_graph();
+
+  auto graph = std::make_shared<Graph<>>(ds_.data_num_, RaBitQSpace<>::kDegreeBound);
+  using HybridJobType = GraphHybridSearchJob<RaBitQSpaceWithScalar>;
+  auto hybrid_search_job = std::make_shared<HybridJobType>(space, graph);
+
+  auto threshold = static_cast<int64_t>(ds_.data_num_ - 500);
+  MetadataFilter filter;
+  filter.add_ge("id", threshold);
+
+  auto filter_executor = hybrid_search_job->make_filter_executor(filter);
+  SearchInfo search_info{topk, ef, FilterExecHint::kAuto};
+  EXPECT_EQ(hybrid_search_job->build_search_mode(filter_executor, search_info),
+            HybridJobType::Mode::kIndexedExact);
+
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  std::vector<uint32_t> brute_force_ids(topk);
+  std::vector<std::string> brute_force_results(topk);
+  auto query = ds_.queries_.data();
+
+  hybrid_search_job->rabitq_hybrid_search_solo(query, search_info, ids.data(), filter, results.data());
+  hybrid_search_job->hybrid_search_brute_force_solo(
+      query, brute_force_ids.data(), topk, filter, brute_force_results.data());
+
+  EXPECT_EQ(ids, brute_force_ids);
+  EXPECT_EQ(results, brute_force_results);
+  for (uint32_t i = 0; i < topk; ++i) {
+    if (ids[i] == static_cast<uint32_t>(-1)) {
+      continue;
+    }
+    EXPECT_GE(static_cast<int64_t>(ids[i]), threshold);
+  }
 }
 
 #endif  // __AVX512F__
