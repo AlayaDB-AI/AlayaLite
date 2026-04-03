@@ -18,6 +18,7 @@
 #include <rocksdb/db.h>
 #include <filesystem>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "storage/rocksdb_storage.hpp"
@@ -92,6 +93,33 @@ TEST_F(RocksDBStorageTest, IsValidWorksCorrectly) {
   EXPECT_TRUE(storage.is_valid(id));
   EXPECT_FALSE(storage.is_valid(id + 1));
   EXPECT_FALSE(storage.is_valid(999));
+}
+
+TEST(ScalarDataTest, DeserializeSingleMetadataValueAndSelectedFields) {
+    ScalarData data{"id_001",
+                    "document content",
+                    {{"category", std::string("tech")},
+                     {"score", int64_t(95)},
+                     {"featured", true}}};
+    auto serialized = data.serialize();
+
+    std::unordered_set<std::string> required_fields{"category"};
+    auto selected = ScalarData::deserialize_selected_metadata(serialized.data(),
+                                                              serialized.size(),
+                                                              required_fields);
+    ASSERT_EQ(selected.size(), 1U);
+    EXPECT_EQ(std::get<std::string>(selected.at("category")), "tech");
+
+    auto score = ScalarData::deserialize_single_metadata_value(serialized.data(),
+                                                               serialized.size(),
+                                                               "score");
+    ASSERT_TRUE(score.has_value());
+    EXPECT_EQ(std::get<int64_t>(*score), 95);
+
+    auto missing = ScalarData::deserialize_single_metadata_value(serialized.data(),
+                                                                 serialized.size(),
+                                                                 "missing");
+    EXPECT_FALSE(missing.has_value());
 }
 
 TEST_F(RocksDBStorageTest, UpdateOperations) {
