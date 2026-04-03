@@ -36,13 +36,18 @@ class TestClientWithURL(unittest.TestCase):
         # Create temp directory for test isolation
         self.temp_dir = tempfile.mkdtemp()
         # Set RocksDB directory to temp_dir for isolation
+        self._original_rocksdb_dir = os.environ.get("ALAYALITE_ROCKSDB_DIR")
         os.environ["ALAYALITE_ROCKSDB_DIR"] = os.path.join(self.temp_dir, "RocksDB")
         self.client = Client(self.temp_dir)
 
     def tearDown(self):
         """Clean up temp directories after each test."""
-        # del self.client
-        # gc.collect()
+        del self.client
+        gc.collect()
+        if self._original_rocksdb_dir is None:
+            os.environ.pop("ALAYALITE_ROCKSDB_DIR", None)
+        else:
+            os.environ["ALAYALITE_ROCKSDB_DIR"] = self._original_rocksdb_dir
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
 
@@ -72,6 +77,7 @@ class TestClientWithURL(unittest.TestCase):
             client.save_collection("non-exist")
         coll_name = "coll"
         coll = client.create_collection(coll_name)
+        self.assertEqual(coll.get_index_params().rocksdb_path, os.path.join(self.temp_dir, coll_name, "rocksdb"))
         coll.insert(self.coll_items)
         self.assertIn(coll_name, client.list_collections())
 

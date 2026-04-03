@@ -27,8 +27,10 @@ from .common import (
     VectorLike,
     VectorLikeBatch,
     _assert,
+    _validate_query_vectors,
 )
 from .schema import IndexParams, load_schema
+from .utils import normalize_vectors_for_cosine_metric
 
 
 # Pylint is incorrectly flagging used private members.
@@ -109,11 +111,7 @@ class Index:
         self.__index = _PyIndexInterface(self.__params.to_cpp_params())
         self.__is_initialized = True
 
-        # Normalize vectors for cosine metric
-        if self.__params.metric in ("cos", "cosine"):
-            norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-            norms = np.where(norms == 0, 1, norms)
-            vectors = vectors / norms
+        vectors = normalize_vectors_for_cosine_metric(vectors, self.__params.metric)
 
         print(
             f"fitting index with the following parameters: \n"
@@ -133,11 +131,7 @@ class Index:
             f"vectors dimension must match the dimension of the vectors used to fit the index."
             f"fit data dimension: {self.__dim}, vectors dimension: {vectors.shape[0]}",
         )
-        # Normalize vector for cosine metric
-        if self.__params.metric in ("cos", "cosine"):
-            norm = np.linalg.norm(vectors)
-            if norm > 0:
-                vectors = vectors / norm
+        vectors = normalize_vectors_for_cosine_metric(vectors, self.__params.metric)
         ret = self.__index.insert(vectors, ef)
         is_full_uint32 = self.__params.id_type == np.uint32 and ret == 4294967295
         is_full_uint64 = self.__params.id_type == np.uint64 and ret == 18446744073709551615
@@ -158,18 +152,14 @@ class Index:
         Perform a nearest neighbor search for a given query vector.
         """
         _assert(self.__index is not None, "Index is not init yet")
-        _assert(query.ndim == 1, "query must be a 1D array")
+        _assert(np.asarray(query).ndim == 1, "query must be a 1D array")
+        query_arr, _ = _validate_query_vectors(query, self.__dim, name="query", metric=self.__params.metric)
         _assert(
-            query.shape[0] == self.__dim,
+            query_arr.shape[1] == self.__dim,
             f"query dimension must match the dimension of the vectors used to fit the index."
-            f"fit data dimension: {self.__dim}, query dimension: {query.shape[0]}",
+            f"fit data dimension: {self.__dim}, query dimension: {query_arr.shape[1]}",
         )
-        # Normalize query for cosine metric
-        if self.__params.metric in ("cos", "cosine"):
-            norm = np.linalg.norm(query)
-            if norm > 0:
-                query = query / norm
-        return self.__index.search(query, topk, ef_search)
+        return self.__index.search(query_arr[0], topk, ef_search)
 
     def batch_search(
         self,
@@ -182,17 +172,13 @@ class Index:
         Perform a batch search for multiple query vectors.
         """
         _assert(self.__index is not None, "Index is not init yet")
-        _assert(queries.ndim == 2, "queries must be a 2D array")
-        _assert(
-            queries.shape[1] == self.__dim,
-            f"query dimension must match the dimension of the vectors used to fit the index."
-            f"fit data dimension: {self.__dim}, query dimension: {queries.shape[1]}",
+        queries, _ = _validate_query_vectors(
+            queries,
+            self.__dim,
+            allow_1d=False,
+            name="queries",
+            metric=self.__params.metric,
         )
-        # Normalize queries for cosine metric
-        if self.__params.metric in ("cos", "cosine"):
-            norms = np.linalg.norm(queries, axis=1, keepdims=True)
-            norms = np.where(norms == 0, 1, norms)
-            queries = queries / norms
         return self.__index.batch_search(queries, topk, ef_search, num_threads)
 
     def batch_search_with_distance(
@@ -206,17 +192,13 @@ class Index:
         Perform a batch search for multiple query vectors.
         """
         _assert(self.__index is not None, "Index is not init yet")
-        _assert(queries.ndim == 2, "queries must be a 2D array")
-        _assert(
-            queries.shape[1] == self.__dim,
-            f"query dimension must match the dimension of the vectors used to fit the index."
-            f"fit data dimension: {self.__dim}, query dimension: {queries.shape[1]}",
+        queries, _ = _validate_query_vectors(
+            queries,
+            self.__dim,
+            allow_1d=False,
+            name="queries",
+            metric=self.__params.metric,
         )
-        # Normalize queries for cosine metric
-        if self.__params.metric in ("cos", "cosine"):
-            norms = np.linalg.norm(queries, axis=1, keepdims=True)
-            norms = np.where(norms == 0, 1, norms)
-            queries = queries / norms
         return self.__index.batch_search_with_distance(queries, topk, ef_search, num_threads)
 
     def get_dim(self):

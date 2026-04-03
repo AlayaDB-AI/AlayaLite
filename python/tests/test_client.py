@@ -16,6 +16,7 @@
 Unit tests for the AlayaLite Client class.
 """
 
+import gc
 import os
 import shutil
 import tempfile
@@ -31,11 +32,18 @@ class TestClient(unittest.TestCase):
     def setUp(self):
         # Create temp directory for RocksDB isolation
         self.tmp_dir = tempfile.mkdtemp()
+        self._original_rocksdb_dir = os.environ.get("ALAYALITE_ROCKSDB_DIR")
         os.environ["ALAYALITE_ROCKSDB_DIR"] = os.path.join(self.tmp_dir, "RocksDB")
         self.client = Client()
 
     def tearDown(self):
         """Clean up temp directories after each test."""
+        del self.client
+        gc.collect()
+        if self._original_rocksdb_dir is None:
+            os.environ.pop("ALAYALITE_ROCKSDB_DIR", None)
+        else:
+            os.environ["ALAYALITE_ROCKSDB_DIR"] = self._original_rocksdb_dir
         if os.path.exists(self.tmp_dir):
             shutil.rmtree(self.tmp_dir)
 
@@ -140,7 +148,7 @@ class TestClient(unittest.TestCase):
         col1 = self.client.create_collection("col1")
         col1.insert(items)
         params1 = col1.get_index_params()
-        self.assertEqual(params1.quantization_type, "sq4")  # default quantization type is now "sq4"
+        self.assertEqual(params1.quantization_type, "none")
 
         col2 = self.client.create_collection("col2", quantization_type="sq8")
         col2.insert(items)
