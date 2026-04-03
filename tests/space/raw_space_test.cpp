@@ -18,6 +18,7 @@
 #include <gtest/gtest.h>
 #include <sys/types.h>
 #include <cmath>
+#include <filesystem>
 #include "utils/metric_type.hpp"
 namespace alaya {
 
@@ -119,6 +120,53 @@ TEST_F(RawSpaceTest, TestDistanceUInt8) {
 
   // Check if the calculated distance matches the expected distance.
   ASSERT_FLOAT_EQ(distance, expected_distance);
+}
+
+TEST(RawSpaceScalarTest, TestFitInsertAndFilterScalarData) {
+  const std::string db_path = "./test_raw_space_scalar_db";
+  if (std::filesystem::exists(db_path)) {
+    std::filesystem::remove_all(db_path);
+  }
+
+  RocksDBConfig config;
+  config.db_path_ = db_path;
+  config.indexed_fields_ = {"category"};
+
+  using RawSpaceWithScalar = RawSpace<float, float, uint32_t, SequentialStorage<float, uint32_t>, ScalarData>;
+  RawSpaceWithScalar space(10, 3, MetricType::L2, config);
+
+  std::vector<float> data = {
+      1.0F, 2.0F, 3.0F,
+      4.0F, 5.0F, 6.0F,
+  };
+
+  std::vector<ScalarData> scalar = {
+      ScalarData("id_1", "doc_1", MetadataMap{{"category", std::string("A")}}),
+      ScalarData("id_2", "doc_2", MetadataMap{{"category", std::string("B")}}),
+  };
+
+  space.fit(data.data(), 2, scalar.data());
+
+  auto [internal_id, scalar_data] = space.get_scalar_data("id_1");
+  EXPECT_EQ(internal_id, 0U);
+  EXPECT_EQ(scalar_data.document, "doc_1");
+
+  MetadataFilter filter;
+  filter.add_eq("category", std::string("A"));
+  auto results = space.get_scalar_data(filter, 10);
+  ASSERT_EQ(results.size(), 1U);
+  EXPECT_EQ(results[0].second.item_id, "id_1");
+
+  std::vector<float> extra = {7.0F, 8.0F, 9.0F};
+  ScalarData extra_scalar("id_3", "doc_3", MetadataMap{{"category", std::string("A")}});
+  auto new_id = space.insert(extra.data(), &extra_scalar);
+  EXPECT_EQ(new_id, 2U);
+  EXPECT_EQ(space.get_scalar_data(new_id).item_id, "id_3");
+
+  space.remove(new_id);
+  EXPECT_FALSE(space.get_scalar_storage()->find_by_item_id("id_3").has_value());
+  space.close_db();
+  std::filesystem::remove_all(db_path);
 }
 
 }  // namespace alaya

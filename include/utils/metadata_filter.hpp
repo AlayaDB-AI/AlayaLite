@@ -241,6 +241,21 @@ struct MetadataFilter {
   }
 
   /**
+   * @brief Add a greater-than-or-equal condition
+   * @param field Field name
+   * @param value Value to compare
+   * @return Reference to this filter for chaining
+   */
+  auto add_ge(const std::string &field, const MetadataValue &value) -> MetadataFilter & {
+    FilterCondition cond;
+    cond.field = field;
+    cond.op = FilterOp::GE;
+    cond.value = value;
+    conditions.push_back(std::move(cond));
+    return *this;
+  }
+
+  /**
    * @brief Add a less-than condition
    * @param field Field name
    * @param value Value to compare
@@ -250,6 +265,21 @@ struct MetadataFilter {
     FilterCondition cond;
     cond.field = field;
     cond.op = FilterOp::LT;
+    cond.value = value;
+    conditions.push_back(std::move(cond));
+    return *this;
+  }
+
+  /**
+   * @brief Add a less-than-or-equal condition
+   * @param field Field name
+   * @param value Value to compare
+   * @return Reference to this filter for chaining
+   */
+  auto add_le(const std::string &field, const MetadataValue &value) -> MetadataFilter & {
+    FilterCondition cond;
+    cond.field = field;
+    cond.op = FilterOp::LE;
     cond.value = value;
     conditions.push_back(std::move(cond));
     return *this;

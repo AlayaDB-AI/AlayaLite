@@ -23,15 +23,13 @@
 
 #include "scalar_data.hpp"
 
-namespace alaya {
-
 /**
  * @brief Utilities for encoding metadata values to sortable strings for indexing.
  *
  * These encodings ensure that RocksDB's lexicographic ordering matches the
  * natural ordering of the values (including negative numbers and floats).
  */
-namespace index_encoding {
+namespace alaya::index_encoding {
 
 /**
  * @brief Encode int64 to sortable hex string (handles negative numbers)
@@ -154,5 +152,4 @@ inline auto extract_id_from_key(const std::string &key) -> IDType {
   return static_cast<IDType>(std::stoul(key.substr(last_underscore + 1)));
 }
 
-}  // namespace index_encoding
-}  // namespace alaya
+}  // namespace alaya::index_encoding

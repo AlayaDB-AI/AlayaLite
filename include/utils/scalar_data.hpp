@@ -18,8 +18,11 @@
 
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -80,6 +83,102 @@ struct ScalarData {
   }
 
   /**
+   * @brief Deserialize only selected metadata fields from serialized ScalarData.
+   * @param data Pointer to serialized data
+   * @param size Size of serialized data
+   * @param required_fields Fields to extract from metadata
+   * @return Metadata map containing only requested fields
+   */
+  static auto deserialize_selected_metadata(const char *data,
+                                            size_t size,
+                                            const std::unordered_set<std::string> &required_fields)
+      -> MetadataMap {
+    MetadataMap result;
+    if (required_fields.empty() || data == nullptr || size == 0) {
+      return result;
+    }
+
+    size_t offset = 0;
+    skip_string(data, size, offset);  // item_id
+    skip_string(data, size, offset);  // document
+
+    if (offset + sizeof(uint32_t) > size) {
+      return result;
+    }
+
+    uint32_t count;
+    std::memcpy(&count, data + offset, sizeof(count));
+    offset += sizeof(count);
+
+    for (uint32_t i = 0; i < count && offset < size; ++i) {
+      std::string key = deserialize_string(data, size, offset);
+      if (key.empty() && offset > size) {
+        return MetadataMap{};
+      }
+
+      if (required_fields.contains(key)) {
+        MetadataValue value = deserialize_value(data, size, offset);
+        if (offset > size) {
+          return MetadataMap{};
+        }
+        result.emplace(std::move(key), std::move(value));
+        if (result.size() == required_fields.size()) {
+          break;
+        }
+      } else {
+        skip_value(data, size, offset);
+        if (offset > size) {
+          return MetadataMap{};
+        }
+      }
+    }
+    return result;
+  }
+
+  static auto deserialize_single_metadata_value(const char *data,
+                                                size_t size,
+                                                std::string_view field)
+      -> std::optional<MetadataValue> {
+    if (field.empty() || data == nullptr || size == 0) {
+      return std::nullopt;
+    }
+
+    size_t offset = 0;
+    skip_string(data, size, offset);  // item_id
+    skip_string(data, size, offset);  // document
+
+    if (offset + sizeof(uint32_t) > size) {
+      return std::nullopt;
+    }
+
+    uint32_t count;
+    std::memcpy(&count, data + offset, sizeof(count));
+    offset += sizeof(count);
+
+    for (uint32_t i = 0; i < count && offset < size; ++i) {
+      std::string key = deserialize_string(data, size, offset);
+      if (key.empty() && offset > size) {
+        return std::nullopt;
+      }
+
+      if (key == field) {
+        auto value = deserialize_value(data, size, offset);
+        if (offset > size) {
+          return std::nullopt;
+        }
+        return value;
+      }
+
+      skip_value(data, size, offset);
+      if (offset > size) {
+        return std::nullopt;
+      }
+    }
+
+    return std::nullopt;
+  }
+
+  /**
    * @brief Get the serialized size (for estimation)
    * @return Estimated serialized size in bytes
    */
@@ -120,6 +219,77 @@ struct ScalarData {
     std::string result(data + offset, len);
     offset += len;
     return result;
+  }
+
+  static auto deserialize_string(const char *data, size_t size, size_t &offset) -> std::string {
+    if (offset + sizeof(uint32_t) > size) {
+      offset = size + 1;
+      return {};
+    }
+    uint32_t len;
+    std::memcpy(&len, data + offset, sizeof(len));
+    offset += sizeof(len);
+    if (offset + len > size) {
+      offset = size + 1;
+      return {};
+    }
+    std::string result(data + offset, len);
+    offset += len;
+    return result;
+  }
+
+  static void skip_string(const char *data, size_t size, size_t &offset) {
+    if (offset + sizeof(uint32_t) > size) {
+      offset = size + 1;
+      return;
+    }
+    uint32_t len;
+    std::memcpy(&len, data + offset, sizeof(len));
+    offset += sizeof(len);
+    if (offset + len > size) {
+      offset = size + 1;
+      return;
+    }
+    offset += len;
+  }
+
+  static void skip_value(const char *data, size_t size, size_t &offset) {
+    if (offset >= size) {
+      offset = size + 1;
+      return;
+    }
+
+    uint8_t type_index = static_cast<uint8_t>(data[offset++]);
+
+    switch (type_index) {
+      case 0:
+        if (offset + sizeof(int64_t) > size) {
+          offset = size + 1;
+          return;
+        }
+        offset += sizeof(int64_t);
+        return;
+      case 1:
+        if (offset + sizeof(double) > size) {
+          offset = size + 1;
+          return;
+        }
+        offset += sizeof(double);
+        return;
+      case 2:
+        skip_string(data, size, offset);
+        return;
+      case 3:
+        if (offset + sizeof(bool) > size) {
+          offset = size + 1;
+          return;
+        }
+        offset += sizeof(bool);
+        return;
+      default:
+        offset = size + 1;
+        return;
+    }
   }
 
   static void serialize_metadata(std::vector<char> &buffer, const MetadataMap &meta) {
@@ -191,6 +361,53 @@ struct ScalarData {
         return v;
       }
       default:
+        return int64_t{0};
+    }
+  }
+
+  static auto deserialize_value(const char *data, size_t size, size_t &offset) -> MetadataValue {
+    if (offset >= size) {
+      offset = size + 1;
+      return int64_t{0};
+    }
+
+    uint8_t type_index = static_cast<uint8_t>(data[offset++]);
+
+    switch (type_index) {
+      case 0: {
+        if (offset + sizeof(int64_t) > size) {
+          offset = size + 1;
+          return int64_t{0};
+        }
+        int64_t v;
+        std::memcpy(&v, data + offset, sizeof(v));
+        offset += sizeof(v);
+        return v;
+      }
+      case 1: {
+        if (offset + sizeof(double) > size) {
+          offset = size + 1;
+          return int64_t{0};
+        }
+        double v;
+        std::memcpy(&v, data + offset, sizeof(v));
+        offset += sizeof(v);
+        return v;
+      }
+      case 2:
+        return deserialize_string(data, size, offset);
+      case 3: {
+        if (offset + sizeof(bool) > size) {
+          offset = size + 1;
+          return int64_t{0};
+        }
+        bool v;
+        std::memcpy(&v, data + offset, sizeof(v));
+        offset += sizeof(v);
+        return v;
+      }
+      default:
+        offset = size + 1;
         return int64_t{0};
     }
   }

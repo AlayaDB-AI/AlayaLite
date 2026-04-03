@@ -154,7 +154,7 @@ class RocksDBStorage {
    * @param id Internal ID
    * @return ScalarData (empty if not found)
    */
-  [[nodiscard]] auto operator[](IDType id) const -> ScalarData {
+  [[nodiscard]] auto operator[](IDType id) const -> ScalarData {  // redundant?
     std::string key = data_key(id);
     std::string value;
     rocksdb::Status status = db_->Get(rocksdb::ReadOptions(), key, &value);
@@ -165,6 +165,50 @@ class RocksDBStorage {
     }
 
     return ScalarData::deserialize(value.data(), value.size());
+  }
+
+  /**
+   * @brief Get raw serialized value by internal ID.
+   * @param id Internal ID
+   * @param value Output serialized bytes
+   * @return true if found
+   */
+  auto get_raw_value(IDType id, std::string &value) const -> bool {
+    std::string key = data_key(id);
+    rocksdb::Status status = db_->Get(rocksdb::ReadOptions(), key, &value);
+    return status.ok();
+  }
+
+  /**
+   * @brief Batch get raw serialized values by internal IDs.
+   *
+   * Uses RocksDB MultiGet and returns empty strings for missing entries.
+   *
+   * @param ids Vector of internal IDs
+   * @return Vector of serialized ScalarData payloads
+   */
+  [[nodiscard]] auto batch_get_raw_values(const std::vector<IDType> &ids) const
+      -> std::vector<std::string> {
+    std::vector<rocksdb::Slice> keys;
+    std::vector<std::string> key_strings;
+    keys.reserve(ids.size());
+    key_strings.reserve(ids.size());
+
+    for (auto id : ids) {
+      key_strings.push_back(data_key(id));
+      keys.emplace_back(key_strings.back());
+    }
+
+    std::vector<std::string> values(ids.size());
+    std::vector<rocksdb::Status> statuses = db_->MultiGet(rocksdb::ReadOptions(), keys, &values);
+
+    for (size_t i = 0; i < statuses.size(); ++i) {
+      if (!statuses[i].ok()) {
+        values[i].clear();
+      }
+    }
+
+    return values;
   }
 
   /**
