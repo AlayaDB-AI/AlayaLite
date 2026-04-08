@@ -25,9 +25,21 @@ add_coverage_to_target(worker_test)
 
 # Generator expressions ensure cross-platform compatibility.
 add_test(NAME executor_test_coro COMMAND $<TARGET_FILE:coro_test>)
-add_test(NAME executor_test_search COMMAND $<TARGET_FILE:search_test>)
+add_test(NAME executor_test_search_graph COMMAND $<TARGET_FILE:search_test> --gtest_filter=SearchTest.*)
+add_test(NAME executor_test_search_hybrid COMMAND $<TARGET_FILE:search_test> --gtest_filter=HybridSearchTest.*)
+add_test(NAME executor_test_search_rabitq_graph_job COMMAND $<TARGET_FILE:search_test>
+                                                            --gtest_filter=RaBitQGraphSearchJobTest.*
+)
+add_test(NAME executor_test_search_rabitq_hybrid COMMAND $<TARGET_FILE:search_test>
+                                                         --gtest_filter=RaBitQHybridSearchTest.*
+)
 add_test(NAME executor_test_update COMMAND $<TARGET_FILE:update_test>)
 add_test(NAME executor_test_mutex COMMAND $<TARGET_FILE:mutex_test>)
 add_test(NAME executor_test_scheduler COMMAND $<TARGET_FILE:scheduler_test>)
 add_test(NAME executor_test_task_queue COMMAND $<TARGET_FILE:task_queue_test>)
 add_test(NAME executor_test_worker COMMAND $<TARGET_FILE:worker_test>)
+
+set_tests_properties(
+  executor_test_search_graph executor_test_search_hybrid executor_test_search_rabitq_graph_job
+  executor_test_search_rabitq_hybrid PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+)
