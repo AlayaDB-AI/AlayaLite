@@ -122,6 +122,51 @@ TEST_F(RawSpaceTest, TestDistanceUInt8) {
   ASSERT_FLOAT_EQ(distance, expected_distance);
 }
 
+TEST_F(RawSpaceTest, TestDistanceInnerProductMetric) {
+  std::vector<float> data1 = {1.0F, 2.0F, 3.0F};
+  std::vector<float> data2 = {4.0F, 5.0F, 6.0F};
+
+  RawSpace<DataType, DistanceType, IDType> space(100, 3, MetricType::IP);
+  space.insert(data1.data());
+  space.insert(data2.data());
+
+  float distance = space.get_distance(0, 1);
+  float expected_distance = -((1.0F * 4.0F) + (2.0F * 5.0F) + (3.0F * 6.0F));
+
+  ASSERT_FLOAT_EQ(distance, expected_distance);
+}
+
+TEST_F(RawSpaceTest, TestDistanceCosineMetricUsesInnerProductPath) {
+  std::vector<float> data1 = {1.0F, 0.0F, 2.0F};
+  std::vector<float> data2 = {0.5F, 3.0F, 4.0F};
+
+  RawSpace<DataType, DistanceType, IDType> space(100, 3, MetricType::COS);
+  space.insert(data1.data());
+  space.insert(data2.data());
+
+  float distance = space.get_distance(0, 1);
+  float expected_distance = -((1.0F * 0.5F) + (0.0F * 3.0F) + (2.0F * 4.0F));
+
+  ASSERT_FLOAT_EQ(distance, expected_distance);
+}
+
+TEST_F(RawSpaceTest, TestFitRejectsNullDataAndCapacityOverflow) {
+  std::vector<float> data = {1.0F, 2.0F, 3.0F};
+
+  EXPECT_THROW(space_->fit(static_cast<const float *>(nullptr), 1), std::invalid_argument);
+  EXPECT_THROW(space_->fit(data.data(), 101), std::length_error);
+}
+
+TEST_F(RawSpaceTest, TestScalarApisThrowWithoutMetadataStorage) {
+  MetadataFilter filter;
+  filter.add_eq("category", std::string("A"));
+
+  EXPECT_THROW(space_->remove(std::string("missing")), std::runtime_error);
+  EXPECT_THROW(space_->get_scalar_data(0), std::runtime_error);
+  EXPECT_THROW(space_->get_scalar_data(std::string("missing")), std::runtime_error);
+  EXPECT_THROW(space_->get_scalar_data(filter, 1), std::runtime_error);
+}
+
 TEST(RawSpaceScalarTest, TestFitInsertAndFilterScalarData) {
   const std::string db_path = "./test_raw_space_scalar_db";
   if (std::filesystem::exists(db_path)) {
@@ -132,12 +177,17 @@ TEST(RawSpaceScalarTest, TestFitInsertAndFilterScalarData) {
   config.db_path_ = db_path;
   config.indexed_fields_ = {"category"};
 
-  using RawSpaceWithScalar = RawSpace<float, float, uint32_t, SequentialStorage<float, uint32_t>, ScalarData>;
+  using RawSpaceWithScalar =
+      RawSpace<float, float, uint32_t, SequentialStorage<float, uint32_t>, ScalarData>;
   RawSpaceWithScalar space(10, 3, MetricType::L2, config);
 
   std::vector<float> data = {
-      1.0F, 2.0F, 3.0F,
-      4.0F, 5.0F, 6.0F,
+      1.0F,
+      2.0F,
+      3.0F,
+      4.0F,
+      5.0F,
+      6.0F,
   };
 
   std::vector<ScalarData> scalar = {
@@ -165,6 +215,88 @@ TEST(RawSpaceScalarTest, TestFitInsertAndFilterScalarData) {
 
   space.remove(new_id);
   EXPECT_FALSE(space.get_scalar_storage()->find_by_item_id("id_3").has_value());
+  space.close_db();
+  std::filesystem::remove_all(db_path);
+}
+
+TEST(RawSpaceScalarTest, TestFitRejectsMissingScalarDataAndUnknownItemId) {
+  const std::string db_path = "./test_raw_space_scalar_invalid_db";
+  if (std::filesystem::exists(db_path)) {
+    std::filesystem::remove_all(db_path);
+  }
+
+  RocksDBConfig config;
+  config.db_path_ = db_path;
+  config.indexed_fields_ = {"category"};
+
+  using RawSpaceWithScalar =
+      RawSpace<float, float, uint32_t, SequentialStorage<float, uint32_t>, ScalarData>;
+  RawSpaceWithScalar space(2, 3, MetricType::L2, config);
+
+  std::vector<float> data = {1.0F, 2.0F, 3.0F};
+  std::vector<ScalarData> scalar = {
+      ScalarData("id_1", "doc_1", MetadataMap{{"category", std::string("A")}}),
+  };
+
+  EXPECT_THROW(space.fit(static_cast<const float *>(nullptr), 1, scalar.data()),
+               std::invalid_argument);
+  EXPECT_THROW(space.fit(data.data(), 3, scalar.data()), std::length_error);
+  EXPECT_THROW(space.fit(data.data(), 1, static_cast<const ScalarData *>(nullptr)),
+               std::invalid_argument);
+
+  space.fit(data.data(), 1, scalar.data());
+
+  EXPECT_THROW(space.remove(std::string("missing")), std::runtime_error);
+  EXPECT_THROW(space.get_scalar_data(std::string("missing")), std::runtime_error);
+
+  space.close_db();
+  std::filesystem::remove_all(db_path);
+}
+
+TEST(RawSpaceScalarTest, TestRemoveByItemIdAndRespectFilterLimit) {
+  const std::string db_path = "./test_raw_space_scalar_remove_db";
+  if (std::filesystem::exists(db_path)) {
+    std::filesystem::remove_all(db_path);
+  }
+
+  RocksDBConfig config;
+  config.db_path_ = db_path;
+  config.indexed_fields_ = {"category"};
+
+  using RawSpaceWithScalar =
+      RawSpace<float, float, uint32_t, SequentialStorage<float, uint32_t>, ScalarData>;
+  RawSpaceWithScalar space(10, 3, MetricType::L2, config);
+
+  std::vector<float> data = {
+      1.0F,
+      2.0F,
+      3.0F,
+      4.0F,
+      5.0F,
+      6.0F,
+      7.0F,
+      8.0F,
+      9.0F,
+  };
+
+  std::vector<ScalarData> scalar = {
+      ScalarData("id_1", "doc_1", MetadataMap{{"category", std::string("A")}}),
+      ScalarData("id_2", "doc_2", MetadataMap{{"category", std::string("A")}}),
+      ScalarData("id_3", "doc_3", MetadataMap{{"category", std::string("B")}}),
+  };
+
+  space.fit(data.data(), 3, scalar.data());
+
+  MetadataFilter filter;
+  filter.add_eq("category", std::string("A"));
+  auto results = space.get_scalar_data(filter, 1);
+  ASSERT_EQ(results.size(), 1U);
+  EXPECT_EQ(std::get<std::string>(results[0].second.metadata.at("category")), "A");
+
+  auto removed_id = space.remove(std::string("id_2"));
+  EXPECT_EQ(removed_id, 1U);
+  EXPECT_FALSE(space.get_scalar_storage()->find_by_item_id("id_2").has_value());
+
   space.close_db();
   std::filesystem::remove_all(db_path);
 }
