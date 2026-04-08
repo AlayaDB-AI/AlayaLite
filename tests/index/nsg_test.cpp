@@ -31,6 +31,17 @@
 #include "utils/timer.hpp"
 
 namespace alaya {
+namespace {
+
+auto make_one_dim_space(const std::vector<float> &values) -> std::shared_ptr<RawSpace<>> {
+  auto space =
+      std::make_shared<RawSpace<>>(static_cast<uint32_t>(values.size()), 1, MetricType::L2);
+  space->fit(values.data(), static_cast<uint32_t>(values.size()));
+  return space;
+}
+
+}  // namespace
+
 class NSGTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -57,6 +68,77 @@ class NSGTest : public ::testing::Test {
 TEST_F(NSGTest, BuildGraphTest) {
   auto graph = nsg_->build_graph();
   // graph->print_graph();
+}
+
+TEST(NSGInternalTest, SyncPruneOccludesLongerNeighbor) {
+  auto space = make_one_dim_space({0.0F, 1.0F, 2.0F});
+  NSGBuilder<RawSpace<>> builder(space, 2, 4);
+
+  auto knng = std::make_unique<Graph<>>(3, 1);
+  Graph<> graph(3, 2);
+  std::vector<Node<uint32_t>> pool = {{1U, 1.0F}, {2U, 4.0F}};
+  std::vector<bool> vis(3, false);
+
+  builder.sync_prune(0, pool, vis, knng, graph);
+
+  EXPECT_EQ(graph.at(0, 0), 1U);
+  EXPECT_EQ(graph.at(0, 1), Graph<>::kEmptyId);
+}
+
+TEST(NSGInternalTest, AddReverseLinksPrunesWhenDestinationIsFull) {
+  auto space = make_one_dim_space({0.0F, 1.0F, 2.0F, 10.0F});
+  NSGBuilder<RawSpace<>> builder(space, 2, 4);
+
+  Graph<> graph(4, 2);
+  graph.at(0, 0) = 1;
+  graph.at(1, 0) = 2;
+  graph.at(1, 1) = 3;
+
+  std::vector<std::mutex> locks(4);
+  builder.add_reverse_links(0, locks, graph);
+
+  EXPECT_EQ(graph.at(1, 0), 2U);
+  EXPECT_EQ(graph.at(1, 1), 3U);
+}
+
+TEST(NSGInternalTest, AttachUnlinkedFallsBackToRandomAvailableNode) {
+  auto space = make_one_dim_space({0.0F, 1.0F, 2.0F, 3.0F});
+  NSGBuilder<RawSpace<>> builder(space, 1, 1);
+
+  builder.final_graph_ = std::make_unique<Graph<>>(4, 1);
+  builder.final_graph_->eps_.push_back(0);
+  builder.final_graph_->at(0, 0) = 1;
+  builder.final_graph_->at(1, 0) = 0;
+  builder.ep_ = 0;
+
+  std::vector<uint32_t> degrees = {1, 1, 0, 0};
+  std::vector<bool> vis = {true, true, false, false};
+  std::vector<bool> vis2(4, false);
+
+  auto node = builder.attach_unlinked(vis, vis2, degrees);
+
+  EXPECT_TRUE(node == 2U || node == 3U);
+  EXPECT_EQ(builder.final_graph_->at(node, 0), 0U);
+  EXPECT_EQ(degrees[node], 1U);
+}
+
+TEST(NSGInternalTest, InsertIntoPoolRejectsDuplicateAndFarNeighbor) {
+  auto space = make_one_dim_space({0.0F, 1.0F});
+  NSGBuilder<RawSpace<>> builder(space, 2, 4);
+
+  Neighbor<uint32_t> pool[4] = {
+      Neighbor<uint32_t>(0, 1.0F),
+      Neighbor<uint32_t>(1, 2.0F),
+      Neighbor<uint32_t>(2, 3.0F),
+      Neighbor<uint32_t>(3, 4.0F),
+  };
+
+  EXPECT_EQ(builder.insert_into_pool(pool, 3, Neighbor<uint32_t>(1, 1.5F)), 3);
+  EXPECT_EQ(builder.insert_into_pool(pool, 3, Neighbor<uint32_t>(4, 4.0F)), 3);
+
+  auto pos = builder.insert_into_pool(pool, 3, Neighbor<uint32_t>(5, 1.5F));
+  EXPECT_EQ(pos, 1);
+  EXPECT_EQ(pool[1].id_, 5U);
 }
 
 class NSGSearchTest : public ::testing::Test {
@@ -109,7 +191,8 @@ TEST_F(NSGSearchTest, SimpleSearchTest) {
 
   Timer timer{};
   std::vector<std::vector<IDType>> res_pool(ds_.query_num_, std::vector<IDType>(topk));
-  const size_t kSearchThreadNum = std::min(static_cast<size_t>(16), static_cast<size_t>(ds_.query_num_));
+  const size_t kSearchThreadNum =
+      std::min(static_cast<size_t>(16), static_cast<size_t>(ds_.query_num_));
   std::vector<std::thread> tasks(kSearchThreadNum);
 
   auto search_knn = [&](uint32_t i) {
