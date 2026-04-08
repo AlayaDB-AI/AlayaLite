@@ -28,13 +28,13 @@ class IpTest : public ::testing::Test {
   std::mt19937 gen_{42};
   std::uniform_real_distribution<float> dist_{-1.0F, 1.0F};
 
-  auto fill_random(std::vector<float>& v) -> void {
-    for (auto& x : v) {
+  auto fill_random(std::vector<float> &v) -> void {
+    for (auto &x : v) {
       x = dist_(gen_);
     }
   }
 
-  static auto reference_ip(const float* x, const float* y, size_t dim) -> float {
+  static auto reference_ip(const float *x, const float *y, size_t dim) -> float {
     float sum = 0.0F;
     for (size_t i = 0; i < dim; ++i) {
       sum += x[i] * y[i];
@@ -44,7 +44,7 @@ class IpTest : public ::testing::Test {
 };
 
 TEST_F(IpTest, SimdLevelDetection) {
-  const char* level = alaya::simd::get_simd_level_name();
+  const char *level = alaya::simd::get_simd_level_name();
   std::cout << "Detected SIMD level: " << level << '\n';
   EXPECT_NE(level, nullptr);
 }
@@ -133,6 +133,44 @@ TEST_F(IpTest, LargeDimension) {
   EXPECT_NEAR(result, expected, 1e-3F);
 }
 
+#ifdef ALAYA_ARCH_X86
+TEST_F(IpTest, AVX2DirectCorrectnessWithTail) {
+  const auto &features = alaya::simd::get_cpu_features();
+  if (!features.avx2_ || !features.fma_) {
+    GTEST_SKIP() << "AVX2 + FMA not available";
+  }
+
+  constexpr size_t kDim = 41;
+  std::vector<float> x(kDim);
+  std::vector<float> y(kDim);
+  fill_random(x);
+  fill_random(y);
+
+  float expected = reference_ip(x.data(), y.data(), kDim);
+  auto result = alaya::simd::ip_sqr_avx2(x.data(), y.data(), kDim);
+
+  EXPECT_NEAR(result, expected, 1e-4F);
+}
+
+TEST_F(IpTest, AVX512DirectCorrectnessWithMaskTail) {
+  const auto &features = alaya::simd::get_cpu_features();
+  if (!features.avx512f_) {
+    GTEST_SKIP() << "AVX-512 not available";
+  }
+
+  constexpr size_t kDim = 79;
+  std::vector<float> x(kDim);
+  std::vector<float> y(kDim);
+  fill_random(x);
+  fill_random(y);
+
+  float expected = reference_ip(x.data(), y.data(), kDim);
+  auto result = alaya::simd::ip_sqr_avx512(x.data(), y.data(), kDim);
+
+  EXPECT_NEAR(result, expected, 1e-4F);
+}
+#endif
+
 // SQ8 IP Tests
 class IpSQ8Test : public ::testing::Test {
  protected:
@@ -140,13 +178,13 @@ class IpSQ8Test : public ::testing::Test {
   std::uniform_int_distribution<int> dist_{0, 255};
   std::uniform_real_distribution<float> float_dist_{-10.0F, 10.0F};
 
-  auto fill_random(std::vector<uint8_t>& v) -> void {
-    for (auto& x : v) {
+  auto fill_random(std::vector<uint8_t> &v) -> void {
+    for (auto &x : v) {
       x = static_cast<uint8_t>(dist_(gen_));
     }
   }
 
-  auto fill_min_max(std::vector<float>& min_vals, std::vector<float>& max_vals) -> void {
+  auto fill_min_max(std::vector<float> &min_vals, std::vector<float> &max_vals) -> void {
     for (size_t i = 0; i < min_vals.size(); ++i) {
       float a = float_dist_(gen_);
       float b = float_dist_(gen_);
@@ -155,11 +193,11 @@ class IpSQ8Test : public ::testing::Test {
     }
   }
 
-  static auto reference_ip_sqr_sq8(const uint8_t* x,
-                               const uint8_t* y,
-                               const float* min,
-                               const float* max,
-                               size_t dim) -> float {
+  static auto reference_ip_sqr_sq8(const uint8_t *x,
+                                   const uint8_t *y,
+                                   const float *min,
+                                   const float *max,
+                                   size_t dim) -> float {
     constexpr float kInv255 = 1.0F / 255.0F;
     float sum = 0.0F;
     for (size_t i = 0; i < dim; ++i) {
@@ -182,10 +220,9 @@ TEST_F(IpSQ8Test, GenericCorrectness) {
   fill_random(y);
   fill_min_max(min_vals, max_vals);
 
-  float expected =
-      reference_ip_sqr_sq8(x.data(), y.data(), min_vals.data(), max_vals.data(), kDim);
-  float result = alaya::simd::ip_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(),
-                                             max_vals.data());
+  float expected = reference_ip_sqr_sq8(x.data(), y.data(), min_vals.data(), max_vals.data(), kDim);
+  float result =
+      alaya::simd::ip_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-4F);
 }
@@ -200,10 +237,13 @@ TEST_F(IpSQ8Test, SimdCorrectness) {
   fill_random(y);
   fill_min_max(min_vals, max_vals);
 
-  float expected = alaya::simd::ip_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(),
-                                               max_vals.data());
-  auto result = alaya::simd::ip_sqr_sq8<float, float>(x.data(), y.data(), kDim, min_vals.data(),
-                                                  max_vals.data());
+  float expected =
+      alaya::simd::ip_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
+  auto result = alaya::simd::ip_sqr_sq8<float, float>(x.data(),
+                                                      y.data(),
+                                                      kDim,
+                                                      min_vals.data(),
+                                                      max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }
@@ -219,10 +259,13 @@ TEST_F(IpSQ8Test, TailHandling) {
     fill_random(y);
     fill_min_max(min_vals, max_vals);
 
-    float expected = alaya::simd::ip_sqr_sq8_generic(x.data(), y.data(), dim, min_vals.data(),
-                                                 max_vals.data());
-    auto result = alaya::simd::ip_sqr_sq8<float, float>(x.data(), y.data(), dim, min_vals.data(),
-                                                    max_vals.data());
+    float expected =
+        alaya::simd::ip_sqr_sq8_generic(x.data(), y.data(), dim, min_vals.data(), max_vals.data());
+    auto result = alaya::simd::ip_sqr_sq8<float, float>(x.data(),
+                                                        y.data(),
+                                                        dim,
+                                                        min_vals.data(),
+                                                        max_vals.data());
 
     EXPECT_NEAR(result, expected, 1e-3F) << "Failed for dim=" << dim;
   }
@@ -236,8 +279,11 @@ TEST_F(IpSQ8Test, ZeroVector) {
   std::vector<float> max_vals(kDim, 1.0F);
   fill_random(y);
 
-  auto result = alaya::simd::ip_sqr_sq8<float, float>(x.data(), y.data(), kDim, min_vals.data(),
-                                                  max_vals.data());
+  auto result = alaya::simd::ip_sqr_sq8<float, float>(x.data(),
+                                                      y.data(),
+                                                      kDim,
+                                                      min_vals.data(),
+                                                      max_vals.data());
   // When min=0, x[i]=0 means x_val=0, so IP should be 0
   EXPECT_NEAR(result, 0.0F, 1e-5F);
 }
@@ -250,15 +296,18 @@ TEST_F(IpSQ8Test, IdenticalVectors) {
   fill_random(x);
   fill_min_max(min_vals, max_vals);
 
-  auto result = alaya::simd::ip_sqr_sq8<float, float>(x.data(), x.data(), kDim, min_vals.data(),
-                                                  max_vals.data());
+  auto result = alaya::simd::ip_sqr_sq8<float, float>(x.data(),
+                                                      x.data(),
+                                                      kDim,
+                                                      min_vals.data(),
+                                                      max_vals.data());
   // IP of identical vectors should be negative (since we return -IP)
   EXPECT_LT(result, 0.0F);
 }
 
 #ifdef ALAYA_ARCH_X86
 TEST_F(IpSQ8Test, AVX2Correctness) {
-  const auto& features = alaya::simd::get_cpu_features();
+  const auto &features = alaya::simd::get_cpu_features();
   if (!features.avx2_ || !features.fma_) {
     GTEST_SKIP() << "AVX2 + FMA not available";
   }
@@ -272,8 +321,31 @@ TEST_F(IpSQ8Test, AVX2Correctness) {
   fill_random(y);
   fill_min_max(min_vals, max_vals);
 
-  float expected = alaya::simd::ip_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(),
-                                               max_vals.data());
+  float expected =
+      alaya::simd::ip_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
+  auto result =
+      alaya::simd::ip_sqr_sq8_avx2(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
+
+  EXPECT_NEAR(result, expected, 1e-3F);
+}
+
+TEST_F(IpSQ8Test, AVX2TailHandling) {
+  const auto &features = alaya::simd::get_cpu_features();
+  if (!features.avx2_ || !features.fma_) {
+    GTEST_SKIP() << "AVX2 + FMA not available";
+  }
+
+  constexpr size_t kDim = 25;
+  std::vector<uint8_t> x(kDim);
+  std::vector<uint8_t> y(kDim);
+  std::vector<float> min_vals(kDim);
+  std::vector<float> max_vals(kDim);
+  fill_random(x);
+  fill_random(y);
+  fill_min_max(min_vals, max_vals);
+
+  float expected =
+      alaya::simd::ip_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
   auto result =
       alaya::simd::ip_sqr_sq8_avx2(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
 
@@ -281,7 +353,7 @@ TEST_F(IpSQ8Test, AVX2Correctness) {
 }
 
 TEST_F(IpSQ8Test, AVX512Correctness) {
-  const auto& features = alaya::simd::get_cpu_features();
+  const auto &features = alaya::simd::get_cpu_features();
   if (!features.avx512f_) {
     GTEST_SKIP() << "AVX-512 not available";
   }
@@ -295,8 +367,8 @@ TEST_F(IpSQ8Test, AVX512Correctness) {
   fill_random(y);
   fill_min_max(min_vals, max_vals);
 
-  float expected = alaya::simd::ip_sqr_sq8_generic(x.data(),  y.data(),kDim, min_vals.data(),
-                                               max_vals.data());
+  float expected =
+      alaya::simd::ip_sqr_sq8_generic(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
   auto result =
       alaya::simd::ip_sqr_sq8_avx512(x.data(), y.data(), kDim, min_vals.data(), max_vals.data());
 
@@ -311,7 +383,7 @@ class IpSQ4Test : public ::testing::Test {
   std::uniform_int_distribution<int> dist_{0, 15};
   std::uniform_real_distribution<float> float_dist_{-10.0F, 10.0F};
 
-  auto pack_sq4(std::vector<uint8_t>& packed, size_t dim) -> void {
+  auto pack_sq4(std::vector<uint8_t> &packed, size_t dim) -> void {
     size_t num_bytes = (dim + 1) / 2;
     packed.resize(num_bytes);
     for (size_t i = 0; i < num_bytes; ++i) {
@@ -321,7 +393,7 @@ class IpSQ4Test : public ::testing::Test {
     }
   }
 
-  auto fill_min_max(std::vector<float>& min_vals, std::vector<float>& max_vals) -> void {
+  auto fill_min_max(std::vector<float> &min_vals, std::vector<float> &max_vals) -> void {
     for (size_t i = 0; i < min_vals.size(); ++i) {
       float a = float_dist_(gen_);
       float b = float_dist_(gen_);
@@ -330,11 +402,11 @@ class IpSQ4Test : public ::testing::Test {
     }
   }
 
-  static auto reference_ip_sqr_sq4(const uint8_t* x,
-                               const uint8_t* y,
-                               const float* min,
-                               const float* max,
-                               size_t dim) -> float {
+  static auto reference_ip_sqr_sq4(const uint8_t *x,
+                                   const uint8_t *y,
+                                   const float *min,
+                                   const float *max,
+                                   size_t dim) -> float {
     constexpr float kInv15 = 1.0F / 15.0F;
     float sum = 0.0F;
     size_t byte_idx = 0;
@@ -369,10 +441,16 @@ TEST_F(IpSQ4Test, GenericCorrectness) {
   pack_sq4(y_packed, kDim);
   fill_min_max(min_vals, max_vals);
 
-  float expected =
-      reference_ip_sqr_sq4(x_packed.data(), y_packed.data(), min_vals.data(), max_vals.data(), kDim);
-  float result = alaya::simd::ip_sqr_sq4_generic(x_packed.data(), y_packed.data(), kDim, min_vals.data(),
-                                             max_vals.data());
+  float expected = reference_ip_sqr_sq4(x_packed.data(),
+                                        y_packed.data(),
+                                        min_vals.data(),
+                                        max_vals.data(),
+                                        kDim);
+  float result = alaya::simd::ip_sqr_sq4_generic(x_packed.data(),
+                                                 y_packed.data(),
+                                                 kDim,
+                                                 min_vals.data(),
+                                                 max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-3F);
 }
@@ -387,10 +465,16 @@ TEST_F(IpSQ4Test, SimdCorrectness) {
   pack_sq4(y_packed, kDim);
   fill_min_max(min_vals, max_vals);
 
-  float expected = alaya::simd::ip_sqr_sq4_generic(x_packed.data(), y_packed.data(),
-                                               kDim, min_vals.data(), max_vals.data());
-  auto result = alaya::simd::ip_sqr_sq4<float, float>(x_packed.data(), y_packed.data(),
-                                                  kDim, min_vals.data(), max_vals.data());
+  float expected = alaya::simd::ip_sqr_sq4_generic(x_packed.data(),
+                                                   y_packed.data(),
+                                                   kDim,
+                                                   min_vals.data(),
+                                                   max_vals.data());
+  auto result = alaya::simd::ip_sqr_sq4<float, float>(x_packed.data(),
+                                                      y_packed.data(),
+                                                      kDim,
+                                                      min_vals.data(),
+                                                      max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-2F);
 }
@@ -406,10 +490,16 @@ TEST_F(IpSQ4Test, TailHandling) {
     pack_sq4(y_packed, dim);
     fill_min_max(min_vals, max_vals);
 
-    float expected = alaya::simd::ip_sqr_sq4_generic(x_packed.data(), y_packed.data(),
-                                                 dim, min_vals.data(), max_vals.data());
-    auto result = alaya::simd::ip_sqr_sq4<float, float>(x_packed.data(), y_packed.data(),
-                                                    dim, min_vals.data(), max_vals.data());
+    float expected = alaya::simd::ip_sqr_sq4_generic(x_packed.data(),
+                                                     y_packed.data(),
+                                                     dim,
+                                                     min_vals.data(),
+                                                     max_vals.data());
+    auto result = alaya::simd::ip_sqr_sq4<float, float>(x_packed.data(),
+                                                        y_packed.data(),
+                                                        dim,
+                                                        min_vals.data(),
+                                                        max_vals.data());
 
     EXPECT_NEAR(result, expected, 1e-2F) << "Failed for dim=" << dim;
   }
@@ -424,8 +514,11 @@ TEST_F(IpSQ4Test, ZeroVector) {
   std::vector<float> max_vals(kDim, 1.0F);
   pack_sq4(y, kDim);
 
-  auto result = alaya::simd::ip_sqr_sq4<float, float>(x.data(), y.data(), kDim, min_vals.data(),
-                                                  max_vals.data());
+  auto result = alaya::simd::ip_sqr_sq4<float, float>(x.data(),
+                                                      y.data(),
+                                                      kDim,
+                                                      min_vals.data(),
+                                                      max_vals.data());
   EXPECT_NEAR(result, 0.0F, 1e-5F);
 }
 
@@ -437,14 +530,17 @@ TEST_F(IpSQ4Test, IdenticalVectors) {
   pack_sq4(x_packed, kDim);
   fill_min_max(min_vals, max_vals);
 
-  auto result = alaya::simd::ip_sqr_sq4<float, float>(x_packed.data(), x_packed.data(),
-                                                  kDim, min_vals.data(), max_vals.data());
+  auto result = alaya::simd::ip_sqr_sq4<float, float>(x_packed.data(),
+                                                      x_packed.data(),
+                                                      kDim,
+                                                      min_vals.data(),
+                                                      max_vals.data());
   EXPECT_LT(result, 0.0F);
 }
 
 #ifdef ALAYA_ARCH_X86
 TEST_F(IpSQ4Test, AVX2Correctness) {
-  const auto& features = alaya::simd::get_cpu_features();
+  const auto &features = alaya::simd::get_cpu_features();
   if (!features.avx2_ || !features.fma_) {
     GTEST_SKIP() << "AVX2 + FMA not available";
   }
@@ -458,16 +554,22 @@ TEST_F(IpSQ4Test, AVX2Correctness) {
   pack_sq4(y_packed, kDim);
   fill_min_max(min_vals, max_vals);
 
-  float expected = alaya::simd::ip_sqr_sq4_generic(x_packed.data(), y_packed.data(),
-                                               kDim, min_vals.data(), max_vals.data());
-  auto result = alaya::simd::ip_sqr_sq4_avx2(x_packed.data(), y_packed.data(), kDim, min_vals.data(),
-                                         max_vals.data());
+  float expected = alaya::simd::ip_sqr_sq4_generic(x_packed.data(),
+                                                   y_packed.data(),
+                                                   kDim,
+                                                   min_vals.data(),
+                                                   max_vals.data());
+  auto result = alaya::simd::ip_sqr_sq4_avx2(x_packed.data(),
+                                             y_packed.data(),
+                                             kDim,
+                                             min_vals.data(),
+                                             max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-2F);
 }
 
 TEST_F(IpSQ4Test, AVX512Correctness) {
-  const auto& features = alaya::simd::get_cpu_features();
+  const auto &features = alaya::simd::get_cpu_features();
   if (!features.avx512f_) {
     GTEST_SKIP() << "AVX-512 not available";
   }
@@ -481,10 +583,45 @@ TEST_F(IpSQ4Test, AVX512Correctness) {
   pack_sq4(y_packed, kDim);
   fill_min_max(min_vals, max_vals);
 
-  float expected = alaya::simd::ip_sqr_sq4_generic(x_packed.data(), y_packed.data(), kDim,
-                                               min_vals.data(), max_vals.data());
-  auto result = alaya::simd::ip_sqr_sq4_avx512(x_packed.data(), y_packed.data(), kDim, min_vals.data(),
-                                           max_vals.data());
+  float expected = alaya::simd::ip_sqr_sq4_generic(x_packed.data(),
+                                                   y_packed.data(),
+                                                   kDim,
+                                                   min_vals.data(),
+                                                   max_vals.data());
+  auto result = alaya::simd::ip_sqr_sq4_avx512(x_packed.data(),
+                                               y_packed.data(),
+                                               kDim,
+                                               min_vals.data(),
+                                               max_vals.data());
+
+  EXPECT_NEAR(result, expected, 1e-2F);
+}
+
+TEST_F(IpSQ4Test, AVX512OddTailHandling) {
+  const auto &features = alaya::simd::get_cpu_features();
+  if (!features.avx512f_) {
+    GTEST_SKIP() << "AVX-512 not available";
+  }
+
+  constexpr size_t kDim = 33;
+  std::vector<uint8_t> x_packed;
+  std::vector<uint8_t> y_packed;
+  std::vector<float> min_vals(kDim);
+  std::vector<float> max_vals(kDim);
+  pack_sq4(x_packed, kDim);
+  pack_sq4(y_packed, kDim);
+  fill_min_max(min_vals, max_vals);
+
+  float expected = alaya::simd::ip_sqr_sq4_generic(x_packed.data(),
+                                                   y_packed.data(),
+                                                   kDim,
+                                                   min_vals.data(),
+                                                   max_vals.data());
+  auto result = alaya::simd::ip_sqr_sq4_avx512(x_packed.data(),
+                                               y_packed.data(),
+                                               kDim,
+                                               min_vals.data(),
+                                               max_vals.data());
 
   EXPECT_NEAR(result, expected, 1e-2F);
 }

@@ -79,24 +79,25 @@ inline auto get_cpu_features() -> const CpuFeatures & {
 // ============================================================================
 enum class SimdLevel : std::uint8_t { kGeneric, kSse4, kAvx2, kAvx512 };
 
-inline auto get_simd_level() -> SimdLevel {
+inline auto get_simd_level(const CpuFeatures &features) -> SimdLevel {
 #ifdef ALAYA_ARCH_X86
-  const auto &f = get_cpu_features();
-  if (f.avx512f_) {
+  if (features.avx512f_) {
     return SimdLevel::kAvx512;
   }
-  if (f.avx2_ && f.fma_) {
+  if (features.avx2_ && features.fma_) {
     return SimdLevel::kAvx2;
   }
-  if (f.sse4_1_) {
+  if (features.sse4_1_) {
     return SimdLevel::kSse4;
   }
 #endif
   return SimdLevel::kGeneric;
 }
 
-inline auto get_simd_level_name() -> const char * {
-  switch (get_simd_level()) {
+inline auto get_simd_level() -> SimdLevel { return get_simd_level(get_cpu_features()); }
+
+inline auto get_simd_level_name(SimdLevel level) -> const char * {
+  switch (level) {
     case SimdLevel::kAvx512:
       return "AVX-512";
     case SimdLevel::kAvx2:
@@ -107,5 +108,7 @@ inline auto get_simd_level_name() -> const char * {
       return "Generic";
   }
 }
+
+inline auto get_simd_level_name() -> const char * { return get_simd_level_name(get_simd_level()); }
 
 }  // namespace alaya::simd
