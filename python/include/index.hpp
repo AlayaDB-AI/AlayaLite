@@ -133,6 +133,9 @@ class PyIndex : public BasePyIndex {
   static constexpr float kMaterializedViewBFTopkThreshold =
       0.5F;  // if topk is more than 50% of the data, it's better to do brute-force search on the
              // whole partition instead of building materialized view
+  static constexpr size_t kMaterializedViewRaBitQExactPartitionThreshold =
+      128;  // small RaBitQ MV partitions are cheaper and more stable to scan exactly than to build
+            // a per-partition QG index
 
   static auto count_result_ids(const IDType *ids, uint32_t topk) -> uint32_t {
     uint32_t count = 0;
@@ -487,7 +490,7 @@ class PyIndex : public BasePyIndex {
 
     // todo: small partitions may not need a child index; choose a threshold with benchmarks.
     if constexpr (is_rabitq_space_v<MaterializedViewSearchSpaceType>) {
-      if (partition_size > 1) {
+      if (partition_size > kMaterializedViewRaBitQExactPartitionThreshold) {
         QGBuilder<MaterializedViewSearchSpaceType> graph_builder(partition.search_space_);
         graph_builder.build_graph();
         partition.search_job_ = std::make_shared<
