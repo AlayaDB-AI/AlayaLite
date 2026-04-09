@@ -205,10 +205,10 @@ class Scheduler {
  private:
   std::vector<CpuID> cpus_;  ///< List of CPU IDs on which worker threads will run.
 
-  std::atomic<std::size_t>
-      total_task_count_;  ///< Atomic counter tracking the total number of tasks scheduled.
-  std::atomic<std::size_t>
-      total_finish_count_;  ///< Atomic counter tracking the total number of completed tasks.
+  std::atomic<std::size_t> total_task_count_{
+      0};  ///< Atomic counter tracking the total number of tasks scheduled.
+  std::atomic<std::size_t> total_finish_count_{
+      0};  ///< Atomic counter tracking the total number of completed tasks.
 
   std::unique_ptr<TaskQueue>
       task_queue_;  ///< The shared task queue that holds tasks for workers to process.
