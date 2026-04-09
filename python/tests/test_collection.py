@@ -532,7 +532,11 @@ class TestCollection(unittest.TestCase):
         collection = self._create_collection("test_collection_rabitq_mv_batch", params)
 
         items = []
-        dim = 64
+        # Keep the dimensionality above the per-label partition size so each query has a unique
+        # nearest neighbor inside the partition; smaller periodic dimensions (for example 64) make
+        # ids like 331 and 11 share the exact same embedding and turn this into a flaky tie-break
+        # test instead of an ID-mapping regression test.
+        dim = 128
         for i in range(500):
             vector = np.zeros(dim, dtype=np.float32)
             vector[i % dim] = 1.0
