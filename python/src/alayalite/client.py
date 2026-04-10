@@ -17,14 +17,13 @@ This module provides the main Client class for interacting with the AlayaLite da
 managing indices and collections.
 """
 
-import json
 import logging
 import os
 import shutil
 
 from .collection import Collection
 from .index import Index
-from .schema import IndexParams, is_collection_url, is_index_url
+from .schema import IndexParams, is_collection_url, is_index_url, save_schema
 
 __all__ = ["Client"]
 
@@ -270,8 +269,7 @@ class Client:
         index_url = os.path.join(self.__url, index_name)
         schema_map = self.__index_map[index_name].save(index_url)
         index_schema_url = os.path.join(index_url, "schema.json")
-        with open(index_schema_url, "w", encoding="utf-8") as f:
-            json.dump(schema_map, f, indent=4)
+        save_schema(index_schema_url, schema_map)
         logger.info("Saved index '%s'", index_name)
 
     def save_collection(self, collection_name: str):
@@ -292,7 +290,5 @@ class Client:
         collection_url = os.path.join(self.__url, collection_name)
         schema_map = self.__collection_map[collection_name].save(collection_url)
         collection_schema_url = os.path.join(collection_url, "schema.json")
-
-        with open(collection_schema_url, "w", encoding="utf-8") as f:
-            json.dump(schema_map, f, indent=4)
+        save_schema(collection_schema_url, schema_map)
         logger.info("Saved collection '%s'", collection_name)

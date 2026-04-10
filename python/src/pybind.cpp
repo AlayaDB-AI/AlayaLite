@@ -188,6 +188,13 @@ PYBIND11_MODULE(_alayalitepy, m) {
            py::arg("item_id") = py::none(),
            py::arg("document") = "",
            py::arg("metadata") = py::dict())
+      .def("upsert",
+           &alaya::PyIndexInterface::upsert,
+           py::arg("insert_data"),
+           py::arg("ef"),
+           py::arg("item_id") = py::none(),
+           py::arg("document") = "",
+           py::arg("metadata") = py::dict())
       .def("remove", &alaya::PyIndexInterface::remove, py::arg("id"))
       .def("remove_by_item_id", &alaya::PyIndexInterface::remove_by_item_id, py::arg("item_id"))
       .def("contains", &alaya::PyIndexInterface::contains, py::arg("item_id"))

@@ -19,7 +19,6 @@ parameter classes and functions for saving and loading schema files.
 
 import json
 import os
-import shutil
 from dataclasses import dataclass
 from typing import Optional
 
@@ -228,11 +227,15 @@ def load_schema(url) -> dict:
 
 
 def save_schema(schema_url, schema_map):
-    schema_bak_address = schema_url + ".bak"
-    shutil.copy2(schema_url, schema_bak_address)
-    with open(schema_url, "w", encoding="utf-8") as f:
+    schema_dir = os.path.dirname(schema_url)
+    if schema_dir:
+        os.makedirs(schema_dir, exist_ok=True)
+    tmp_schema_url = schema_url + ".tmp"
+    with open(tmp_schema_url, "w", encoding="utf-8") as f:
         json.dump(schema_map, f, indent=4)
-        os.remove(schema_bak_address)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_schema_url, schema_url)
 
 
 def is_index_url(url):

@@ -28,7 +28,7 @@ from ._alayalitepy import MetadataFilter as _MetadataFilter
 from ._alayalitepy import PyIndexInterface as _PyIndexInterface
 from .common import _assert, _validate_query_vectors, normalize_filter_execution_hint
 from .index import Index
-from .schema import IndexParams, load_schema
+from .schema import IndexParams, load_schema, save_schema
 from .utils import normalize_vectors_for_cosine_metric
 
 
@@ -90,6 +90,19 @@ class Collection:
                 "Collection index backend is unavailable. Call insert() with the first batch of data first."
             )
         return self.__cpp_index
+
+    def _maybe_persist_schema_for_recovery(self) -> None:
+        if not self.__index_params.rocksdb_path or self.__index_py is None:
+            return
+
+        collection_dir = os.path.dirname(self.__index_params.rocksdb_path)
+        if not collection_dir:
+            return
+
+        save_schema(
+            os.path.join(collection_dir, "schema.json"),
+            {"type": "collection", "index": self.__index_params.to_json_dict()},
+        )
 
     def batch_query(
         self,
@@ -279,6 +292,7 @@ class Collection:
                 metadata_list=metadata_list,
             )
             self.__cpp_index = self.__index_py.get_cpp_index()
+            self._maybe_persist_schema_for_recovery()
         else:
             # Incremental insert with scalar data
             cpp_index = self._get_cpp_index()
@@ -305,26 +319,16 @@ class Collection:
             return
 
         cpp_index = self._get_cpp_index()
-        new_items_to_insert = []
-
         for item_id, document, embedding, metadata in items:
-            if cpp_index.contains(item_id):
-                # Update: remove old, insert new
-                cpp_index.remove_by_item_id(item_id)
-                vec = np.array(embedding, dtype=self.__index_py.get_dtype())
-                vec = normalize_vectors_for_cosine_metric(vec, self.__index_params.metric)
-                cpp_index.insert(
-                    vec,
-                    100,  # ef
-                    item_id,
-                    document,
-                    metadata or {},
-                )
-            else:
-                new_items_to_insert.append((item_id, document, embedding, metadata))
-
-        if new_items_to_insert:
-            self.insert(new_items_to_insert)
+            vec = np.array(embedding, dtype=self.__index_py.get_dtype())
+            vec = normalize_vectors_for_cosine_metric(vec, self.__index_params.metric)
+            cpp_index.upsert(
+                vec,
+                100,  # ef
+                item_id,
+                document,
+                metadata or {},
+            )
 
     def delete_by_id(self, ids: List[str]):
         """

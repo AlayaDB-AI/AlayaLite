@@ -110,6 +110,60 @@ class TestClientWithURL(unittest.TestCase):
         gc.collect()
         _ = Client(self.temp_dir)  # load
 
+    def test_collection_recovers_without_explicit_save(self):
+        client = Client(self.temp_dir)
+        coll = client.create_collection("recovering")
+        coll.insert(
+            [
+                ("a", "Document A", np.array([1.0, 0.0, 0.0], dtype=np.float32), {"group": "keep"}),
+                ("b", "Document B", np.array([0.0, 1.0, 0.0], dtype=np.float32), {"group": "drop"}),
+            ]
+        )
+        coll.upsert(
+            [
+                ("a", "Document A v2", np.array([1.0, 0.1, 0.0], dtype=np.float32), {"group": "keep", "v": 2}),
+                ("c", "Document C", np.array([0.0, 0.0, 1.0], dtype=np.float32), {"group": "keep"}),
+            ]
+        )
+        coll.delete_by_id(["b"])
+
+        del coll
+        del client
+        gc.collect()
+
+        recovered_client = Client(self.temp_dir)
+        recovered = recovered_client.get_collection("recovering")
+
+        self.assertIsNotNone(recovered)
+        result = recovered.get_by_id(["a", "b", "c"])
+        self.assertEqual(result["id"], ["a", "c"])
+        self.assertEqual(result["document"][0], "Document A v2")
+        self.assertEqual(result["metadata"][0]["v"], 2)
+
+    def test_sq8_collection_recovery_uses_scalar_storage(self):
+        client = Client(self.temp_dir)
+        coll = client.create_collection("recovering_sq8", quantization_type="sq8", metric="ip")
+        coll.insert(
+            [
+                ("x", "Document X", np.array([0.1, 0.2, 0.3], dtype=np.float32), {"kind": "seed"}),
+                ("y", "Document Y", np.array([0.4, 0.5, 0.6], dtype=np.float32), {"kind": "old"}),
+            ]
+        )
+        coll.upsert([("y", "Document Y v2", np.array([0.4, 0.5, 0.7], dtype=np.float32), {"kind": "new"})])
+
+        del coll
+        del client
+        gc.collect()
+
+        recovered_client = Client(self.temp_dir)
+        recovered = recovered_client.get_collection("recovering_sq8")
+
+        self.assertIsNotNone(recovered)
+        result = recovered.get_by_id(["x", "y"])
+        self.assertEqual(result["id"], ["x", "y"])
+        self.assertEqual(result["document"][1], "Document Y v2")
+        self.assertEqual(result["metadata"][1]["kind"], "new")
+
     def test_load_different(self):
         client = Client(self.temp_dir)
         index_name = "ind1"
