@@ -17,6 +17,8 @@
 #pragma once
 
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include "utils/platform.hpp"
 
 namespace alaya::simd {
@@ -78,6 +80,45 @@ inline auto get_cpu_features() -> const CpuFeatures & {
 // SIMD Level Enum
 // ============================================================================
 enum class SimdLevel : std::uint8_t { kGeneric, kSse4, kAvx2, kAvx512 };
+
+enum class DistanceDispatchPolicy : std::uint8_t {
+  kPreferStableThroughput,
+  kPreferAvx512,
+};
+
+inline constexpr const char *kDistanceDispatchPolicyEnv = "ALAYA_SIMD_DISTANCE_POLICY";
+
+inline auto parse_distance_dispatch_policy(const char *value) -> DistanceDispatchPolicy {
+  if (value != nullptr && std::strcmp(value, "avx512") == 0) {
+    return DistanceDispatchPolicy::kPreferAvx512;
+  }
+  return DistanceDispatchPolicy::kPreferStableThroughput;
+}
+
+inline auto get_distance_dispatch_policy() -> DistanceDispatchPolicy {
+  static const DistanceDispatchPolicy kPolicy =
+      parse_distance_dispatch_policy(std::getenv(kDistanceDispatchPolicyEnv));
+  return kPolicy;
+}
+
+inline auto select_fp32_distance_level(const CpuFeatures &features, DistanceDispatchPolicy policy)
+    -> SimdLevel {
+#ifdef ALAYA_ARCH_X86
+  if (policy == DistanceDispatchPolicy::kPreferAvx512 && features.avx512f_) {
+    return SimdLevel::kAvx512;
+  }
+  if (features.avx2_ && features.fma_) {
+    return SimdLevel::kAvx2;
+  }
+  if (features.avx512f_) {
+    return SimdLevel::kAvx512;
+  }
+  if (features.sse4_1_) {
+    return SimdLevel::kSse4;
+  }
+#endif
+  return SimdLevel::kGeneric;
+}
 
 inline auto get_simd_level(const CpuFeatures &features) -> SimdLevel {
 #ifdef ALAYA_ARCH_X86

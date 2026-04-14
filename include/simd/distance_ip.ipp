@@ -688,12 +688,13 @@ inline auto get_ip_sqr_func() -> IpSqrFunc {
   static const IpSqrFunc kFunc = []() -> IpSqrFunc {
 #ifdef ALAYA_ARCH_X86
     const auto &f = get_cpu_features();
-    if (f.avx512f_) {
-      // return ip_sqr_avx2;
-      return ip_sqr_avx512;
-    }
-    if (f.avx2_ && f.fma_) {
-      return ip_sqr_avx2;
+    switch (select_fp32_distance_level(f, get_distance_dispatch_policy())) {
+      case SimdLevel::kAvx512:
+        return ip_sqr_avx512;
+      case SimdLevel::kAvx2:
+        return ip_sqr_avx2;
+      default:
+        break;
     }
 #endif
     return ip_sqr_generic;

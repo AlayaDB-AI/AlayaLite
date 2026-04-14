@@ -69,4 +69,25 @@ TEST(CpuFeaturesTest, RuntimeHelpersStayConsistent) {
 #endif
 }
 
+TEST(CpuFeaturesTest, Fp32DistanceDispatchDefaultsToAvx2WhenAvailable) {
+  CpuFeatures avx512;
+  avx512.avx512f_ = true;
+  avx512.avx2_ = true;
+  avx512.fma_ = true;
+  avx512.sse4_1_ = true;
+
+  EXPECT_EQ(select_fp32_distance_level(avx512, DistanceDispatchPolicy::kPreferStableThroughput),
+            SimdLevel::kAvx2);
+  EXPECT_EQ(select_fp32_distance_level(avx512, DistanceDispatchPolicy::kPreferAvx512),
+            SimdLevel::kAvx512);
+}
+
+TEST(CpuFeaturesTest, ParseDistanceDispatchPolicyRecognizesAvx512Override) {
+  EXPECT_EQ(parse_distance_dispatch_policy(nullptr),
+            DistanceDispatchPolicy::kPreferStableThroughput);
+  EXPECT_EQ(parse_distance_dispatch_policy("avx512"), DistanceDispatchPolicy::kPreferAvx512);
+  EXPECT_EQ(parse_distance_dispatch_policy("unknown"),
+            DistanceDispatchPolicy::kPreferStableThroughput);
+}
+
 }  // namespace alaya::simd

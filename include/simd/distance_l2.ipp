@@ -679,12 +679,13 @@ inline auto get_l2_sqr_func() -> L2SqrFunc {
   static const L2SqrFunc kFunc = []() -> L2SqrFunc {
 #ifdef ALAYA_ARCH_X86
     const auto &f = get_cpu_features();
-    if (f.avx512f_) {
-      // return l2_sqr_avx2;  // because avx2 performs better than avx-512 in most cases
-      return l2_sqr_avx512;
-    }
-    if (f.avx2_ && f.fma_) {
-      return l2_sqr_avx2;
+    switch (select_fp32_distance_level(f, get_distance_dispatch_policy())) {
+      case SimdLevel::kAvx512:
+        return l2_sqr_avx512;
+      case SimdLevel::kAvx2:
+        return l2_sqr_avx2;
+      default:
+        break;
     }
 #endif
     return l2_sqr_generic;
