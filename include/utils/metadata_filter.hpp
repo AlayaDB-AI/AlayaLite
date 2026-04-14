@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -76,14 +77,22 @@ struct FilterCondition {
         return actual == value;
       case FilterOp::NE:
         return actual != value;
-      case FilterOp::GT:
-        return compare(actual, value) > 0;
-      case FilterOp::GE:
-        return compare(actual, value) >= 0;
-      case FilterOp::LT:
-        return compare(actual, value) < 0;
-      case FilterOp::LE:
-        return compare(actual, value) <= 0;
+      case FilterOp::GT: {
+        auto cmp = compare(actual, value);
+        return cmp.has_value() && *cmp > 0;
+      }
+      case FilterOp::GE: {
+        auto cmp = compare(actual, value);
+        return cmp.has_value() && *cmp >= 0;
+      }
+      case FilterOp::LT: {
+        auto cmp = compare(actual, value);
+        return cmp.has_value() && *cmp < 0;
+      }
+      case FilterOp::LE: {
+        auto cmp = compare(actual, value);
+        return cmp.has_value() && *cmp <= 0;
+      }
       case FilterOp::IN:
         return std::find(values.begin(), values.end(), actual) != values.end();
       case FilterOp::NOT_IN:
@@ -100,14 +109,14 @@ struct FilterCondition {
    * @brief Compare two MetadataValue objects
    * @return -1 if a < b, 0 if a == b, 1 if a > b
    */
-  static auto compare(const MetadataValue &a, const MetadataValue &b) -> int {
+  static auto compare(const MetadataValue &a, const MetadataValue &b) -> std::optional<int> {
     // Type mismatch: cannot compare
     if (a.index() != b.index()) {
-      return 0;
+      return std::nullopt;
     }
 
     return std::visit(
-        [&b](const auto &va) -> int {
+        [&b](const auto &va) -> std::optional<int> {
           using T = std::decay_t<decltype(va)>;
           const auto &vb = std::get<T>(b);
           if (va < vb) {

@@ -121,6 +121,13 @@ auto make_one_dim_raw_space(const std::vector<float> &values) -> std::shared_ptr
   return space;
 }
 
+auto make_one_dim_sq8_space(const std::vector<float> &values) -> std::shared_ptr<SQ8SpaceType> {
+  auto space =
+      std::make_shared<SQ8SpaceType>(static_cast<uint32_t>(values.size()), 1, MetricType::L2);
+  space->fit(values.data(), static_cast<uint32_t>(values.size()));
+  return space;
+}
+
 auto make_one_dim_scalar_space(const std::vector<float> &values,
                                const std::filesystem::path &db_path,
                                const std::vector<std::string> &indexed_fields)
@@ -513,6 +520,35 @@ TEST(GraphSearchJobUnitTest, UpdatedSearchUsesSecondHopNeighborsFromJobContext) 
   search_job.search_solo_updated(query.data(), ids.data(), 3, 1);
 
   EXPECT_EQ(ids[0], 2U);
+}
+
+TEST(GraphSearchJobUnitTest, UnderfilledSearchMarksMissingIdsInvalid) {
+  auto space = make_one_dim_raw_space({0.0F, 1.0F, 10.0F});
+  auto graph = make_graph_from_edges({{1}, {}, {}});
+  GraphSearchJob<RawSpaceType> search_job(space, graph);
+
+  std::vector<float> query = {0.0F};
+  std::vector<uint32_t> ids(3, 0U);
+  search_job.search_solo(query.data(), ids.data(), 3, 3);
+
+  EXPECT_EQ(ids[0], 0U);
+  EXPECT_EQ(ids[1], 1U);
+  EXPECT_EQ(ids[2], std::numeric_limits<uint32_t>::max());
+}
+
+TEST(GraphSearchJobUnitTest, UnderfilledRerankMarksMissingIdsInvalid) {
+  auto build_space = make_one_dim_raw_space({0.0F, 1.0F, 10.0F});
+  auto search_space = make_one_dim_sq8_space({0.0F, 1.0F, 10.0F});
+  auto graph = make_graph_from_edges({{1}, {}, {}});
+  GraphSearchJob<SQ8SpaceType, RawSpaceType> search_job(search_space, graph, nullptr, build_space);
+
+  std::vector<float> query = {0.0F};
+  std::vector<uint32_t> ids(3, 0U);
+  search_job.search_solo(query.data(), ids.data(), 3, 3);
+
+  EXPECT_EQ(ids[0], 0U);
+  EXPECT_EQ(ids[1], 1U);
+  EXPECT_EQ(ids[2], std::numeric_limits<uint32_t>::max());
 }
 
 // ============================================================================

@@ -417,8 +417,10 @@ class QGBuilder {
 
       // duplicate check
       if (nei_set.find(cur.id_) != nei_set.end()) {
-        occlude = true;
-        break;
+        // occlude = true;
+        // break;
+        ++start;
+        continue;
       }
 
       // For a candidate of the vertex, if there exists another candidate whose distance to the

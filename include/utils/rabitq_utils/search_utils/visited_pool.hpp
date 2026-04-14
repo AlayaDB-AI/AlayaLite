@@ -20,7 +20,7 @@
 #include <deque>
 #include <mutex>
 
-#include "utils/rabitq_utils/search_utils/epoch_visited.hpp"
+#include "utils/query_utils.hpp"
 #include "utils/rabitq_utils/search_utils/hashset.hpp"
 
 namespace alaya {

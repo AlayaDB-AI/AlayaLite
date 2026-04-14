@@ -16,48 +16,4 @@
 
 #pragma once
 
-#include <algorithm>
-#include <cstddef>
-#include <cstdint>
-#include <type_traits>
-#include <vector>
-
-#include "utils/memory.hpp"
-
-namespace alaya {
-
-template <typename TagType = uint32_t>
-class EpochVisitedSet {
- private:
-  using PID = uint32_t;
-
-  std::vector<TagType, AlignedAlloc<TagType>> tags_;
-  TagType epoch_ = 1;
-
- public:
-  static_assert(std::is_unsigned_v<TagType>, "TagType must be an unsigned integer type.");
-
-  EpochVisitedSet() = default;
-  explicit EpochVisitedSet(size_t size) : tags_(size, TagType{0}) {}
-
-  void resize(size_t size) {
-    tags_.assign(size, TagType{0});
-    epoch_ = 1;
-  }
-
-  void clear() {
-    ++epoch_;
-    if (epoch_ == TagType{0}) {
-      std::fill(tags_.begin(), tags_.end(), TagType{0});
-      epoch_ = 1;
-    }
-  }
-
-  [[nodiscard]] auto get(PID id) const -> bool { return tags_[id] == epoch_; }
-
-  void set(PID id) { tags_[id] = epoch_; }
-
-  [[nodiscard]] auto size() const -> size_t { return tags_.size(); }
-};
-
-}  // namespace alaya
+#include "utils/query_utils.hpp"

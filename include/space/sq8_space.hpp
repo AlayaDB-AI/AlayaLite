@@ -301,7 +301,9 @@ class SQ8Space {
       if (scalar_data != nullptr && scalar_storage_ != nullptr) {
         if (!scalar_storage_->insert(id, *scalar_data)) {
           LOG_ERROR("Failed to insert ScalarData for ID {}", id);
-          // Don't fail the whole operation, just log the error
+          data_storage_.remove(id);
+          item_cnt_--;
+          throw std::runtime_error("Failed to insert ScalarData");
         }
       }
     }
@@ -491,6 +493,10 @@ class SQ8Space {
   std::unique_ptr<RocksDBStorage<IDType>>
       scalar_storage_;  ///< Scalar Data Storage (stores ScalarData)
 
+  // TODO(review - scalar storage dedup): extract scalar_storage_ plus save/load_scalar_config into
+  // a shared helper reused by Raw/SQ4/SQ8/RaBitQ spaces.
+  // TODO(review - portable snapshots): checkpoint the RocksDB contents or rewrite db_path_
+  // relative to the saved index instead of persisting only the original absolute path.
   void save_scalar_config(std::ofstream &writer) {
     // Save db_path_ string
     size_t db_path_size = config_.db_path_.size();

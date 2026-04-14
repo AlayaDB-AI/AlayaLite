@@ -126,6 +126,9 @@ TEST(MetadataFilterConditionTest, EvaluatesAllComparisonOperators) {
   EXPECT_TRUE(make_condition("flag", FilterOp::GT, false).evaluate(metadata));
   EXPECT_TRUE(make_condition("title", FilterOp::GT, std::string("aardvark")).evaluate(metadata));
   EXPECT_FALSE(make_condition("age", FilterOp::GT, 9.5).evaluate(metadata));
+  EXPECT_FALSE(make_condition("age", FilterOp::GE, 9.5).evaluate(metadata));
+  EXPECT_FALSE(make_condition("age", FilterOp::LT, std::string("zzz")).evaluate(metadata));
+  EXPECT_FALSE(make_condition("age", FilterOp::LE, std::string("zzz")).evaluate(metadata));
 }
 
 TEST(MetadataFilterConditionTest, EvaluatesCollectionAndContainsOperators) {

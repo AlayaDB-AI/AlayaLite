@@ -305,6 +305,10 @@ class RawSpace {
     return nullptr;
   }
 
+  // TODO(review - scalar storage dedup): extract scalar_storage_ plus save/load_scalar_config into
+  // a shared helper reused by Raw/SQ4/SQ8/RaBitQ spaces.
+  // TODO(review - portable snapshots): checkpoint the RocksDB contents or rewrite db_path_
+  // relative to the saved index instead of persisting only the original absolute path.
   void save_scalar_config(std::ofstream &writer) {
     size_t db_path_size = config_.db_path_.size();
     writer.write(reinterpret_cast<char *>(&db_path_size), sizeof(db_path_size));

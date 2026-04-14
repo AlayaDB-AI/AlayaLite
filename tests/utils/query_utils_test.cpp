@@ -15,6 +15,7 @@
  */
 
 #include "utils/query_utils.hpp"
+#include "utils/rabitq_utils/search_utils/hashset.hpp"
 #include "utils/thread_pool.hpp"
 #include <gtest/gtest.h>
 
@@ -125,6 +126,56 @@ TEST_F(LinearPoolTest, ConcurrentInsertTest) {
 
   // Check final size
   EXPECT_LE(pool_->size(), 5);  // Size should be less than or equal to capacity
+}
+
+TEST(EpochVisitedSetTest, ClearResetsLogicalState) {
+  EpochVisitedSet<> visited(8);
+
+  visited.set(2);
+  visited.set(5);
+  EXPECT_TRUE(visited.get(2));
+  EXPECT_TRUE(visited.get(5));
+
+  visited.clear();
+
+  EXPECT_FALSE(visited.get(2));
+  EXPECT_FALSE(visited.get(5));
+
+  visited.set(3);
+  EXPECT_TRUE(visited.get(3));
+  EXPECT_FALSE(visited.get(2));
+}
+
+TEST(EpochVisitedSetTest, ResizeClearsExistingState) {
+  EpochVisitedSet<> visited(4);
+
+  visited.set(1);
+  visited.resize(10);
+
+  EXPECT_EQ(visited.size(), 10U);
+  for (uint32_t i = 0; i < 10; ++i) {
+    EXPECT_FALSE(visited.get(i));
+  }
+}
+
+TEST(HashBasedBooleanSetTest, HandlesCollisionsAndClear) {
+  HashBasedBooleanSet visited;
+  visited.initialize(8);
+
+  visited.set(1);
+  visited.set(9);
+  visited.set(17);
+
+  EXPECT_TRUE(visited.get(1));
+  EXPECT_TRUE(visited.get(9));
+  EXPECT_TRUE(visited.get(17));
+  EXPECT_FALSE(visited.get(2));
+
+  visited.clear();
+
+  EXPECT_FALSE(visited.get(1));
+  EXPECT_FALSE(visited.get(9));
+  EXPECT_FALSE(visited.get(17));
 }
 
 }  // namespace alaya

@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -72,12 +73,20 @@ struct ScalarData {
    * @return Deserialized ScalarData
    */
   static auto deserialize(const char *data, size_t size) -> ScalarData {
+    if (data == nullptr || size == 0) {
+      throw std::runtime_error("Invalid ScalarData payload");
+    }
+
     ScalarData result;
     size_t offset = 0;
 
-    result.item_id = deserialize_string(data, offset);
-    result.document = deserialize_string(data, offset);
-    result.metadata = deserialize_metadata(data, offset);
+    result.item_id = deserialize_string(data, size, offset);
+    result.document = deserialize_string(data, size, offset);
+    result.metadata = deserialize_metadata(data, size, offset);
+
+    if (offset > size) {
+      throw std::runtime_error("Corrupted ScalarData payload");
+    }
 
     return result;
   }
@@ -330,6 +339,31 @@ struct ScalarData {
     for (uint32_t i = 0; i < count; ++i) {
       std::string key = deserialize_string(data, offset);
       MetadataValue value = deserialize_value(data, offset);
+      result[key] = std::move(value);
+    }
+    return result;
+  }
+
+  static auto deserialize_metadata(const char *data, size_t size, size_t &offset) -> MetadataMap {
+    MetadataMap result;
+    if (offset + sizeof(uint32_t) > size) {
+      offset = size + 1;
+      return result;
+    }
+
+    uint32_t count;
+    std::memcpy(&count, data + offset, sizeof(count));
+    offset += sizeof(count);
+
+    for (uint32_t i = 0; i < count; ++i) {
+      std::string key = deserialize_string(data, size, offset);
+      if (offset > size) {
+        return MetadataMap{};
+      }
+      MetadataValue value = deserialize_value(data, size, offset);
+      if (offset > size) {
+        return MetadataMap{};
+      }
       result[key] = std::move(value);
     }
     return result;

@@ -115,6 +115,14 @@ TEST(ScalarDataTest, DeserializeSingleMetadataValueAndSelectedFields) {
     EXPECT_FALSE(missing.has_value());
 }
 
+TEST(ScalarDataTest, DeserializeRejectsTruncatedPayload) {
+    ScalarData data{"id_001", "document content", {{"category", std::string("tech")}}};
+    auto serialized = data.serialize();
+    serialized.pop_back();
+
+    EXPECT_THROW(ScalarData::deserialize(serialized.data(), serialized.size()), std::runtime_error);
+}
+
 TEST_F(RocksDBStorageTest, UpdateOperations) {
     RocksDBStorage<> storage(config_);
 
@@ -285,6 +293,21 @@ TEST_F(RocksDBStorageTest, BatchGet) {
     EXPECT_EQ(results[2].item_id, "id_003");
 }
 
+TEST_F(RocksDBStorageTest, ScanWithFilterReturnsNumericIdOrder) {
+    RocksDBStorage<> storage(config_);
+
+    ASSERT_TRUE(storage.insert(10, ScalarData{"id_010", "doc10", {}}));
+    ASSERT_TRUE(storage.insert(9, ScalarData{"id_009", "doc9", {}}));
+
+    auto results = storage.scan_with_filter([](const ScalarData&) {
+        return true;
+    });
+
+    ASSERT_EQ(results.size(), 2U);
+    EXPECT_EQ(results[0].first, 9U);
+    EXPECT_EQ(results[1].first, 10U);
+}
+
 // ============================================================================
 // Persistence Tests
 // ============================================================================
@@ -303,6 +326,17 @@ TEST_F(RocksDBStorageTest, PersistenceAcrossInstances) {
         EXPECT_EQ(storage[0].item_id, "id_001");
         EXPECT_EQ(storage[1].item_id, "id_002");
     }
+}
+
+TEST_F(RocksDBStorageTest, LockConflictFallsBackToReadOnlyAndRejectsWrites) {
+    RocksDBStorage<> primary(config_);
+    ASSERT_TRUE(primary.insert(0, ScalarData{"item_1", "data1", {}}));
+
+    RocksDBStorage<> secondary(config_);
+    EXPECT_TRUE(secondary.is_read_only());
+    EXPECT_TRUE(secondary.is_valid(0));
+    EXPECT_EQ(secondary[0].item_id, "item_1");
+    EXPECT_THROW(secondary.insert(1, ScalarData{"item_2", "data2", {}}), std::runtime_error);
 }
 
 TEST_F(RocksDBStorageTest, SaveCheckpointAndRestore) {

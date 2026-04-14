@@ -22,9 +22,11 @@
 #include <coroutine>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <queue>
 #include <stdexcept>
@@ -59,11 +61,16 @@ template <typename DistanceSpaceType,
           typename IDType = typename DistanceSpaceType::IDTypeAlias>
   requires Space<DistanceSpaceType> && Space<BuildSpaceType>
 struct GraphSearchJob {
+  struct QueryScratch;
+  class QueryScratchPool;
+  class QueryScratchLease;
+
   std::shared_ptr<DistanceSpaceType> space_ = nullptr;     ///< Search space (may be quantized)
   std::shared_ptr<BuildSpaceType> build_space_ = nullptr;  ///< Build space (raw vectors for rerank)
   std::shared_ptr<Graph<DataType, IDType>> graph_ = nullptr;  ///< The search graph.
   std::shared_ptr<JobContext<IDType>> job_context_;           ///< The shared job context
-  std::unique_ptr<EpochVisitedPool<>> visited_pool_;  ///< O(1)-clear visited pool for rabitq
+  std::unique_ptr<HashSetPool> visited_pool_;                 ///< Reused visited pool for rabitq
+  std::unique_ptr<QueryScratchPool> query_scratch_pool_;      ///< Reused rerank buffers
 
   /// Compile-time flag: whether rerank is needed
   static constexpr bool kNeedsRerank = !std::is_same_v<DistanceSpaceType, BuildSpaceType>;
@@ -122,62 +129,228 @@ struct GraphSearchJob {
     }
     // Initialize visited list pool for rabitq search
     if constexpr (is_rabitq_space_v<DistanceSpaceType>) {
-      visited_pool_ = std::make_unique<EpochVisitedPool<>>(1, space_->get_data_num());
+      visited_pool_ = std::make_unique<HashSetPool>(1, space_->get_data_num());
     }
+    query_scratch_pool_ = std::make_unique<QueryScratchPool>(1);
+  }
+
+  static constexpr auto kInvalidId = std::numeric_limits<IDType>::max();
+  static constexpr auto kInvalidDistance = std::numeric_limits<DistanceType>::max();
+
+  static void fill_invalid_ids(IDType *ids, uint32_t begin, uint32_t end) {
+    std::fill(ids + begin, ids + end, kInvalidId);
+  }
+
+  static void fill_invalid_distances(DistanceType *distances, uint32_t begin, uint32_t end) {
+    std::fill(distances + begin, distances + end, kInvalidDistance);
+  }
+
+  struct RerankCandidate {
+    DistanceType distance_;
+    IDType id_;
+  };
+
+  struct QueryScratch {
+    std::vector<RerankCandidate> rerank_heap_;
+
+    void prepare(size_t topk) {
+      rerank_heap_.clear();
+      if (rerank_heap_.capacity() < topk) {
+        rerank_heap_.reserve(topk);
+      }
+    }
+  };
+
+  class QueryScratchPool {
+   public:
+    explicit QueryScratchPool(size_t init_pool_size) {
+      for (size_t i = 0; i < init_pool_size; ++i) {
+        pool_.push_front(new QueryScratch());
+      }
+    }
+
+    ~QueryScratchPool() {
+      while (!pool_.empty()) {
+        auto *ptr = pool_.front();
+        pool_.pop_front();
+        delete ptr;
+      }
+    }
+
+    QueryScratchPool(const QueryScratchPool &) = delete;
+    auto operator=(const QueryScratchPool &) -> QueryScratchPool & = delete;
+    QueryScratchPool(QueryScratchPool &&) = delete;
+    auto operator=(QueryScratchPool &&) -> QueryScratchPool & = delete;
+
+    auto acquire(size_t topk) -> QueryScratch * {
+      QueryScratch *res = nullptr;
+      {
+        std::unique_lock<std::mutex> lock(poolguard_);
+        if (!pool_.empty()) {
+          res = pool_.front();
+          pool_.pop_front();
+        } else {
+          res = new QueryScratch();
+        }
+      }
+      res->prepare(topk);
+      return res;
+    }
+
+    void release(QueryScratch *scratch) {
+      std::unique_lock<std::mutex> lock(poolguard_);
+      pool_.push_front(scratch);
+    }
+
+   private:
+    std::deque<QueryScratch *> pool_;
+    std::mutex poolguard_;
+  };
+
+  class QueryScratchLease {
+   public:
+    QueryScratchLease(QueryScratchPool *pool, size_t topk) : pool_(pool) {
+      if (pool_ != nullptr) {
+        scratch_ = pool_->acquire(topk);
+      }
+    }
+
+    ~QueryScratchLease() {
+      if (pool_ != nullptr && scratch_ != nullptr) {
+        pool_->release(scratch_);
+      }
+    }
+
+    QueryScratchLease(const QueryScratchLease &) = delete;
+    auto operator=(const QueryScratchLease &) -> QueryScratchLease & = delete;
+
+    QueryScratchLease(QueryScratchLease &&other) noexcept
+        : pool_(other.pool_), scratch_(other.scratch_) {
+      other.pool_ = nullptr;
+      other.scratch_ = nullptr;
+    }
+
+    auto operator=(QueryScratchLease &&other) noexcept -> QueryScratchLease & {
+      if (this == &other) {
+        return *this;
+      }
+      if (pool_ != nullptr && scratch_ != nullptr) {
+        pool_->release(scratch_);
+      }
+      pool_ = other.pool_;
+      scratch_ = other.scratch_;
+      other.pool_ = nullptr;
+      other.scratch_ = nullptr;
+      return *this;
+    }
+
+    auto get() -> QueryScratch * { return scratch_; }
+
+   private:
+    QueryScratchPool *pool_ = nullptr;
+    QueryScratch *scratch_ = nullptr;
+  };
+
+  static auto rerank_candidate_less(const RerankCandidate &lhs, const RerankCandidate &rhs)
+      -> bool {
+    if (lhs.distance_ != rhs.distance_) {
+      return lhs.distance_ < rhs.distance_;
+    }
+    return lhs.id_ < rhs.id_;
   }
   /**
    * @brief Rerank search results using exact distances from build space
-   * @param src Source ID array (ef candidates from graph search)
    * @param desc Destination ID array (topk results after rerank)
-   * @param ef Number of candidates
    * @param topk Number of results to return
    * @param dist_compute Distance computer from build space
    */
-  void rerank(std::vector<IDType> &src,
+  void rerank(const LinearPool<DistanceType, IDType> &src,
               IDType *desc,
-              uint32_t ef,
               uint32_t topk,
               auto dist_compute) {
-    std::priority_queue<std::pair<DistanceType, IDType>,
-                        std::vector<std::pair<DistanceType, IDType>>,
-                        std::greater<>>
-        pq;
-    for (size_t i = 0; i < ef; i++) {
-      pq.push({dist_compute(src[i]), src[i]});
+    if (topk == 0) {
+      return;
     }
-    for (size_t i = 0; i < topk; i++) {
-      desc[i] = pq.top().second;
-      pq.pop();
+    QueryScratchLease scratch(query_scratch_pool_.get(), topk);
+    auto *query_scratch = scratch.get();
+    if (query_scratch == nullptr) {
+      fill_invalid_ids(desc, 0, topk);
+      return;
     }
+
+    auto &heap = query_scratch->rerank_heap_;
+    auto candidate_count = static_cast<uint32_t>(src.size());
+    for (uint32_t i = 0; i < candidate_count; ++i) {
+      RerankCandidate candidate{dist_compute(src.id(i)), src.id(i)};
+      if (heap.size() < topk) {
+        heap.push_back(candidate);
+        std::push_heap(heap.begin(), heap.end(), rerank_candidate_less);
+        continue;
+      }
+      if (!rerank_candidate_less(candidate, heap.front())) {
+        continue;
+      }
+      std::pop_heap(heap.begin(), heap.end(), rerank_candidate_less);
+      heap.back() = candidate;
+      std::push_heap(heap.begin(), heap.end(), rerank_candidate_less);
+    }
+
+    std::sort(heap.begin(), heap.end(), rerank_candidate_less);
+    auto result_count = static_cast<uint32_t>(std::min<size_t>(heap.size(), topk));
+    for (uint32_t i = 0; i < result_count; ++i) {
+      desc[i] = heap[i].id_;
+    }
+    fill_invalid_ids(desc, result_count, topk);
   }
 
   /**
    * @brief Rerank search results with distances using exact distances from build space
-   * @param src Source ID array (ef candidates from graph search)
    * @param desc Destination ID array (topk results after rerank)
    * @param distances Output distance array
-   * @param ef Number of candidates
    * @param topk Number of results to return
    * @param dist_compute Distance computer from build space
    */
-  void rerank(std::vector<IDType> &src,
+  void rerank(const LinearPool<DistanceType, IDType> &src,
               IDType *desc,
               DistanceType *distances,
-              uint32_t ef,
               uint32_t topk,
               auto dist_compute) {
-    std::priority_queue<std::pair<DistanceType, IDType>,
-                        std::vector<std::pair<DistanceType, IDType>>,
-                        std::greater<>>
-        pq;
-    for (size_t i = 0; i < ef; i++) {
-      pq.push({dist_compute(src[i]), src[i]});
+    if (topk == 0) {
+      return;
     }
-    for (size_t i = 0; i < topk; i++) {
-      distances[i] = pq.top().first;
-      desc[i] = pq.top().second;
-      pq.pop();
+    QueryScratchLease scratch(query_scratch_pool_.get(), topk);
+    auto *query_scratch = scratch.get();
+    if (query_scratch == nullptr) {
+      fill_invalid_ids(desc, 0, topk);
+      fill_invalid_distances(distances, 0, topk);
+      return;
     }
+
+    auto &heap = query_scratch->rerank_heap_;
+    auto candidate_count = static_cast<uint32_t>(src.size());
+    for (uint32_t i = 0; i < candidate_count; ++i) {
+      RerankCandidate candidate{dist_compute(src.id(i)), src.id(i)};
+      if (heap.size() < topk) {
+        heap.push_back(candidate);
+        std::push_heap(heap.begin(), heap.end(), rerank_candidate_less);
+        continue;
+      }
+      if (!rerank_candidate_less(candidate, heap.front())) {
+        continue;
+      }
+      std::pop_heap(heap.begin(), heap.end(), rerank_candidate_less);
+      heap.back() = candidate;
+      std::push_heap(heap.begin(), heap.end(), rerank_candidate_less);
+    }
+
+    std::sort(heap.begin(), heap.end(), rerank_candidate_less);
+    auto result_count = static_cast<uint32_t>(std::min<size_t>(heap.size(), topk));
+    for (uint32_t i = 0; i < result_count; ++i) {
+      distances[i] = heap[i].distance_;
+      desc[i] = heap[i].id_;
+    }
+    fill_invalid_ids(desc, result_count, topk);
+    fill_invalid_distances(distances, result_count, topk);
   }
 
   void rabitq_search_solo(const DataType *query, uint32_t k, IDType *ids, uint32_t ef) {
@@ -251,8 +424,9 @@ struct GraphSearchJob {
 #endif
   }
 
+#if defined(__linux__)
   auto rabitq_search(const DataType *query, uint32_t k, IDType *ids, uint32_t ef) -> coro::task<> {
-#if defined(__AVX512F__)
+  #if defined(__AVX512F__)
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");
     }
@@ -323,10 +497,11 @@ struct GraphSearchJob {
     res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids));
 
     co_return;
-#else
+  #else
     throw std::runtime_error("Avx512 instruction is not supported!");
-#endif
+  #endif
   }
+#endif
 #if defined(__linux__)
   /**
    * @brief Search for nearest neighbors (coroutine version with async prefetching)
@@ -346,7 +521,6 @@ struct GraphSearchJob {
 
     auto *sp = space_.get();
     auto *gr = graph_.get();
-    std::vector<IDType> res_pool(ef);
 
     auto query_computer = sp->get_query_computer(query);
     LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
@@ -380,16 +554,15 @@ struct GraphSearchJob {
       }
     }
 
-    // Copy ef candidates
-    for (uint32_t i = 0; i < ef; i++) {
-      res_pool[i] = pool.id(i);
-    }
-
     // Rerank if needed, otherwise directly copy topk
     if constexpr (kNeedsRerank) {
-      rerank(res_pool, ids, ef, topk, build_space_->get_query_computer(query));
+      rerank(pool, ids, topk, build_space_->get_query_computer(query));
     } else {
-      std::copy(res_pool.begin(), res_pool.begin() + topk, ids);
+      auto result_count = std::min<uint32_t>(static_cast<uint32_t>(pool.size()), topk);
+      for (uint32_t i = 0; i < result_count; ++i) {
+        ids[i] = pool.id(i);
+      }
+      fill_invalid_ids(ids, result_count, topk);
     }
 
     co_return;
@@ -415,8 +588,6 @@ struct GraphSearchJob {
 
     auto *sp = space_.get();
     auto *gr = graph_.get();
-    std::vector<IDType> res_pool(ef);
-    std::vector<DistanceType> dist_pool(ef);
 
     auto query_computer = sp->get_query_computer(query);
     LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
@@ -450,18 +621,17 @@ struct GraphSearchJob {
       }
     }
 
-    // Copy ef candidates
-    for (uint32_t i = 0; i < ef; i++) {
-      res_pool[i] = pool.id(i);
-      dist_pool[i] = pool.dist(i);
-    }
-
     // Rerank if needed, otherwise directly copy topk
     if constexpr (kNeedsRerank) {
-      rerank(res_pool, ids, distances, ef, topk, build_space_->get_query_computer(query));
+      rerank(pool, ids, distances, topk, build_space_->get_query_computer(query));
     } else {
-      std::copy(res_pool.begin(), res_pool.begin() + topk, ids);
-      std::copy(dist_pool.begin(), dist_pool.begin() + topk, distances);
+      auto result_count = std::min<uint32_t>(static_cast<uint32_t>(pool.size()), topk);
+      for (uint32_t i = 0; i < result_count; ++i) {
+        ids[i] = pool.id(i);
+        distances[i] = pool.dist(i);
+      }
+      fill_invalid_ids(ids, result_count, topk);
+      fill_invalid_distances(distances, result_count, topk);
     }
 
     co_return;
@@ -485,7 +655,6 @@ struct GraphSearchJob {
 
     auto *sp = space_.get();
     auto *gr = graph_.get();
-    std::vector<IDType> res_pool(ef);
 
     auto query_computer = sp->get_query_computer(query);
     LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
@@ -517,16 +686,15 @@ struct GraphSearchJob {
       }
     }
 
-    // Copy ef candidates
-    for (uint32_t i = 0; i < ef; i++) {
-      res_pool[i] = pool.id(i);
-    }
-
     // Rerank if needed, otherwise directly copy topk
     if constexpr (kNeedsRerank) {
-      rerank(res_pool, ids, ef, topk, build_space_->get_query_computer(query));
+      rerank(pool, ids, topk, build_space_->get_query_computer(query));
     } else {
-      std::copy(res_pool.begin(), res_pool.begin() + topk, ids);
+      auto result_count = std::min<uint32_t>(static_cast<uint32_t>(pool.size()), topk);
+      for (uint32_t i = 0; i < result_count; ++i) {
+        ids[i] = pool.id(i);
+      }
+      fill_invalid_ids(ids, result_count, topk);
     }
   }
 
@@ -553,8 +721,6 @@ struct GraphSearchJob {
 
     auto *sp = space_.get();
     auto *gr = graph_.get();
-    std::vector<IDType> res_pool(ef);
-    std::vector<DistanceType> dist_pool(ef);
 
     auto query_computer = sp->get_query_computer(query);
     LinearPool<DistanceType, IDType> pool(sp->get_data_num(), ef);
@@ -586,18 +752,17 @@ struct GraphSearchJob {
       }
     }
 
-    // Copy ef candidates
-    for (uint32_t i = 0; i < ef; i++) {
-      res_pool[i] = pool.id(i);
-      dist_pool[i] = pool.dist(i);
-    }
-
     // Rerank if needed, otherwise directly copy topk
     if constexpr (kNeedsRerank) {
-      rerank(res_pool, ids, distances, ef, topk, build_space_->get_query_computer(query));
+      rerank(pool, ids, distances, topk, build_space_->get_query_computer(query));
     } else {
-      std::copy(res_pool.begin(), res_pool.begin() + topk, ids);
-      std::copy(dist_pool.begin(), dist_pool.begin() + topk, distances);
+      auto result_count = std::min<uint32_t>(static_cast<uint32_t>(pool.size()), topk);
+      for (uint32_t i = 0; i < result_count; ++i) {
+        ids[i] = pool.id(i);
+        distances[i] = pool.dist(i);
+      }
+      fill_invalid_ids(ids, result_count, topk);
+      fill_invalid_distances(distances, result_count, topk);
     }
   }
   void search_solo_updated(DataType *query, IDType *ids, uint32_t ef, uint32_t topk) {
@@ -647,9 +812,11 @@ struct GraphSearchJob {
         pool.insert(v, cur_dist);
       }
     }
-    for (uint32_t i = 0; i < topk; i++) {
+    auto result_count = std::min<uint32_t>(static_cast<uint32_t>(pool.size()), topk);
+    for (uint32_t i = 0; i < result_count; ++i) {
       ids[i] = pool.id(i);
     }
+    fill_invalid_ids(ids, result_count, topk);
   }
 
   auto make_vector_iterator(const DataType *query,

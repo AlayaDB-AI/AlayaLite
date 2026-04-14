@@ -149,7 +149,7 @@ inline auto extract_id_from_key(const std::string &key) -> IDType {
   if (last_underscore == std::string::npos) {
     return 0;
   }
-  return static_cast<IDType>(std::stoul(key.substr(last_underscore + 1)));
+  return static_cast<IDType>(std::stoull(key.substr(last_underscore + 1)));
 }
 
 }  // namespace alaya::index_encoding

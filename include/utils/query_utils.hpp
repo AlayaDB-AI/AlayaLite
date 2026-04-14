@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 #include <unordered_set>
 #include <vector>
 #include "../index/neighbor.hpp"
@@ -128,6 +129,46 @@ class DynamicBitset {
    * @brief Get the number of bits in the bitset
    */
   [[nodiscard]] auto size() const -> size_t { return size_; }
+};
+
+/**
+ * @brief A visited-set implementation backed by epoch tags.
+ *
+ * Similar to DynamicBitset, this stores one marker per element and supports an
+ * O(1) logical clear by advancing the current epoch.
+ */
+template <typename TagType = uint32_t>
+class EpochVisitedSet {
+ private:
+  using PID = uint32_t;
+
+  std::vector<TagType, AlignedAlloc<TagType>> tags_;
+  TagType epoch_ = 1;
+
+ public:
+  static_assert(std::is_unsigned_v<TagType>, "TagType must be an unsigned integer type.");
+
+  EpochVisitedSet() = default;
+  explicit EpochVisitedSet(size_t size) : tags_(size, TagType{0}) {}
+
+  void resize(size_t size) {
+    tags_.assign(size, TagType{0});
+    epoch_ = 1;
+  }
+
+  void clear() {
+    ++epoch_;
+    if (epoch_ == TagType{0}) {
+      std::fill(tags_.begin(), tags_.end(), TagType{0});
+      epoch_ = 1;
+    }
+  }
+
+  [[nodiscard]] auto get(PID id) const -> bool { return tags_[id] == epoch_; }
+
+  void set(PID id) { tags_[id] = epoch_; }
+
+  [[nodiscard]] auto size() const -> size_t { return tags_.size(); }
 };
 
 /**
