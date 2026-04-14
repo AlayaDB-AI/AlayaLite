@@ -76,6 +76,16 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         self.assertGreaterEqual(recall, 0.95)
 
     @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
+    def test_rabitq_batch_search_with_distance_unsupported(self):
+        index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
+        vectors = np.random.rand(256, 128).astype(np.float32)
+        queries = np.random.rand(4, 128).astype(np.float32)
+        index.fit(vectors)
+
+        with self.assertRaises(RuntimeError):
+            index.batch_search_with_distance(queries, 10, 400)
+
+    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_save_load(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
         vectors = np.random.rand(1000, 128).astype(np.float32)

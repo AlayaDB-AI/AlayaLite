@@ -140,6 +140,39 @@ class TestCollection(unittest.TestCase):
         self.assertEqual(list(map(int, result_multi["id"][0])), [3, 2, 1])
         self.assertEqual(list(map(int, result_multi["id"][1])), [2, 1, 3])
 
+    def test_cpp_batch_get_scalar_data_by_internal_ids(self):
+        items = [
+            (1, "Document 1", np.array([0.1, 0.2, 0.3]), {"category": "A"}),
+            (2, "Document 2", np.array([0.4, 0.5, 0.6]), {"category": "B"}),
+        ]
+        self.collection.insert(items)
+
+        cpp_index = self.collection.get_cpp_index()
+        scalars = cpp_index.batch_get_scalar_data_by_internal_ids(np.array([0, 1, 99], dtype=np.uint32))
+
+        self.assertEqual(len(scalars), 3)
+        self.assertEqual(scalars[0]["item_id"], "1")
+        self.assertEqual(scalars[1]["metadata"]["category"], "B")
+        self.assertEqual(scalars[2].get("item_id", ""), "")
+
+    def test_cpp_internal_id_bridge_supports_uint64(self):
+        params = self._collection_params(id_type=np.uint64)
+        collection = self._create_collection("test_collection_uint64_bridge", params)
+        collection.insert([("a", "Document A", np.array([0.1, 0.2, 0.3], dtype=np.float32), {"kind": "seed"})])
+
+        cpp_index = collection.get_cpp_index()
+        scalar = cpp_index.get_scalar_data_by_internal_id(np.uint64(0))
+        self.assertEqual(scalar["item_id"], "a")
+
+        item_ids = cpp_index.batch_get_item_ids_by_internal_ids(np.array([0], dtype=np.uint64))
+        self.assertEqual(list(item_ids), ["a"])
+
+        vector = cpp_index.get_data_by_id(np.uint64(0))
+        self.assertEqual(vector.shape[0], 3)
+
+        cpp_index.remove(np.uint64(0))
+        self.assertFalse(cpp_index.contains("a"))
+
     def test_upsert(self):
         """Test updating an existing item in the collection."""
         items = [(1, "Old Doc", np.array([0.1, 0.2, 0.3]), {})]

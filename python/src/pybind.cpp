@@ -197,6 +197,10 @@ PYBIND11_MODULE(_alayalitepy, m) {
       .def("get_scalar_data_by_internal_id",
            &alaya::PyIndexInterface::get_scalar_data_by_internal_id,
            py::arg("internal_id"))
+      .def("batch_get_scalar_data_by_internal_ids",
+           &alaya::PyIndexInterface::batch_get_scalar_data_by_internal_ids,
+           py::arg("internal_ids"),
+           "Batch get scalar data by internal IDs using RocksDB MultiGet")
       .def("batch_get_item_ids_by_internal_ids",
            &alaya::PyIndexInterface::batch_get_item_ids_by_internal_ids,
            py::arg("internal_ids"),

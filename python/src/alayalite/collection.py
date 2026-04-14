@@ -119,6 +119,8 @@ class Collection:
         )
 
         cpp_index = self._get_cpp_index()
+        flat_scalars = cpp_index.batch_get_scalar_data_by_internal_ids(ids_arr.reshape(-1))
+        scalar_offset = 0
         ret = {"id": [], "document": [], "metadata": [], "distance": []}
         for ids_row, dists_row in zip(ids_arr, dists_arr):
             row_ids = []
@@ -126,17 +128,12 @@ class Collection:
             row_metas = []
             row_dists = [float(d) for d in dists_row]
 
-            for internal_id in ids_row:
-                try:
-                    scalar = cpp_index.get_scalar_data_by_internal_id(int(internal_id))
-                    row_ids.append(scalar.get("item_id", ""))
-                    row_docs.append(scalar.get("document", ""))
-                    row_metas.append(scalar.get("metadata", {}))
-                except RuntimeError:
-                    # Keep result alignment when graph results include deleted/invalid ids.
-                    row_ids.append("")
-                    row_docs.append("")
-                    row_metas.append({})
+            for _ in ids_row:
+                scalar = flat_scalars[scalar_offset]
+                scalar_offset += 1
+                row_ids.append(scalar.get("item_id", ""))
+                row_docs.append(scalar.get("document", ""))
+                row_metas.append(scalar.get("metadata", {}))
 
             ret["id"].append(row_ids)
             ret["document"].append(row_docs)
@@ -487,6 +484,8 @@ class Collection:
                     mf.add_sub_filter(sub_filter)
             elif isinstance(value, dict):
                 for op, op_value in value.items():
+                    # TODO(review - filter DSL parity): expose `$ne`, `$not_in`, and `$contains`
+                    # here so the Python dict DSL stays in sync with every C++ `FilterOp`.
                     if op == "$eq":
                         mf.add_eq(key, op_value)
                     elif op == "$gt":

@@ -57,6 +57,7 @@
 #include "materialized_view.hpp"
 #include "params.hpp"
 #include "parse.hpp"
+#include "recovery/recovery_manager.hpp"
 #include "space/rabitq_space.hpp"
 #include "space/raw_space.hpp"
 #include "space/sq4_space.hpp"
@@ -88,642 +89,25 @@ class PyIndex : public BasePyIndex {
   using DataType = typename SearchSpaceType::DataTypeAlias;
   using DistanceType = typename SearchSpaceType::DistanceTypeAlias;
   using BuildSpaceType = typename GraphBuilderType::DistanceSpaceTypeAlias;
-  using MaterializedViewSearchSpaceType = StripScalarDataT<SearchSpaceType>;
-  using MaterializedViewBuildSpaceType = StripScalarDataT<BuildSpaceType>;
-
-  using MaterializedViewCandidate = VectorCandidate<IDType, DistanceType>;
-
-  struct MaterializedViewPartition {
-    MetadataValue value_;
-    std::string
-        encoded_value_;  // encode metadata value into string for efficient RocksDB key prefix scan
-    std::vector<IDType>
-        local_to_global_ids_;  // mapping from local ID in partition to global ID in the whole index
-    std::shared_ptr<MaterializedViewSearchSpaceType> search_space_{
-        nullptr};  // space without scalar data for search
-    std::shared_ptr<MaterializedViewBuildSpaceType> build_space_{
-        nullptr};  // space without scalar data for building graph, can be the same as search_space_
-                   // if scalar data is not used in build process
-    std::shared_ptr<Graph<DataType, IDType>> graph_{nullptr};
-    std::shared_ptr<
-        alaya::GraphSearchJob<MaterializedViewSearchSpaceType, MaterializedViewBuildSpaceType>>
-        search_job_{nullptr};
-  };
-
-  struct MaterializedViewPartitionSeed {
-    MetadataValue value_;
-    std::string encoded_value_;
-    std::vector<IDType> global_ids_;
-  };
+  using MaterializedViewManagerType = MaterializedViewManager<SearchSpaceType, BuildSpaceType>;
 
   PyIndex() = delete;
-  explicit PyIndex(IndexParams params) : params_(std::move(params)) {}
+  explicit PyIndex(IndexParams params) : params_(std::move(params)) { initialize_recovery(); }
 
   auto to_string() const -> std::string { return "PyIndex"; }
   auto get_materialized_view_partition_count() const -> uint32_t {
-    return static_cast<uint32_t>(materialized_view_partitions_.size());
+    return materialized_view_manager_.get_partition_count();
   }
 
  private:
-  static constexpr size_t kMaterializedViewMaxPartitions =
-      128;  // to avoid creating too many small partitions which can lead to high search overhead
-  static constexpr float kMaterializedViewKnnBFFilterThreshold =
-      0.93F;  // if the filter would exclude more than 93% of the data, it's better to do
-              // brute-force search on the whole partition instead of building materialized view
-  static constexpr float kMaterializedViewBFTopkThreshold =
-      0.5F;  // if topk is more than 50% of the data, it's better to do brute-force search on the
-             // whole partition instead of building materialized view
-  static constexpr size_t kMaterializedViewRaBitQExactPartitionThreshold =
-      128;  // small RaBitQ MV partitions are cheaper and more stable to scan exactly than to build
-            // a per-partition QG index
-
-  static auto count_result_ids(const IDType *ids, uint32_t topk) -> uint32_t {
-    uint32_t count = 0;
-    while (count < topk && ids[count] != std::numeric_limits<IDType>::max()) {
-      ++count;
-    }
-    return count;
-  }
-
-  static void insert_materialized_view_candidate(std::vector<MaterializedViewCandidate> &results,
-                                                 IDType id,
-                                                 DistanceType distance,
-                                                 size_t limit) {
-    // todo: switch this merge buffer to SearchBuffer once it supports generic ID types cleanly.
-    if (limit == 0) {
-      return;
-    }
-    if (results.size() == limit && distance >= results.back().distance_) {
-      return;
-    }
-
-    auto it = std::upper_bound(results.begin(),
-                               results.end(),
-                               distance,
-                               [](const DistanceType &lhs, const MaterializedViewCandidate &rhs) {
-                                 return lhs < rhs.distance_;
-                               });
-    results.insert(it, MaterializedViewCandidate{id, distance});
-    if (results.size() > limit) {
-      results.pop_back();
-    }
-  }
-
-  static auto should_use_materialized_view_brute_force(const SearchInfo &search_info,
-                                                       size_t total_count,
-                                                       size_t matched_count) -> bool {
-    if (matched_count == 0) {
-      return false;
-    }
-
-    // 1. demanding too much results
-    auto topk = static_cast<size_t>(search_info.topk_);
-    if (topk >=
-        static_cast<size_t>(static_cast<double>(total_count) * kMaterializedViewBFTopkThreshold)) {
-      return true;
-    }
-
-    // 2. filter is too selective
-    auto filtered_out_num = total_count - matched_count;
-    if (filtered_out_num >= static_cast<size_t>(static_cast<double>(total_count) *
-                                                kMaterializedViewKnnBFFilterThreshold)) {
-      return true;
-    }
-
-    // 3. topk is too large compared to matched count
-    return topk >= static_cast<size_t>(static_cast<double>(matched_count) *
-                                       kMaterializedViewBFTopkThreshold);
-  }
-
-  /**
-   * @brief Adjust the search info for materialized view based on partition characteristics
-   * @param search_info Original search info
-   * @param partition_size Number of items in this particular partition
-   * @param matched_count Number of matched items that are not filtered out by the entire filter in
-   * this particular partition, usually matched_count <= partition_size
-   * @return Adjusted search info for materialized view search
-   */
-  static auto adjust_materialized_view_search_info(const SearchInfo &search_info,
-                                                   size_t partition_size,
-                                                   size_t matched_count) -> SearchInfo {
-    SearchInfo adjusted = search_info;
-    // make sure topk and ef are not larger than partition size
-    adjusted.topk_ = static_cast<uint32_t>(std::min<size_t>(search_info.topk_, partition_size));
-    adjusted.ef_ = static_cast<uint32_t>(
-        std::min<size_t>(partition_size, std::max<uint32_t>(search_info.ef_, adjusted.topk_)));
-
-    if (matched_count == 0 || matched_count == partition_size) {
-      return adjusted;
-    }
-
-    // expected scenario: topk / ef = matched_count / partition_size => ef = topk * partition_size /
-    // matched_count
-    auto expected_ef = static_cast<size_t>(
-        (static_cast<double>(adjusted.topk_) * static_cast<double>(partition_size)) /
-        static_cast<double>(matched_count));
-
-    expected_ef += expected_ef / 2;
-
-    // bigger ef means more candidates to rerank, but we need to still make sure it is not larger
-    // than partition size
-    adjusted.ef_ = static_cast<uint32_t>(
-        std::min<size_t>(partition_size, std::max<size_t>(adjusted.ef_, expected_ef)));
-    return adjusted;
-  }
-
-  void reset_materialized_view() {
-    materialized_view_ready_ = false;
-    materialized_view_field_.clear();
-    materialized_view_partition_lookup_.clear();
-    materialized_view_partitions_.clear();
-  }
-
-  void invalidate_materialized_view(std::string_view reason) {
-    if (materialized_view_ready_) {
-      LOG_DEBUG("materialized_view: invalidate cached partitions, reason={}", reason);
-    }
-    reset_materialized_view();
-  }
-
-  auto is_materialized_view_supported() const -> bool {
-    if constexpr (!SearchSpaceType::has_scalar_data) {
-      return false;
-    }
-
-    if (search_space_ == nullptr || params_.indexed_fields_.empty()) {
-      return false;
-    }
-
-    if constexpr (!is_rabitq_space_v<SearchSpaceType>) {
-      if (build_space_ == nullptr || params_.index_type_ != IndexType::HNSW) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  void copy_materialized_view_source_vector(IDType global_id, DataType *dst) const {
-    // todo: for rabitq space, assign build_space_ = search_space_ to avoid duplicate data storage.
-    if constexpr (is_rabitq_space_v<SearchSpaceType>) {
-      auto *src = search_space_->get_data_by_id(global_id);
-      std::memcpy(dst, src, static_cast<size_t>(data_dim_) * sizeof(DataType));
-    } else {
-      auto *src = build_space_->get_data_by_id(global_id);
-      std::memcpy(dst, src, static_cast<size_t>(data_dim_) * sizeof(DataType));
-    }
-  }
-
-  auto collect_materialized_view_partition_seeds(const RocksDBStorage<IDType> &storage) const
-      -> std::optional<std::vector<MaterializedViewPartitionSeed>> {
-    std::vector<MaterializedViewPartitionSeed> partitions;
-    std::unordered_map<std::string, size_t> partition_lookup;
-
-    // todo: build materialized views asynchronously or on demand for large datasets.
-    for (IDType id = 0; id < search_space_->get_data_num(); ++id) {
-      std::string raw_value;
-      if (!storage.get_raw_value(id, raw_value)) {
-        continue;
-      }
-
-      auto field_value = ScalarData::deserialize_single_metadata_value(raw_value.data(),
-                                                                       raw_value.size(),
-                                                                       materialized_view_field_);
-      if (!field_value.has_value()) {
-        // todo: missing partition field may deserve an explicit error instead of being skipped.
-        continue;
-      }
-
-      auto encoded_value = index_encoding::encode_value(*field_value);
-      auto lookup_it = partition_lookup.find(encoded_value);
-      if (lookup_it == partition_lookup.end()) {
-        lookup_it = partition_lookup.emplace(encoded_value, partitions.size()).first;
-        partitions.push_back(MaterializedViewPartitionSeed{*field_value, encoded_value, {}});
-        if (partitions.size() > kMaterializedViewMaxPartitions) {
-          return std::nullopt;
-        }
-      }
-      partitions[lookup_it->second].global_ids_.push_back(id);
-    }
-
-    return partitions;
-  }
-
-  template <typename ExactDistanceEvaluator>
-  void emit_materialized_view_brute_force_results(
-      const MaterializedViewPartition &partition,
-      const SearchInfo &search_info,
-      const DynamicBitset *residual_blocked,
-      ExactDistanceEvaluator &&exact_distance,
-      std::vector<MaterializedViewCandidate> &results) const {
-    auto partition_size = partition.local_to_global_ids_.size();
-    for (size_t local_id = 0; local_id < partition_size; ++local_id) {
-      if (residual_blocked != nullptr && residual_blocked->get(local_id)) {
-        continue;
-      }
-      insert_materialized_view_candidate(results,
-                                         partition.local_to_global_ids_[local_id],
-                                         exact_distance(static_cast<IDType>(local_id)),
-                                         search_info.topk_);
-    }
-  }
-
-  template <typename ExactDistanceEvaluator>
-  void search_materialized_view_partition_with_exact_distance(
-      const MaterializedViewPartition &partition,
-      const DataType *query,
-      const SearchInfo &search_info,
-      const SearchInfo &local_search_info,
-      size_t matched_count,
-      const DynamicBitset *residual_blocked,
-      bool filter_covered,
-      bool brute_force_requested,
-      ExactDistanceEvaluator &&exact_distance,
-      std::vector<MaterializedViewCandidate> &results) const {
-    auto partition_size = partition.local_to_global_ids_.size();
-
-    // 1. demanded brute_force search
-    if (brute_force_requested || partition.search_job_ == nullptr ||
-        should_use_materialized_view_brute_force(local_search_info,
-                                                 partition_size,
-                                                 matched_count)) {
-      emit_materialized_view_brute_force_results(partition,
-                                                 local_search_info,
-                                                 residual_blocked,
-                                                 std::forward<ExactDistanceEvaluator>(
-                                                     exact_distance),
-                                                 results);
-      return;
-    }
-
-    auto required_results =
-        static_cast<uint32_t>(std::min<size_t>(local_search_info.topk_, matched_count));
-    if (required_results == 0) {
-      return;
-    }
-
-    // 2. partition satisfies search condition, do simple ann search
-    if (filter_covered) {
-      std::vector<IDType> local_ids(local_search_info.topk_, std::numeric_limits<IDType>::max());
-      if constexpr (is_rabitq_space_v<MaterializedViewSearchSpaceType>) {
-        partition.search_job_->rabitq_search_solo(query,
-                                                  local_search_info.topk_,
-                                                  local_ids.data(),
-                                                  local_search_info);
-      } else {
-        partition.search_job_->search_solo(const_cast<DataType *>(query),
-                                           local_ids.data(),
-                                           local_search_info);
-      }
-
-      auto found_results = count_result_ids(local_ids.data(), local_search_info.topk_);
-      if (found_results < required_results) {
-        emit_materialized_view_brute_force_results(partition,
-                                                   local_search_info,
-                                                   residual_blocked,
-                                                   std::forward<ExactDistanceEvaluator>(
-                                                       exact_distance),
-                                                   results);
-        return;
-      }
-
-      for (uint32_t i = 0; i < found_results; ++i) {
-        auto local_id = local_ids[i];
-        insert_materialized_view_candidate(results,
-                                           partition.local_to_global_ids_[local_id],
-                                           exact_distance(local_id),
-                                           local_search_info.topk_);
-      }
-      return;
-    }
-
-    // 3. iterative post-filtering
-    if (search_info.filter_exec_hint_ == FilterExecHint::kIterativeFilter) {
-      // todo: inflate ef iteratively when post-filtering cannot collect enough results.
-      auto iterator = partition.search_job_->make_vector_iterator(query, local_search_info);
-      while (results.size() < local_search_info.topk_ && iterator->has_next()) {
-        auto candidate = iterator->next();
-        if (!candidate.has_value()) {
-          break;
-        }
-        if (residual_blocked != nullptr && residual_blocked->get(candidate->id_)) {
-          continue;
-        }
-        insert_materialized_view_candidate(results,
-                                           partition.local_to_global_ids_[candidate->id_],
-                                           exact_distance(candidate->id_),
-                                           local_search_info.topk_);
-      }
-      return;
-    }
-
-    // 4. blocked bitmap pre-filtering
-    auto adjusted_search_info =
-        adjust_materialized_view_search_info(local_search_info, partition_size, matched_count);
-    std::vector<IDType> local_ids(adjusted_search_info.topk_, std::numeric_limits<IDType>::max());
-    if constexpr (is_rabitq_space_v<MaterializedViewSearchSpaceType>) {
-      partition.search_job_->rabitq_search_solo(query,
-                                                adjusted_search_info.topk_,
-                                                local_ids.data(),
-                                                adjusted_search_info,
-                                                residual_blocked);
-    } else {
-      partition.search_job_->search_solo(const_cast<DataType *>(query),
-                                         local_ids.data(),
-                                         adjusted_search_info,
-                                         residual_blocked);
-    }
-
-    // 5. can not find enough result, fall back to brute-force search
-    auto found_results = count_result_ids(local_ids.data(), adjusted_search_info.topk_);
-    if (found_results < required_results) {
-      emit_materialized_view_brute_force_results(partition,
-                                                 local_search_info,
-                                                 residual_blocked,
-                                                 std::forward<ExactDistanceEvaluator>(
-                                                     exact_distance),
-                                                 results);
-      return;
-    }
-
-    for (uint32_t i = 0; i < found_results; ++i) {
-      auto local_id = local_ids[i];
-      insert_materialized_view_candidate(results,
-                                         partition.local_to_global_ids_[local_id],
-                                         exact_distance(local_id),
-                                         local_search_info.topk_);
-    }
-  }
-
-  auto build_materialized_view_partition(const MetadataValue &value,
-                                         std::string encoded_value,
-                                         std::vector<IDType> global_ids)
-      -> MaterializedViewPartition {
-    MaterializedViewPartition partition;
-    partition.value_ = value;
-    partition.encoded_value_ = std::move(encoded_value);
-    partition.local_to_global_ids_ = std::move(global_ids);
-
-    auto partition_size = partition.local_to_global_ids_.size();
-    auto partition_capacity = static_cast<IDType>(partition_size);
-    std::vector<DataType> partition_vectors(partition_size * static_cast<size_t>(data_dim_));
-    for (size_t i = 0; i < partition_size; ++i) {
-      copy_materialized_view_source_vector(partition.local_to_global_ids_[i],
-                                           partition_vectors.data() +
-                                               (i * static_cast<size_t>(data_dim_)));
-    }
-
-    partition.build_space_ = std::make_shared<MaterializedViewBuildSpaceType>(partition_capacity,
-                                                                              data_dim_,
-                                                                              params_.metric_);
-    partition.build_space_->fit(partition_vectors.data(), partition_capacity);
-
-    if constexpr (std::is_same_v<MaterializedViewBuildSpaceType, MaterializedViewSearchSpaceType>) {
-      partition.search_space_ = partition.build_space_;
-    } else {
-      partition.search_space_ =
-          std::make_shared<MaterializedViewSearchSpaceType>(partition_capacity,
-                                                            data_dim_,
-                                                            params_.metric_);
-      partition.search_space_->fit(partition_vectors.data(), partition_capacity);
-    }
-
-    // todo: small partitions may not need a child index; choose a threshold with benchmarks.
-    if constexpr (is_rabitq_space_v<MaterializedViewSearchSpaceType>) {
-      if (partition_size > kMaterializedViewRaBitQExactPartitionThreshold) {
-        QGBuilder<MaterializedViewSearchSpaceType> graph_builder(partition.search_space_);
-        graph_builder.build_graph();
-        partition.search_job_ = std::make_shared<
-            alaya::GraphSearchJob<MaterializedViewSearchSpaceType,
-                                  MaterializedViewBuildSpaceType>>(partition.search_space_,
-                                                                   nullptr,
-                                                                   nullptr,
-                                                                   partition.build_space_);
-      }
-    } else {
-      if (partition_size == 1) {
-        partition.graph_ =
-            std::make_shared<Graph<DataType, IDType>>(partition_capacity, params_.max_nbrs_);
-        partition.graph_->eps_.push_back(0);
-      } else {
-        HNSWBuilder<MaterializedViewBuildSpaceType>
-            graph_builder(partition.build_space_,
-                          params_.max_nbrs_,
-                          materialized_view_ef_construction_);
-        partition.graph_ = std::shared_ptr<Graph<DataType, IDType>>(
-            graph_builder.build_graph(materialized_view_build_threads_).release());
-      }
-      partition.search_job_ = std::make_shared<
-          alaya::GraphSearchJob<MaterializedViewSearchSpaceType,
-                                MaterializedViewBuildSpaceType>>(partition.search_space_,
-                                                                 partition.graph_,
-                                                                 nullptr,
-                                                                 partition.build_space_);
-    }
-
-    return partition;
-  }
-
-  void try_build_materialized_view() {
-    reset_materialized_view();
-    if (!is_materialized_view_supported()) {
-      return;
-    }
-
-    auto *storage = search_space_->get_scalar_storage();
-    if (storage == nullptr) {
-      return;
-    }
-
-    materialized_view_field_ = params_.indexed_fields_.front();
-    if (params_.indexed_fields_.size() > 1) {
-      LOG_INFO("materialized_view: only the first indexed field is partitioned, field={}",
-               materialized_view_field_);
-    }
-
-    try {
-      auto partitions = collect_materialized_view_partition_seeds(*storage);
-      if (!partitions.has_value()) {
-        LOG_INFO("materialized_view: skip build, field={} has too many partitions (>{})",
-                 materialized_view_field_,
-                 kMaterializedViewMaxPartitions);
-        reset_materialized_view();
-        return;
-      }
-
-      if (partitions->size() <= 1) {
-        LOG_INFO("materialized_view: skip build, field={} has {} partition(s)",
-                 materialized_view_field_,
-                 partitions->size());
-        reset_materialized_view();
-        return;
-      }
-
-      materialized_view_partitions_.reserve(partitions->size());
-      materialized_view_partition_lookup_.reserve(partitions->size());
-      for (auto &partition_seed : *partitions) {
-        auto partition = build_materialized_view_partition(partition_seed.value_,
-                                                           std::move(partition_seed.encoded_value_),
-                                                           std::move(partition_seed.global_ids_));
-        materialized_view_partition_lookup_.emplace(partition.encoded_value_,
-                                                    materialized_view_partitions_.size());
-        materialized_view_partitions_.push_back(std::move(partition));
-      }
-      materialized_view_ready_ = !materialized_view_partitions_.empty();
-      LOG_INFO("materialized_view: built field={}, partitions={}",
-               materialized_view_field_,
-               materialized_view_partitions_.size());
-    } catch (const std::exception &e) {
-      LOG_ERROR("materialized_view: build failed for field={}, error={}",
-                materialized_view_field_,
-                e.what());
-      reset_materialized_view();
-    }
-  }
-
-  auto execute_materialized_view_partition_search(
-      const MaterializedViewPartition &partition,
-      const DataType *query,
-      const SearchInfo &search_info,
-      const MetadataFilterExecutor<IDType> *filter_executor,
-      bool brute_force_requested,
-      bool filter_covered) const -> std::vector<MaterializedViewCandidate> {
-    std::vector<MaterializedViewCandidate> results;
-    auto partition_size = partition.local_to_global_ids_.size();
-    if (partition_size == 0) {
-      return results;
-    }
-
-    // initialize local_search_info
-    SearchInfo local_search_info =
-        adjust_materialized_view_search_info(search_info, partition_size, partition_size);
-
-    std::optional<typename MetadataFilterExecutor<IDType>::BlockedBitsetResult>
-        residual_filter_result;
-    const DynamicBitset *residual_blocked = nullptr;
-    auto matched_count = partition_size;
-    if (!filter_covered) {
-      assert(filter_executor != nullptr);
-      residual_filter_result =
-          filter_executor->build_blocked_bitset(partition.local_to_global_ids_);
-      matched_count = residual_filter_result->matched_count_;
-      if (matched_count == 0) {
-        return results;
-      }
-      residual_blocked = &residual_filter_result->blocked_;
-    }
-
-    auto dist_func = partition.build_space_->get_dist_func();
-    auto dim = partition.build_space_->get_dim();
-    search_materialized_view_partition_with_exact_distance(
-        partition,
-        query,
-        search_info,
-        local_search_info,
-        matched_count,
-        residual_blocked,
-        filter_covered,
-        brute_force_requested,
-        [&](IDType local_id) -> DistanceType {
-          return dist_func(query, partition.build_space_->get_data_by_id(local_id), dim);
-        },
-        results);
-    return results;
-  }  // execute_materialized_view_partition_search
-
-  auto try_materialized_view_hybrid_search(const DataType *query,
-                                           IDType *ids,
-                                           const SearchInfo &search_info,
-                                           const MetadataFilter &filter,
-                                           bool brute_force_requested,
-                                           std::string *item_ids) const -> bool {
-    if (!materialized_view_ready_ || filter.is_empty()) {
-      return false;
-    }
-    auto partition_selection = analyze_materialized_view_filter(filter, materialized_view_field_);
-    if (!partition_selection.eligible_) {
-      return false;
-    }
-    auto *storage = search_space_->get_scalar_storage();
-    if (storage == nullptr) {
-      return false;
-    }
-
-    std::fill(ids, ids + search_info.topk_, std::numeric_limits<IDType>::max());
-    std::fill(item_ids, item_ids + search_info.topk_, std::string{});
-
-    std::unique_ptr<MetadataFilterExecutor<IDType>> filter_executor;
-    if (!partition_selection.filter_covered_) {
-      filter_executor =
-          std::make_unique<MetadataFilterExecutor<IDType>>(filter,
-                                                           storage,
-                                                           search_space_->get_data_num());
-    }
-
-    std::vector<MaterializedViewCandidate> merged_results;
-    merged_results.reserve(search_info.topk_);
-
-    size_t selected_partitions = 0;
-    for (const auto &value : partition_selection.values_) {
-      auto lookup_it =
-          materialized_view_partition_lookup_.find(index_encoding::encode_value(value));
-      if (lookup_it == materialized_view_partition_lookup_.end()) {
-        // filter value does not match any partition, skip this value since it won't contribute to
-        // the result
-        continue;
-      }
-
-      ++selected_partitions;
-      auto partition_results =
-          execute_materialized_view_partition_search(materialized_view_partitions_[lookup_it
-                                                                                       ->second],
-                                                     query,
-                                                     search_info,
-                                                     filter_executor.get(),
-                                                     brute_force_requested,
-                                                     partition_selection.filter_covered_);
-      for (const auto &candidate : partition_results) {
-        insert_materialized_view_candidate(merged_results,
-                                           candidate.id_,
-                                           candidate.distance_,
-                                           search_info.topk_);
-      }
-    }
-
-    LOG_DEBUG("hybrid_search: plan=materialized_view, field={}, partitions={}",
-              materialized_view_field_,
-              selected_partitions);
-
-    if (merged_results.empty()) {  // no available result
-      return true;
-    }
-
-    std::vector<IDType> materialized_ids;
-    materialized_ids.reserve(merged_results.size());
-    for (size_t i = 0; i < merged_results.size(); ++i) {
-      ids[i] = merged_results[i].id_;
-      materialized_ids.push_back(merged_results[i].id_);
-    }
-
-    auto materialized_item_ids = storage->batch_get_item_id_only(materialized_ids);
-    for (size_t i = 0; i < materialized_item_ids.size(); ++i) {
-      item_ids[i] = std::move(materialized_item_ids[i]);
-    }
-    return true;
-  }
-
   void execute_hybrid_search_dispatch(const DataType *query,
                                       IDType *ids,
                                       const SearchInfo &search_info,
                                       const MetadataFilter &filter,
                                       bool brute_force_requested,
                                       std::string *item_ids) const {
-    if (try_materialized_view_hybrid_search(query,
-                                            ids,
-                                            search_info,
-                                            filter,
-                                            brute_force_requested,
-                                            item_ids)) {
+    if (materialized_view_manager_
+            .try_hybrid_search(query, ids, search_info, filter, brute_force_requested, item_ids)) {
       return;
     }
 
@@ -775,34 +159,44 @@ class PyIndex : public BasePyIndex {
   }
 #endif
 
- public:
-  auto get_data_by_id(IDType id) -> py::array_t<DataType> {
-    if constexpr (is_rabitq_space_v<SearchSpaceType>) {
-      if (search_space_ == nullptr) {
-        throw std::runtime_error("space is nullptr");
-      }
-      if (id >= search_space_->get_data_num()) {
-        throw std::runtime_error("id out of range");
-      }
-      auto data = search_space_->get_data_by_id(id);
-      return py::array_t<DataType>({data_dim_}, {sizeof(DataType)}, data);
-    } else {
-      if (build_space_ == nullptr) {
-        throw std::runtime_error("space is nullptr");
-      }
-      if (id >= build_space_->get_data_num()) {
-        throw std::runtime_error("id out of range");
-      }
-      auto data = build_space_->get_data_by_id(id);
-      return py::array_t<DataType>({data_dim_}, {sizeof(DataType)}, data);
+  void initialize_recovery() {
+    if (params_.rocksdb_path_.empty()) {
+      return;
     }
+    auto recovery_root = std::filesystem::path(params_.rocksdb_path_).parent_path() / "recovery";
+    recovery_manager_ =
+        std::make_unique<alaya::recovery::RecoveryManager>(recovery_root,
+                                                           std::filesystem::path(
+                                                               params_.rocksdb_path_));
+
+    uint64_t max_seen_op_id = 0;
+    recovery_manager_->replayable_records(0, &max_seen_op_id);
+    auto manifest = recovery_manager_->current_snapshot();
+    if (manifest.has_value()) {
+      last_committed_recovery_op_id_ = manifest->applied_through_op_id;
+    }
+    last_seen_recovery_op_id_ = std::max(max_seen_op_id, last_committed_recovery_op_id_);
+    next_recovery_op_id_ = last_seen_recovery_op_id_ + 1;
   }
 
-  auto get_dim() const -> uint32_t { return data_dim_; }
+  [[nodiscard]] auto recovery_scalar_storage() const -> RocksDBStorage<IDType> * {
+    if constexpr (SearchSpaceType::has_scalar_data) {
+      if (search_space_ != nullptr) {
+        return search_space_->get_scalar_storage();
+      }
+    }
+    if constexpr (!std::is_same<BuildSpaceType, SearchSpaceType>::value &&
+                  BuildSpaceType::has_scalar_data) {
+      if (build_space_ != nullptr) {
+        return build_space_->get_scalar_storage();
+      }
+    }
+    return nullptr;
+  }
 
-  auto save(const std::string &index_path,
-            const std::string &data_path = std::string(),
-            const std::string &quant_path = std::string()) -> void {
+  auto save_state(const std::string &index_path,
+                  const std::string &data_path = std::string(),
+                  const std::string &quant_path = std::string()) const -> void {
     std::string_view index_path_view{index_path};
     std::string_view data_path_view{data_path};
     std::string_view quant_path_view{quant_path};
@@ -819,10 +213,9 @@ class PyIndex : public BasePyIndex {
     }
   }
 
-  auto load(const std::string &index_path,
-            const std::string &data_path = std::string(),
-            const std::string &quant_path = std::string()) -> void {
-    // index_path_ = index_path;
+  auto load_state(const std::string &index_path,
+                  const std::string &data_path = std::string(),
+                  const std::string &quant_path = std::string()) -> void {
     std::string_view index_path_view{index_path};
     std::string_view data_path_view{data_path};
     std::string_view quant_path_view{quant_path};
@@ -875,12 +268,293 @@ class PyIndex : public BasePyIndex {
                                                                         build_space_);
       update_job_ = std::make_shared<GraphUpdateJob<SearchSpaceType, BuildSpaceType>>(search_job_);
     }
-    materialized_view_ef_construction_ = std::max<uint32_t>(200, params_.max_nbrs_ * 4);
-    materialized_view_build_threads_ = params_.materialized_view_build_threads_ != 0
-                                           ? params_.materialized_view_build_threads_
-                                       : params_.build_threads_ != 0 ? params_.build_threads_
-                                                                     : 1;
-    try_build_materialized_view();
+  }
+
+  auto checkpoint_recovery_snapshot(std::string_view reason) -> void {
+    if (recovery_manager_ == nullptr || search_space_ == nullptr) {
+      return;
+    }
+
+    auto snapshot_dir = recovery_manager_->create_snapshot_dir();
+    auto snapshot_id = snapshot_dir.filename().string();
+
+    std::string graph_file;
+    std::string data_file;
+    std::string quant_file;
+
+    if constexpr (!is_rabitq_space_v<SearchSpaceType>) {
+      graph_file = "graph.snapshot";
+      data_file = "data.snapshot";
+    }
+    if constexpr (is_rabitq_space_v<SearchSpaceType> ||
+                  !std::is_same<BuildSpaceType, SearchSpaceType>::value) {
+      quant_file = "quant.snapshot";
+    }
+
+    save_state(graph_file.empty() ? std::string() : (snapshot_dir / graph_file).string(),
+               data_file.empty() ? std::string() : (snapshot_dir / data_file).string(),
+               quant_file.empty() ? std::string() : (snapshot_dir / quant_file).string());
+
+    std::string rocksdb_dir;
+    if (auto *storage = recovery_scalar_storage(); storage != nullptr) {
+      rocksdb_dir = "rocksdb";
+      storage->save((snapshot_dir / rocksdb_dir).string());
+    }
+
+    alaya::recovery::SnapshotManifest manifest;
+    manifest.snapshot_id = snapshot_id;
+    manifest.reason = std::string(reason);
+    manifest.applied_through_op_id = last_committed_recovery_op_id_;
+    manifest.created_unix_ms = alaya::recovery::SnapshotManifest::current_unix_ms();
+    manifest.graph_file = graph_file;
+    manifest.data_file = data_file;
+    manifest.quant_file = quant_file;
+    manifest.rocksdb_dir = rocksdb_dir;
+
+    recovery_manager_->publish_snapshot(manifest, snapshot_dir);
+  }
+
+  [[nodiscard]] auto encode_insert_like_payload(const DataType *data,
+                                                uint32_t ef,
+                                                const ScalarData &scalar_data) const
+      -> std::vector<char> {
+    alaya::recovery::BinaryWriter writer;
+    writer.write_u32(ef);
+    writer.write_vector_blob(data, static_cast<size_t>(data_dim_));
+    writer.write_blob(scalar_data.serialize());
+    return std::move(writer).finish();
+  }
+
+  [[nodiscard]] auto encode_remove_item_payload(const std::string &item_id) const
+      -> std::vector<char> {
+    alaya::recovery::BinaryWriter writer;
+    writer.write_string(item_id);
+    return std::move(writer).finish();
+  }
+
+  [[nodiscard]] auto encode_remove_internal_payload(IDType internal_id) const -> std::vector<char> {
+    alaya::recovery::BinaryWriter writer;
+    writer.write_u64(static_cast<uint64_t>(internal_id));
+    return std::move(writer).finish();
+  }
+
+  auto insert_nondurable(DataType *data, uint32_t ef, const ScalarData *scalar_data) -> IDType {
+    if (update_job_ == nullptr) {
+      throw std::runtime_error("incremental updates are not supported for the current index type");
+    }
+    auto inserted_id = update_job_->insert_and_update(data, ef, scalar_data);
+    materialized_view_manager_.invalidate("insert");
+    return inserted_id;
+  }
+
+  auto remove_nondurable(IDType id) -> void {
+    if (update_job_ == nullptr) {
+      throw std::runtime_error("incremental updates are not supported for the current index type");
+    }
+    update_job_->remove(id);
+    materialized_view_manager_.invalidate("remove");
+  }
+
+  auto remove_nondurable(const std::string &item_id) -> void {
+    if (update_job_ == nullptr) {
+      throw std::runtime_error("incremental updates are not supported for the current index type");
+    }
+    update_job_->remove(item_id);
+    materialized_view_manager_.invalidate("remove_by_item_id");
+  }
+
+  [[nodiscard]] auto copy_vector_by_internal_id(IDType internal_id) const -> std::vector<DataType> {
+    std::vector<DataType> vector(data_dim_);
+    const DataType *source = nullptr;
+
+    if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+      source = search_space_->get_data_by_id(internal_id);
+    } else {
+      source = build_space_->get_data_by_id(internal_id);
+    }
+
+    std::copy(source, source + data_dim_, vector.begin());
+    return vector;
+  }
+
+  auto upsert_nondurable(DataType *data, uint32_t ef, const ScalarData &scalar_data) -> IDType {
+    if constexpr (!SearchSpaceType::has_scalar_data) {
+      throw std::runtime_error("upsert requires scalar data support");
+    } else {
+      if (!contains(scalar_data.item_id)) {
+        return insert_nondurable(data, ef, &scalar_data);
+      }
+
+      auto [old_internal_id, old_scalar] = search_space_->get_scalar_data(scalar_data.item_id);
+      auto old_vector = copy_vector_by_internal_id(old_internal_id);
+      remove_nondurable(scalar_data.item_id);
+
+      try {
+        return insert_nondurable(data, ef, &scalar_data);
+      } catch (...) {
+        LOG_ERROR("recovery: upsert failed after remove, attempting rollback for item_id={}",
+                  scalar_data.item_id);
+        try {
+          insert_nondurable(old_vector.data(), ef, &old_scalar);
+        } catch (const std::exception &rollback_error) {
+          LOG_CRITICAL("recovery: rollback failed for item_id={} error={}",
+                       scalar_data.item_id,
+                       rollback_error.what());
+        }
+        throw;
+      }
+    }
+  }
+
+  auto replay_record(const alaya::recovery::WalRecord &record) -> void {
+    alaya::recovery::BinaryReader reader(record.payload.data(), record.payload.size());
+
+    switch (record.mutation_type) {
+      case alaya::recovery::MutationType::INSERT:
+      case alaya::recovery::MutationType::UPSERT: {
+        auto ef = reader.read_u32();
+        auto vector_blob = reader.read_blob();
+        auto scalar_blob = reader.read_blob();
+        if (!ef.has_value() || !vector_blob.has_value() || !scalar_blob.has_value()) {
+          throw std::runtime_error("Invalid WAL insert/upsert payload");
+        }
+        if (vector_blob->size() != static_cast<size_t>(data_dim_) * sizeof(DataType)) {
+          throw std::runtime_error("WAL vector payload dimension mismatch");
+        }
+
+        auto scalar_data = ScalarData::deserialize(scalar_blob->data(), scalar_blob->size());
+        std::vector<DataType> vector(data_dim_);
+        std::memcpy(vector.data(), vector_blob->data(), vector_blob->size());
+
+        if (record.mutation_type == alaya::recovery::MutationType::INSERT) {
+          insert_nondurable(vector.data(), ef.value(), &scalar_data);
+        } else {
+          upsert_nondurable(vector.data(), ef.value(), scalar_data);
+        }
+        break;
+      }
+      case alaya::recovery::MutationType::REMOVE_BY_ITEM_ID: {
+        auto item_id = reader.read_string();
+        if (!item_id.has_value()) {
+          throw std::runtime_error("Invalid WAL remove-by-item-id payload");
+        }
+        if (contains(item_id.value())) {
+          remove_nondurable(item_id.value());
+        } else {
+          LOG_WARN("recovery: skip removing missing item_id={} during replay", item_id.value());
+        }
+        break;
+      }
+      case alaya::recovery::MutationType::REMOVE_BY_INTERNAL_ID: {
+        auto internal_id = reader.read_u64();
+        if (!internal_id.has_value()) {
+          throw std::runtime_error("Invalid WAL remove-by-id payload");
+        }
+        if (internal_id.value() < static_cast<uint64_t>(search_space_->get_data_num())) {
+          remove_nondurable(static_cast<IDType>(internal_id.value()));
+        } else {
+          LOG_WARN("recovery: skip removing missing internal_id={} during replay",
+                   internal_id.value());
+        }
+        break;
+      }
+    }
+  }
+
+  auto replay_recovery_log(uint64_t applied_through) -> size_t {
+    if (recovery_manager_ == nullptr) {
+      return 0;
+    }
+
+    auto records =
+        recovery_manager_->replayable_records(applied_through, &last_seen_recovery_op_id_);
+    for (const auto &record : records) {
+      replay_record(record);
+      last_committed_recovery_op_id_ = std::max(last_committed_recovery_op_id_, record.op_id);
+    }
+    if (!records.empty()) {
+      LOG_INFO("recovery: replayed {} committed mutations", records.size());
+    }
+    next_recovery_op_id_ = std::max(next_recovery_op_id_, last_seen_recovery_op_id_ + 1);
+    return records.size();
+  }
+
+ public:
+  auto get_data_by_id(IDType id) -> py::array_t<DataType> {
+    if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+      if (search_space_ == nullptr) {
+        throw std::runtime_error("space is nullptr");
+      }
+      if (id >= search_space_->get_data_num()) {
+        throw std::runtime_error("id out of range");
+      }
+      auto data = search_space_->get_data_by_id(id);
+      return py::array_t<DataType>({data_dim_}, {sizeof(DataType)}, data);
+    } else {
+      if (build_space_ == nullptr) {
+        throw std::runtime_error("space is nullptr");
+      }
+      if (id >= build_space_->get_data_num()) {
+        throw std::runtime_error("id out of range");
+      }
+      auto data = build_space_->get_data_by_id(id);
+      return py::array_t<DataType>({data_dim_}, {sizeof(DataType)}, data);
+    }
+  }
+
+  auto get_dim() const -> uint32_t { return data_dim_; }
+
+  auto save(const std::string &index_path,
+            const std::string &data_path = std::string(),
+            const std::string &quant_path = std::string()) -> void {
+    save_state(index_path, data_path, quant_path);
+    checkpoint_recovery_snapshot("manual_save");
+  }
+
+  auto load(const std::string &index_path,
+            const std::string &data_path = std::string(),
+            const std::string &quant_path = std::string()) -> void {
+    std::string resolved_index_path = index_path;
+    std::string resolved_data_path = data_path;
+    std::string resolved_quant_path = quant_path;
+    uint64_t applied_through = 0;
+
+    if (recovery_manager_ != nullptr) {
+      auto manifest = recovery_manager_->current_snapshot();
+      auto snapshot_dir = recovery_manager_->current_snapshot_dir();
+      if (manifest.has_value() && snapshot_dir.has_value()) {
+        recovery_manager_->restore_active_rocksdb_from_snapshot(manifest.value(),
+                                                                snapshot_dir.value());
+        resolved_index_path = manifest->graph_path(snapshot_dir.value());
+        resolved_data_path = manifest->data_path(snapshot_dir.value());
+        resolved_quant_path = manifest->quant_path(snapshot_dir.value());
+        applied_through = manifest->applied_through_op_id;
+        LOG_INFO("recovery: loading snapshot id={} applied_through={}",
+                 manifest->snapshot_id,
+                 applied_through);
+      }
+    }
+
+    load_state(resolved_index_path, resolved_data_path, resolved_quant_path);
+    auto materialized_view_ef_construction = std::max<uint32_t>(200, params_.max_nbrs_ * 4);
+    auto materialized_view_build_threads = params_.materialized_view_build_threads_ != 0
+                                               ? params_.materialized_view_build_threads_
+                                           : params_.build_threads_ != 0 ? params_.build_threads_
+                                                                         : 1;
+    materialized_view_manager_.rebuild(params_,
+                                       data_dim_,
+                                       search_space_,
+                                       build_space_,
+                                       materialized_view_ef_construction,
+                                       materialized_view_build_threads);
+
+    auto replayed = replay_recovery_log(applied_through);
+    if (recovery_manager_ != nullptr) {
+      auto current_snapshot = recovery_manager_->current_snapshot();
+      if (replayed > 0 || !current_snapshot.has_value()) {
+        checkpoint_recovery_snapshot(replayed > 0 ? "post_recovery" : "post_load");
+      }
+    }
     LOG_DEBUG("creator task generator success");
   }
 
@@ -899,10 +573,10 @@ class PyIndex : public BasePyIndex {
     data_size_ = vectors.shape(0);
     data_dim_ = vectors.shape(1);
     vectors_ = static_cast<DataType *>(vectors.request().ptr);
-    materialized_view_ef_construction_ = ef_construction;
-    materialized_view_build_threads_ = params_.materialized_view_build_threads_ != 0
-                                           ? params_.materialized_view_build_threads_
-                                           : std::max<uint32_t>(1, num_threads);
+    auto materialized_view_ef_construction = ef_construction;
+    auto materialized_view_build_threads = params_.materialized_view_build_threads_ != 0
+                                               ? params_.materialized_view_build_threads_
+                                               : std::max<uint32_t>(1, num_threads);
 
     // Build ScalarData array if provided (only for search_space_)
     std::vector<ScalarData> scalar_data_vec;
@@ -1005,7 +679,13 @@ class PyIndex : public BasePyIndex {
                                                                         build_space_);
       update_job_ = std::make_shared<GraphUpdateJob<SearchSpaceType, BuildSpaceType>>(search_job_);
     }
-    try_build_materialized_view();
+    materialized_view_manager_.rebuild(params_,
+                                       data_dim_,
+                                       search_space_,
+                                       build_space_,
+                                       materialized_view_ef_construction,
+                                       materialized_view_build_threads);
+    checkpoint_recovery_snapshot("post_fit");
     LOG_DEBUG("Create task generator successfully!");
   }
 
@@ -1014,31 +694,80 @@ class PyIndex : public BasePyIndex {
               const std::string &item_id = "",
               const std::string &document = "",
               const py::dict &metadata = py::dict()) -> IDType {
-    if (update_job_ == nullptr) {
-      throw std::runtime_error("incremental updates are not supported for the current index type");
-    }
     auto insert_data_ptr = static_cast<DataType *>(insert_data.request().ptr);
     MetadataMap meta_map = pydict_to_metadata_map(metadata);
     ScalarData scalar_data{item_id, document, meta_map};
-    auto inserted_id = update_job_->insert_and_update(insert_data_ptr, ef, &scalar_data);
-    invalidate_materialized_view("insert");
+
+    if (recovery_manager_ != nullptr) {
+      auto op_id = next_recovery_op_id_++;
+      recovery_manager_->append_prepare(
+          {op_id,
+           alaya::recovery::MutationType::INSERT,
+           encode_insert_like_payload(insert_data_ptr, ef, scalar_data)});
+      auto inserted_id = insert_nondurable(insert_data_ptr, ef, &scalar_data);
+      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::INSERT);
+      last_committed_recovery_op_id_ = op_id;
+      last_seen_recovery_op_id_ = std::max(last_seen_recovery_op_id_, op_id);
+      return inserted_id;
+    }
+
+    auto inserted_id = insert_nondurable(insert_data_ptr, ef, &scalar_data);
     return inserted_id;
   }
 
-  auto remove(uint32_t id) -> void {
-    if (update_job_ == nullptr) {
-      throw std::runtime_error("incremental updates are not supported for the current index type");
+  auto upsert(py::array_t<DataType> insert_data,
+              uint32_t ef,
+              const std::string &item_id = "",
+              const std::string &document = "",
+              const py::dict &metadata = py::dict()) -> IDType {
+    auto insert_data_ptr = static_cast<DataType *>(insert_data.request().ptr);
+    MetadataMap meta_map = pydict_to_metadata_map(metadata);
+    ScalarData scalar_data{item_id, document, meta_map};
+
+    if (recovery_manager_ != nullptr) {
+      auto op_id = next_recovery_op_id_++;
+      recovery_manager_->append_prepare(
+          {op_id,
+           alaya::recovery::MutationType::UPSERT,
+           encode_insert_like_payload(insert_data_ptr, ef, scalar_data)});
+      auto upserted_id = upsert_nondurable(insert_data_ptr, ef, scalar_data);
+      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::UPSERT);
+      last_committed_recovery_op_id_ = op_id;
+      last_seen_recovery_op_id_ = std::max(last_seen_recovery_op_id_, op_id);
+      return upserted_id;
     }
-    update_job_->remove(id);
-    invalidate_materialized_view("remove");
+
+    return upsert_nondurable(insert_data_ptr, ef, scalar_data);
+  }
+
+  auto remove(IDType id) -> void {
+    if (recovery_manager_ != nullptr) {
+      auto op_id = next_recovery_op_id_++;
+      recovery_manager_->append_prepare({op_id,
+                                         alaya::recovery::MutationType::REMOVE_BY_INTERNAL_ID,
+                                         encode_remove_internal_payload(id)});
+      remove_nondurable(id);
+      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::REMOVE_BY_INTERNAL_ID);
+      last_committed_recovery_op_id_ = op_id;
+      last_seen_recovery_op_id_ = std::max(last_seen_recovery_op_id_, op_id);
+      return;
+    }
+    remove_nondurable(id);
   }
 
   auto remove(const std::string &item_id) -> void {
-    if (update_job_ == nullptr) {
-      throw std::runtime_error("incremental updates are not supported for the current index type");
+    if (recovery_manager_ != nullptr) {
+      auto op_id = next_recovery_op_id_++;
+      recovery_manager_->append_prepare({op_id,
+                                         alaya::recovery::MutationType::REMOVE_BY_ITEM_ID,
+                                         encode_remove_item_payload(item_id)});
+      remove_nondurable(item_id);
+      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::REMOVE_BY_ITEM_ID);
+      last_committed_recovery_op_id_ = op_id;
+      last_seen_recovery_op_id_ = std::max(last_seen_recovery_op_id_, op_id);
+      return;
     }
-    update_job_->remove(item_id);
-    invalidate_materialized_view("remove_by_item_id");
+    remove_nondurable(item_id);
   }
 
   /**
@@ -1090,6 +819,35 @@ class PyIndex : public BasePyIndex {
         scalar_data = search_space_->get_scalar_data(internal_id);
       }
       return scalar_data_to_pydict(scalar_data);
+    }
+  }
+
+  /**
+   * @brief Batch get scalar data by internal IDs using RocksDB MultiGet.
+   * @param internal_ids numpy array of internal IDs
+   * @return Python list of scalar-data dicts
+   */
+  auto batch_get_scalar_data_by_internal_ids(py::array_t<IDType> internal_ids) -> py::list {
+    if constexpr (!SearchSpaceType::has_scalar_data) {
+      throw std::runtime_error("batch_get_scalar_data requires a space that supports scalar data");
+    } else {
+      auto buf = internal_ids.request();
+      auto *id_ptr = static_cast<IDType *>(buf.ptr);
+      size_t count = static_cast<size_t>(buf.size);
+      std::vector<IDType> ids(id_ptr, id_ptr + count);
+
+      std::vector<ScalarData> scalar_data;
+      {
+        py::gil_scoped_release release;
+        auto *storage = search_space_->get_scalar_storage();
+        scalar_data = storage->batch_get(ids);
+      }
+
+      py::list result;
+      for (const auto &sd : scalar_data) {
+        result.append(scalar_data_to_pydict(sd));
+      }
+      return result;
     }
   }
 
@@ -1388,6 +1146,10 @@ class PyIndex : public BasePyIndex {
                                   uint32_t topk,
                                   uint32_t ef,
                                   uint32_t num_threads) -> py::object {
+    if constexpr (is_rabitq_space_v<SearchSpaceType>) {
+      throw std::runtime_error("batch_search_with_distance is not supported for RaBitQ space");
+    }
+
     size_t query_size = queries.shape(0);
     size_t query_dim = queries.shape(1);
 
@@ -1474,14 +1236,11 @@ class PyIndex : public BasePyIndex {
   std::mutex hybrid_batch_pool_mutex_;
   std::shared_ptr<alaya::ThreadPool> hybrid_batch_pool_{nullptr};
   uint32_t hybrid_batch_pool_threads_{0};
-  std::string materialized_view_field_;
-  std::unordered_map<std::string, size_t>
-      materialized_view_partition_lookup_;  // partition key to partition index
-  std::vector<MaterializedViewPartition>
-      materialized_view_partitions_;  // index partitions for materialized view
-  uint32_t materialized_view_ef_construction_{200};
-  uint32_t materialized_view_build_threads_{1};
-  bool materialized_view_ready_{false};
+  MaterializedViewManagerType materialized_view_manager_;
+  std::unique_ptr<alaya::recovery::RecoveryManager> recovery_manager_{nullptr};
+  uint64_t next_recovery_op_id_{1};
+  uint64_t last_committed_recovery_op_id_{0};
+  uint64_t last_seen_recovery_op_id_{0};
 };
 
 class PyIndexInterface {
@@ -1516,8 +1275,8 @@ class PyIndexInterface {
                                return index->search(typed_query, topk, ef););
   }
 
-  auto get_data_by_id(uint32_t id) -> py::array {  // NOLINT
-    DISPATCH_AND_CAST(index, return index->get_data_by_id(id););
+  auto get_data_by_id(const py::object &id_obj) -> py::array {  // NOLINT
+    DISPATCH_AND_CAST(index, return index->get_data_by_id(id_obj.cast<IDType>()););
   }
 
   auto insert(py::array &insert_data,
@@ -1535,8 +1294,22 @@ class PyIndexInterface {
                                    ->insert(typed_insert_data, ef, item_id, document, metadata););
   }
 
-  auto remove(uint32_t id) -> void {  // NOLINT
-    DISPATCH_AND_CAST(index, index->remove(id););
+  auto upsert(py::array &insert_data,
+              uint32_t ef,
+              const py::object &item_id_obj = py::none(),
+              const std::string &document = "",
+              const py::dict &metadata = py::dict())
+      -> std::variant<uint32_t, uint64_t> {  // NOLINT
+    std::string item_id = item_id_obj.is_none() ? "" : py::str(item_id_obj).cast<std::string>();
+    DISPATCH_AND_CAST_WITH_ARR(insert_data,
+                               typed_insert_data,
+                               index,
+                               return index
+                                   ->upsert(typed_insert_data, ef, item_id, document, metadata););
+  }
+
+  auto remove(const py::object &id_obj) -> void {  // NOLINT
+    DISPATCH_AND_CAST(index, index->remove(id_obj.cast<IDType>()););
   }
 
   auto remove_by_item_id(const py::object &item_id_obj) -> void {  // NOLINT
@@ -1554,13 +1327,22 @@ class PyIndexInterface {
     DISPATCH_AND_CAST(index, return index->contains(item_id););
   }
 
-  auto get_scalar_data_by_internal_id(uint32_t internal_id) -> py::dict {  // NOLINT
-    DISPATCH_AND_CAST(index, return index->get_scalar_data_by_internal_id(internal_id););
+  auto get_scalar_data_by_internal_id(const py::object &internal_id_obj) -> py::dict {  // NOLINT
+    DISPATCH_AND_CAST(index,
+                      return index->get_scalar_data_by_internal_id(
+                          internal_id_obj.cast<IDType>()););
+  }
+
+  auto batch_get_scalar_data_by_internal_ids(py::array internal_ids) -> py::list {  // NOLINT
+    DISPATCH_AND_CAST(index, {
+      auto typed_ids = internal_ids.cast<py::array_t<IDType>>();
+      return index->batch_get_scalar_data_by_internal_ids(typed_ids);
+    });
   }
 
   auto batch_get_item_ids_by_internal_ids(py::array internal_ids) -> py::list {  // NOLINT
     DISPATCH_AND_CAST(index, {
-      auto typed_ids = internal_ids.cast<py::array_t<uint32_t>>();
+      auto typed_ids = internal_ids.cast<py::array_t<IDType>>();
       return index->batch_get_item_ids_by_internal_ids(typed_ids);
     });
   }
