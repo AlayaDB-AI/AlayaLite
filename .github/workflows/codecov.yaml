@@ -35,13 +35,9 @@ on  :
     - scripts/conan_build/**
 
 jobs:
-  codecov:
+  codecov-python:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      BUILD_JOBS: 2
-      CTEST_JOBS: 1
-      OMP_NUM_THREADS: 2
+    timeout-minutes: 25
     steps:
     - name: Checkout
       uses: actions/checkout@v4
@@ -64,13 +60,43 @@ jobs:
         uv sync --dev
         uv run pytest --cov --cov-branch --cov-report=xml
 
+    - name: Upload Python coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        files: coverage.xml
+        flags: python
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+  codecov-cpp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      BUILD_JOBS: 2
+      CTEST_JOBS: 1
+      OMP_NUM_THREADS: 2
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
+
+    - name: Restore Caches
+      uses: ./.github/actions/cache-restore
+      with:
+        build-type: Debug
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Install dependencies
+      run: pip install pytest pytest-cov conan && sudo apt-get install -y lcov
+
     - name: Run c++ code coverage
       run: bash scripts/ci/codecov/gnu_codecoverage.sh
 
-    - name: Upload results to Codecov
+    - name: Upload C++ coverage to Codecov
       uses: codecov/codecov-action@v5
       with:
-        files: |
-          coverage.xml
-          coverage_c++.info
+        files: coverage_c++.info
+        flags: cpp
         token: ${{ secrets.CODECOV_TOKEN }}

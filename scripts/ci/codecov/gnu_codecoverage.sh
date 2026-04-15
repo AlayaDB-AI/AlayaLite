@@ -16,7 +16,7 @@ cmake .. -DBUILD_TESTING=ON -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug -DCMAK
 make -j"${BUILD_JOBS}"
 
 # run the tests in parallel
-ctest --verbose --output-on-failure -LE performance -j"${CTEST_JOBS}"
+ctest --output-on-failure -LE performance -j"${CTEST_JOBS}"
 lcov  --capture \
      --ignore-errors mismatch \
      --directory ${BUILD_DIR} \
