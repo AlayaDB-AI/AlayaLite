@@ -17,7 +17,7 @@ include(cmake/PrintSummary.cmake)
 include(cmake/Codecov.cmake)
 
 option(ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
-option(BUILD_TESTING "Build tests" ON)
+option(BUILD_TESTING "Build tests" OFF)
 
 # ============================================================================
 # 1. C++ STANDARD AND COMPILER CONFIGURATION

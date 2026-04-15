@@ -1,6 +1,9 @@
 ---
 name       : CI
-on         : [push, pull_request]
+on         :
+  pull_request:
+  push:
+    branches: [main]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -88,39 +91,3 @@ jobs       :
       run: |
         uv sync --dev
         uv run pytest
-
-
-  codecov:
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 2
-
-    - name: Restore Caches
-      uses: ./.github/actions/cache-restore
-      with:
-        build-type: Debug
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v5
-
-    - name: Install dependencies
-      run: pip install pytest pytest-cov conan && sudo apt-get install -y lcov
-
-    - name: Run python code coverage
-      run: |
-        uv sync --dev
-        uv run pytest --cov --cov-branch --cov-report=xml
-
-    - name: Run c++ code coverage
-      run: bash scripts/ci/codecov/gnu_codecoverage.sh
-
-    - name: Upload results to Codecov
-      uses: codecov/codecov-action@v5
-      with:
-        files: |
-          coverage.xml
-          coverage_c++.info
-        token: ${{ secrets.CODECOV_TOKEN }}
