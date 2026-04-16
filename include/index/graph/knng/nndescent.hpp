@@ -27,6 +27,7 @@
 #include "space/space_concepts.hpp"
 #include "utils/log.hpp"
 #include "utils/random.hpp"
+#include "utils/thread_config.hpp"
 #include "utils/thread_pool.hpp"
 #include "utils/timer.hpp"
 
@@ -125,6 +126,7 @@ struct NndescentImpl {
   uint32_t iterations_ = 10;                  ///< number of iterations
   uint32_t candidate_pool_size_;              ///< length of candidate list
   uint32_t random_seed_ = 347;
+  uint32_t thread_num_ = 1;
 
   NndescentImpl(std::shared_ptr<DistanceSpaceType> &space, uint32_t k) {
     space_ = space;
@@ -140,6 +142,7 @@ struct NndescentImpl {
    * @return std::unique_ptr<Graph<DataType, IDType>>
    */
   auto build_graph(uint32_t thread_num = 1) -> std::unique_ptr<Graph<DataType, IDType>> {
+    thread_num_ = cap_thread_count(thread_num);
     // init the graph
     init_graph();
     // descent to build the graph
@@ -173,7 +176,7 @@ struct NndescentImpl {
       }
     }
 
-    unsigned int num_cores = std::thread::hardware_concurrency();
+    auto num_cores = thread_num_;
     {
       std::mt19937 rng((random_seed_ * 7741) + num_cores);
       ThreadPool pool(num_cores);
@@ -228,7 +231,7 @@ struct NndescentImpl {
     std::vector<IDType> eval_points(num_eval);
 
     std::vector<std::vector<IDType>> eval_gt(num_eval);
-    std::mt19937 rng((random_seed_ * 6577) + std::thread::hardware_concurrency());
+    std::mt19937 rng((random_seed_ * 6577) + thread_num_);
 
     gen_random(rng, eval_points.data(), num_eval, vector_num_);
     gen_eval_gt(eval_points, eval_gt);
@@ -254,7 +257,7 @@ struct NndescentImpl {
     auto t1 = Timer();
 
     // TODO(ljh): Use the thread_num parameter, not the hardware_concurrency
-    unsigned int num_cores = std::thread::hardware_concurrency();
+    auto num_cores = thread_num_;
     ThreadPool thread_pool(num_cores);
 
     IDType per_num_cores = (vector_num_ + num_cores - 1) / num_cores;
@@ -295,7 +298,7 @@ struct NndescentImpl {
     auto t1 = Timer();
 
     // TODO(ljh): Use the thread_num parameter, not the hardware_concurrency
-    unsigned int num_cores = std::thread::hardware_concurrency();
+    auto num_cores = thread_num_;
     ThreadPool thread_pool(num_cores);
 
     IDType per_num_cores = (vector_num_ + num_cores - 1) / num_cores;
@@ -428,7 +431,7 @@ struct NndescentImpl {
     auto t1 = Timer();
 
     // TODO(?): Use the thread_num parameter, not the hardware_concurrency
-    unsigned int num_cores = std::thread::hardware_concurrency();
+    auto num_cores = thread_num_;
     ThreadPool thread_pool(num_cores);
     auto per_num_cores = (eval_set.size() + num_cores - 1) / num_cores;
     for (unsigned int thread_id = 0; thread_id < num_cores; ++thread_id) {

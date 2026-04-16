@@ -31,6 +31,7 @@
 #include "index/neighbor.hpp"
 #include "utils/log.hpp"
 #include "utils/random.hpp"
+#include "utils/thread_config.hpp"
 #include "utils/thread_pool.hpp"
 #include "utils/timer.hpp"
 
@@ -60,6 +61,7 @@ struct NSGBuilder {
   uint32_t nndescent_radius_{};  ///< Radius for reverse nearest neighbors in Nndescent.
   uint32_t nndescent_candidate_pool_size_{};  ///< Size of candidate pool in Nndescent.
   uint32_t nndescent_iters_{};                ///< Number of iterations for Nndescent.
+  uint32_t thread_num_ = 1;
 
   /**
    * @brief Constructor for NSGBuilder.
@@ -95,13 +97,14 @@ struct NSGBuilder {
    * @return A unique pointer to the final NSG graph.
    */
   auto build_graph(uint32_t thread_num = 1) -> std::unique_ptr<Graph<DataType, IDType>> {
+    thread_num_ = cap_thread_count(thread_num);
     NndescentImpl<DistanceSpaceType> nndescent(space_, nndescent_max_nbrs_);
     nndescent.selected_sample_num_ = nndescent_selected_sample_num_;
     nndescent.radius_ = nndescent_radius_;
     nndescent.candidate_pool_size_ = nndescent_candidate_pool_size_;
     nndescent.iterations_ = nndescent_iters_;
 
-    auto nndescent_graph = nndescent.build_graph();
+    auto nndescent_graph = nndescent.build_graph(thread_num_);
 
     init(nndescent_graph);
     std::vector<uint32_t> degrees(vector_num_, 0);
@@ -115,7 +118,7 @@ struct NSGBuilder {
       // Graph<DataType, IDType>::kEmptyId);
       final_graph_->eps_.push_back(ep_);
 
-      unsigned int num_cores = std::thread::hardware_concurrency();
+      auto num_cores = thread_num_;
       ThreadPool pool(num_cores);
 
       IDType per_core_num = (vector_num_ + num_cores - 1) / num_cores;
@@ -288,7 +291,7 @@ struct NSGBuilder {
   void link(const std::unique_ptr<Graph<DataType, IDType>> &knng, Graph<DataType, IDType> &graph) {
     auto t1 = Timer();
     std::atomic<int> cnt{0};
-    unsigned int num_cores = std::thread::hardware_concurrency();
+    auto num_cores = thread_num_;
     ThreadPool pool(num_cores);
 
     IDType per_core_num = (vector_num_ + num_cores - 1) / num_cores;

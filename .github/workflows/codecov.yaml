@@ -73,7 +73,8 @@ jobs:
     env:
       BUILD_JOBS: 2
       CTEST_JOBS: 1
-      OMP_NUM_THREADS: 2
+      OMP_NUM_THREADS: 1
+      ALAYA_MAX_THREADS: 1
     steps:
     - name: Checkout
       uses: actions/checkout@v4

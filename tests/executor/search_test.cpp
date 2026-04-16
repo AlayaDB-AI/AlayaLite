@@ -37,6 +37,7 @@
 #include "utils/log.hpp"
 #include "utils/metadata_filter.hpp"
 #include "utils/scalar_data.hpp"
+#include "utils/thread_config.hpp"
 #include "utils/timer.hpp"
 
 namespace alaya {
@@ -85,8 +86,7 @@ struct ScopedTempDbDir {
 };
 
 auto max_thread_num() -> uint32_t {
-  auto thread_num = std::thread::hardware_concurrency();
-  return thread_num == 0 ? 1U : thread_num;
+  return configured_thread_limit();
 }
 
 auto make_test_metadata(uint32_t item_cnt) -> std::vector<ScalarData> {
@@ -224,7 +224,7 @@ auto run_parallel_search(SearchJobPtr &search_job, Dataset &ds, uint32_t topk, u
   Timer timer{};
   std::vector<std::vector<uint32_t>> res_pool(ds.query_num_, std::vector<uint32_t>(topk));
   const size_t search_thread_num =
-      std::min<size_t>(16, std::max<size_t>(1, static_cast<size_t>(ds.query_num_)));
+      std::min<size_t>(cap_thread_count(16), std::max<size_t>(1, static_cast<size_t>(ds.query_num_)));
   std::vector<std::thread> tasks(search_thread_num);
 
   auto search_knn = [&](uint32_t i) {

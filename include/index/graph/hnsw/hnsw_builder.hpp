@@ -23,6 +23,7 @@
 #include <vector>
 #include "../../../space/space_concepts.hpp"
 #include "../../../utils/log.hpp"
+#include "../../../utils/thread_config.hpp"
 #include "../../../utils/thread_pool.hpp"
 #include "../../../utils/timer.hpp"
 #include "../graph.hpp"
@@ -96,6 +97,7 @@ struct HNSWBuilder {
    *       out-of-bounds access.
    */
   auto build_graph(uint32_t thread_num = 1) -> std::unique_ptr<Graph<DataType, IDType>> {
+    thread_num = cap_thread_count(thread_num);
     // Init the unified graph.
     auto vec_num = space_->get_data_num();
     auto graph =

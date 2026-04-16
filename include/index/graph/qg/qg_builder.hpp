@@ -27,6 +27,7 @@
 #include "utils/rabitq_utils/search_utils/buffer.hpp"
 #include "utils/rabitq_utils/search_utils/hashset.hpp"
 #include "utils/random.hpp"
+#include "utils/thread_config.hpp"
 
 namespace alaya {
 template <typename DistanceSpaceType>
@@ -58,8 +59,7 @@ class QGBuilder {
     pruned_neighbors_.resize(num_nodes_);
     degrees_.resize(num_nodes_, static_cast<uint32_t>(degree_bound_));
 
-    const size_t sys_threads_num = std::thread::hardware_concurrency();  // NOLINT
-    num_threads_ = std::min(num_threads, sys_threads_num == 0 ? 1 : sys_threads_num);
+    num_threads_ = std::min(num_threads, static_cast<size_t>(configured_thread_limit()));
     omp_set_num_threads(static_cast<int>(num_threads_));
 
     size_t pool_capacity = std::min(ef_build_ * ef_build_, num_nodes_ / 10);

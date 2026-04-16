@@ -26,6 +26,7 @@
 #include "index/graph/graph.hpp"
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "space/raw_space.hpp"
+#include "utils/thread_config.hpp"
 namespace alaya {
 
 class HNSWTest : public ::testing::Test {
@@ -59,7 +60,7 @@ class HNSWTest : public ::testing::Test {
     }
   }
 
-  uint32_t max_thread_num_ = std::thread::hardware_concurrency();
+  uint32_t max_thread_num_ = configured_thread_limit();
   uint32_t max_node_;               ///< The number of vector data.
   uint32_t dim_;                    ///< The dim of vector data.
   std::string_view metric_ = "L2";  /// The metric type for building graph.

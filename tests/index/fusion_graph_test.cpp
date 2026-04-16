@@ -30,6 +30,7 @@
 #include "space/raw_space.hpp"
 #include "utils/dataset_utils.hpp"
 #include "utils/evaluate.hpp"
+#include "utils/thread_config.hpp"
 #include "utils/timer.hpp"
 
 namespace alaya {
@@ -53,7 +54,7 @@ class FusionGraphTest : public ::testing::Test {
     }
   }
 
-  uint32_t max_thread_num_ = std::thread::hardware_concurrency();
+  uint32_t max_thread_num_ = configured_thread_limit();
   Dataset ds_;
   std::unique_ptr<
       alaya::FusionGraphBuilder<alaya::RawSpace<>, alaya::HNSWBuilder<alaya::RawSpace<>>,
@@ -77,7 +78,7 @@ class FusionGraphSearchTest : public ::testing::Test {
 
   void TearDown() override {}
 
-  uint32_t max_thread_num_ = std::thread::hardware_concurrency();
+  uint32_t max_thread_num_ = configured_thread_limit();
   Dataset ds_;
 };
 
@@ -122,7 +123,8 @@ TEST_F(FusionGraphSearchTest, SimpleSearchTest) {
 
   Timer timer{};
   std::vector<std::vector<IDType>> res_pool(ds_.query_num_, std::vector<IDType>(topk));
-  const size_t kSearchThreadNum = std::min(static_cast<size_t>(16), static_cast<size_t>(ds_.query_num_));
+  const size_t kSearchThreadNum =
+      std::min<size_t>(cap_thread_count(16), static_cast<size_t>(ds_.query_num_));
   std::vector<std::thread> tasks(kSearchThreadNum);
 
   auto search_knn = [&](uint32_t i) {
