@@ -51,7 +51,13 @@ find_package(Eigen3 REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(RocksDB REQUIRED)
 
-set(THIRD_PARTY_LIBS spdlog::spdlog_header_only concurrentqueue::concurrentqueue Eigen3::Eigen OpenMP::OpenMP_CXX RocksDB::rocksdb)
+set(THIRD_PARTY_LIBS
+    spdlog::spdlog_header_only
+    concurrentqueue::concurrentqueue
+    Eigen3::Eigen
+    OpenMP::OpenMP_CXX
+    RocksDB::rocksdb
+)
 
 if(UNIX AND NOT APPLE)
   find_package(libcoro REQUIRED)

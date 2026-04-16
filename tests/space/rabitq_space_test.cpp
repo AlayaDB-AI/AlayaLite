@@ -189,7 +189,7 @@ class RaBitQSpaceMetadataTest : public ::testing::Test {
 
   void TearDown() override {
     cleanup_test_files();
-    LOG_INFO("TearDown删除文件");
+    LOG_INFO("TearDown completed, test files cleaned up.");
   }
 
   void cleanup_test_files() {
