@@ -25,6 +25,7 @@
 #include <cstring>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -172,6 +173,18 @@ class WriteAheadLog {
  public:
   explicit WriteAheadLog(fs::path path) : path_(std::move(path)) {}
 
+  ~WriteAheadLog() {
+    std::lock_guard<std::mutex> lock(wal_mutex_);
+    if (wal_stream_.is_open()) {
+      wal_stream_.close();
+    }
+  }
+
+  WriteAheadLog(const WriteAheadLog &) = delete;
+  auto operator=(const WriteAheadLog &) -> WriteAheadLog & = delete;
+  WriteAheadLog(WriteAheadLog &&) = delete;
+  auto operator=(WriteAheadLog &&) -> WriteAheadLog & = delete;
+
   auto append_prepare(const WalRecord &record) const -> void {
     append_frame(WalFrameType::PREPARE, record);
   }
@@ -180,9 +193,37 @@ class WriteAheadLog {
     append_frame(WalFrameType::COMMIT, WalRecord{op_id, mutation_type, {}});
   }
 
+  auto truncate() const -> void {
+    std::lock_guard<std::mutex> lock(wal_mutex_);
+    if (wal_stream_.is_open()) {
+      wal_stream_.close();
+    }
+    std::error_code ec;
+    fs::remove(path_, ec);
+    if (ec) {
+      LOG_WARN("WAL truncate failed: {}", ec.message());
+    }
+  }
+
+  auto sync() const -> void {
+    std::lock_guard<std::mutex> lock(wal_mutex_);
+    if (wal_stream_.is_open()) {
+      wal_stream_.flush();
+    }
+    sync_file(path_);
+  }
+
   [[nodiscard]] auto replayable_records(uint64_t applied_through,
                                         uint64_t *max_seen_op_id = nullptr) const
       -> std::vector<WalRecord> {
+    // Flush any buffered writes so the reader sees all committed data.
+    {
+      std::lock_guard<std::mutex> lock(wal_mutex_);
+      if (wal_stream_.is_open()) {
+        wal_stream_.flush();
+      }
+    }
+
     std::vector<WalRecord> committed;
     std::unordered_map<uint64_t, WalRecord> pending;
 
@@ -261,37 +302,56 @@ class WriteAheadLog {
     uint64_t payload_size{0};
   };
 
+  auto ensure_stream_open() const -> void {
+    if (!wal_stream_.is_open()) {
+      fs::create_directories(path_.parent_path());
+      wal_stream_.open(path_, std::ios::binary | std::ios::app);
+      if (!wal_stream_.is_open()) {
+        throw std::runtime_error("Failed to open WAL file for append at " + path_.string());
+      }
+    }
+  }
+
   auto append_frame(WalFrameType frame_type, const WalRecord &record) const -> void {
-    fs::create_directories(path_.parent_path());
+    std::lock_guard<std::mutex> lock(wal_mutex_);
+    ensure_stream_open();
 
-    std::ofstream output(path_, std::ios::binary | std::ios::app);
-    if (!output.is_open()) {
-      throw std::runtime_error("Failed to open WAL file for append at " + path_.string());
-    }
-
-    uint32_t magic = kWalFrameMagic;
-    uint8_t version = kWalFormatVersion;
-    uint8_t frame_type_raw = static_cast<uint8_t>(frame_type);
-    uint8_t mutation_type_raw = static_cast<uint8_t>(record.mutation_type);
-    uint8_t reserved = 0;
+    // Build the entire frame in a contiguous buffer to ensure a single
+    // write call, avoiding partial frames from interleaved I/O.
+    constexpr size_t kHeaderSize =
+        sizeof(uint32_t) + sizeof(uint8_t) * 4 + sizeof(uint64_t) + sizeof(uint64_t);
+    constexpr size_t kTrailerSize = sizeof(uint32_t);
     uint64_t payload_size = static_cast<uint64_t>(record.payload.size());
-    uint32_t trailer = kWalTrailerMagic;
+    std::vector<char> buf(kHeaderSize + static_cast<size_t>(payload_size) + kTrailerSize);
+    char *ptr = buf.data();
 
-    output.write(reinterpret_cast<const char *>(&magic), sizeof(magic));
-    output.write(reinterpret_cast<const char *>(&version), sizeof(version));
-    output.write(reinterpret_cast<const char *>(&frame_type_raw), sizeof(frame_type_raw));
-    output.write(reinterpret_cast<const char *>(&mutation_type_raw), sizeof(mutation_type_raw));
-    output.write(reinterpret_cast<const char *>(&reserved), sizeof(reserved));
-    output.write(reinterpret_cast<const char *>(&record.op_id), sizeof(record.op_id));
-    output.write(reinterpret_cast<const char *>(&payload_size), sizeof(payload_size));
+    auto write_pod = [&ptr](const auto &val) {
+      std::memcpy(ptr, &val, sizeof(val));
+      ptr += sizeof(val);
+    };
+
+    write_pod(kWalFrameMagic);
+    write_pod(kWalFormatVersion);
+    write_pod(static_cast<uint8_t>(frame_type));
+    write_pod(static_cast<uint8_t>(record.mutation_type));
+    write_pod(static_cast<uint8_t>(0));  // reserved
+    write_pod(record.op_id);
+    write_pod(payload_size);
     if (payload_size > 0) {
-      output.write(record.payload.data(), static_cast<std::streamsize>(record.payload.size()));
+      std::memcpy(ptr, record.payload.data(), static_cast<size_t>(payload_size));
+      ptr += static_cast<size_t>(payload_size);
     }
-    output.write(reinterpret_cast<const char *>(&trailer), sizeof(trailer));
-    output.flush();
-    output.close();
+    write_pod(kWalTrailerMagic);
 
-    sync_file(path_);
+    wal_stream_.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+    wal_stream_.flush();
+
+    // Only fsync on COMMIT frames. PREPARE frames are durable enough after
+    // flush — a crash between PREPARE and COMMIT leaves an uncommitted record
+    // that is correctly skipped during replay.
+    if (frame_type == WalFrameType::COMMIT) {
+      sync_file(path_);
+    }
   }
 
   [[nodiscard]] static auto read_frame_header(std::ifstream &input) -> std::optional<FrameHeader> {
@@ -348,6 +408,8 @@ class WriteAheadLog {
   }
 
   fs::path path_;
+  mutable std::mutex wal_mutex_;
+  mutable std::ofstream wal_stream_;
 };
 
 }  // namespace alaya::recovery

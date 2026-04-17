@@ -73,6 +73,9 @@ class RecoveryManager {
     return snapshot_dir;
   }
 
+  // TODO(P2): Graph save and RocksDB checkpoint are not atomic. A crash between
+  // them creates an inconsistent snapshot. Consider a two-phase commit protocol
+  // where both components are written before the CURRENT pointer is updated.
   auto publish_snapshot(const SnapshotManifest &manifest, const fs::path &snapshot_dir) const
       -> void {
     ensure_layout();
@@ -82,6 +85,8 @@ class RecoveryManager {
     LOG_INFO("recovery: published snapshot id={} applied_through={}",
              manifest.snapshot_id,
              manifest.applied_through_op_id);
+    wal_.truncate();
+    remove_old_snapshots(manifest.snapshot_id);
   }
 
   [[nodiscard]] auto current_snapshot() const -> std::optional<SnapshotManifest> {
@@ -131,6 +136,8 @@ class RecoveryManager {
     wal_.append_commit(op_id, mutation_type);
   }
 
+  auto sync_wal() const -> void { wal_.sync(); }
+
   auto restore_active_rocksdb_from_snapshot(const SnapshotManifest &manifest,
                                             const fs::path &snapshot_dir) const -> void {
     if (active_rocksdb_path_.empty() || manifest.rocksdb_dir.empty()) {
@@ -152,6 +159,33 @@ class RecoveryManager {
   }
 
  private:
+  auto remove_old_snapshots(const std::string &current_snapshot_id) const -> void {
+    if (!fs::exists(snapshots_dir_)) {
+      return;
+    }
+    std::error_code ec;
+    for (const auto &entry : fs::directory_iterator(snapshots_dir_, ec)) {
+      if (ec) {
+        break;
+      }
+      if (!entry.is_directory()) {
+        continue;
+      }
+      if (entry.path().filename().string() == current_snapshot_id) {
+        continue;
+      }
+      std::error_code remove_ec;
+      fs::remove_all(entry.path(), remove_ec);
+      if (remove_ec) {
+        LOG_WARN("recovery: failed to remove old snapshot {}: {}",
+                 entry.path().string(),
+                 remove_ec.message());
+      } else {
+        LOG_INFO("recovery: removed old snapshot {}", entry.path().string());
+      }
+    }
+  }
+
   static auto trim(std::string value) -> std::string {
     while (!value.empty() &&
            (value.back() == '\n' || value.back() == '\r' || value.back() == ' ')) {
