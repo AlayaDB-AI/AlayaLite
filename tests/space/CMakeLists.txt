@@ -20,3 +20,11 @@ add_test(NAME space_test_raw_space COMMAND $<TARGET_FILE:raw_space_test>)
 add_test(NAME space_test_sq4_space COMMAND $<TARGET_FILE:sq4_space_test>)
 add_test(NAME space_test_sq8_space COMMAND $<TARGET_FILE:sq8_space_test>)
 add_test(NAME space_test_rabitq_space COMMAND $<TARGET_FILE:rabitq_space_test>)
+set_tests_properties(
+  space_test_quant
+  space_test_raw_space
+  space_test_sq4_space
+  space_test_sq8_space
+  space_test_rabitq_space
+  PROPERTIES LABELS "space"
+)

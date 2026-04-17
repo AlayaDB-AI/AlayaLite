@@ -44,3 +44,17 @@ add_test(NAME utils_test_metadata_filter COMMAND $<TARGET_FILE:metadata_filter_t
 add_test(NAME utils_test_rotator_utils COMMAND $<TARGET_FILE:rotator_utils_test>)
 add_test(NAME utils_test_lut_utils COMMAND $<TARGET_FILE:lut_utils_test>)
 add_test(NAME utils_test_math COMMAND $<TARGET_FILE:math_test>)
+set_tests_properties(
+  utils_test_query_utils
+  utils_test_log
+  utils_test_evaluate
+  utils_test_metric_type
+  utils_test_data_utils
+  utils_test_dataset_utils
+  utils_test_index_encoding
+  utils_test_metadata_filter
+  utils_test_rotator_utils
+  utils_test_lut_utils
+  utils_test_math
+  PROPERTIES LABELS "utils"
+)

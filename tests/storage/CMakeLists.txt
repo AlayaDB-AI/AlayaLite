@@ -13,3 +13,6 @@ add_coverage_to_target(rocksdb_storage_test)
 add_test(NAME storage_test_sequential_storage COMMAND $<TARGET_FILE:storage_test>)
 add_test(NAME storage_test_static_storage COMMAND $<TARGET_FILE:static_storage_test>)
 add_test(NAME storage_test_rocksdb_storage COMMAND $<TARGET_FILE:rocksdb_storage_test>)
+set_tests_properties(
+  storage_test_sequential_storage storage_test_static_storage storage_test_rocksdb_storage PROPERTIES LABELS "storage"
+)

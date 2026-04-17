@@ -73,6 +73,7 @@ jobs:
     env:
       BUILD_JOBS: 2
       CTEST_JOBS: 1
+      CTEST_LABELS: unit|storage|recovery|simd|space|utils
       OMP_NUM_THREADS: 1
       ALAYA_MAX_THREADS: 1
     steps:

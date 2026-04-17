@@ -8,6 +8,7 @@ ROOT_DIR="$(realpath "$SCRIPT_DIR/../../..")"
 BUILD_DIR="${ROOT_DIR}/build"
 BUILD_JOBS="${BUILD_JOBS:-4}"
 CTEST_JOBS="${CTEST_JOBS:-4}"
+CTEST_LABELS="${CTEST_LABELS:-unit|storage|recovery|simd|space|utils}"
 
 
 # rebuild the project
@@ -16,7 +17,7 @@ cmake .. -DBUILD_TESTING=ON -DENABLE_COVERAGE=ON -DCMAKE_BUILD_TYPE=Debug -DCMAK
 make -j"${BUILD_JOBS}"
 
 # run the tests in parallel
-ctest --output-on-failure -LE performance -j"${CTEST_JOBS}"
+ctest --output-on-failure -L "${CTEST_LABELS}" -j"${CTEST_JOBS}"
 lcov  --capture \
      --ignore-errors mismatch \
      --directory ${BUILD_DIR} \
