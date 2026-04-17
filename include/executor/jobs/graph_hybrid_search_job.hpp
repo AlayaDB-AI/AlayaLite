@@ -49,6 +49,9 @@ template <typename DistanceSpaceType,
           typename IDType = typename DistanceSpaceType::IDTypeAlias>
   requires Space<DistanceSpaceType> && Space<BuildSpaceType>
 struct GraphHybridSearchJob {
+  // TODO(P2): Make these thresholds configurable via SearchInfo or constructor
+  // parameter instead of hardcoding. Different workloads may benefit from
+  // different cutoff points for switching between graph and brute-force search.
   static constexpr float kHybridSearchKnnBFFilterThreshold = 0.93f;
   static constexpr float kHybridSearchBFTopkThreshold = 0.5f;
 
@@ -176,6 +179,8 @@ struct GraphHybridSearchJob {
     auto expected_ef = static_cast<size_t>(
         (static_cast<double>(search_info.topk_) * static_cast<double>(space_->get_data_num())) /
         static_cast<double>(matched_count));
+    // TODO(P2): The 1.5x ef inflation factor is fixed. Consider making it
+    // adaptive based on historical query performance or filter selectivity.
     expected_ef += expected_ef / 2;  // 1.5x on default
 
     SearchInfo adjusted = search_info;

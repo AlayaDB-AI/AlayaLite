@@ -698,6 +698,10 @@ class PyIndex : public BasePyIndex {
     MetadataMap meta_map = pydict_to_metadata_map(metadata);
     ScalarData scalar_data{item_id, document, meta_map};
 
+    // TODO(P2): RocksDB has its own internal WAL and the custom WAL must stay
+    // in sync. If the process crashes between insert_nondurable (RocksDB write)
+    // and append_commit, replay may cause duplicates. Consider idempotent
+    // replay (check if item_id already exists) or a unified WAL.
     if (recovery_manager_ != nullptr) {
       auto op_id = next_recovery_op_id_++;
       recovery_manager_->append_prepare(
