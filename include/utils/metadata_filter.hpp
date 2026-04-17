@@ -23,6 +23,7 @@
 #include <variant>
 #include <vector>
 
+#include "utils/log.hpp"
 #include "utils/scalar_data.hpp"
 
 namespace alaya {
@@ -200,7 +201,13 @@ struct MetadataFilter {
           return v;
         });
       case LogicOp::NOT:
-        // NOT only applies to the first result
+        // NOT semantically applies to a single sub-expression.
+        if (results.size() > 1) {
+          LOG_WARN(
+              "LogicOp::NOT has {} sub-expressions; only the first is evaluated. "
+              "Wrap multiple conditions in an AND/OR sub-filter.",
+              results.size());
+        }
         return !results[0];
       default:
         return true;

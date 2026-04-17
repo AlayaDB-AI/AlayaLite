@@ -193,6 +193,30 @@ TEST(MetadataFilterTest, SupportsBuildersAndNestedLogic) {
   EXPECT_TRUE(nested_filter.evaluate(metadata));
 }
 
+TEST(MetadataFilterTest, NotWithSingleConditionNegatesCorrectly) {
+  const MetadataMap metadata = {{"category", std::string("books")}};
+
+  // NOT(category == "games") -> NOT(false) -> true
+  MetadataFilter not_false;
+  not_false.logic_op = LogicOp::NOT;
+  not_false.add_eq("category", std::string("games"));
+  EXPECT_TRUE(not_false.evaluate(metadata));
+
+  // NOT(category == "books") -> NOT(true) -> false
+  MetadataFilter not_true;
+  not_true.logic_op = LogicOp::NOT;
+  not_true.add_eq("category", std::string("books"));
+  EXPECT_FALSE(not_true.evaluate(metadata));
+
+  // NOT wrapping a sub-filter: NOT(score > 100) on metadata without score -> NOT(false) -> true
+  MetadataFilter not_sub;
+  not_sub.logic_op = LogicOp::NOT;
+  MetadataFilter inner;
+  inner.add_gt("score", int64_t(100));
+  not_sub.add_sub_filter(std::move(inner));
+  EXPECT_TRUE(not_sub.evaluate(metadata));
+}
+
 class MetadataFilterExecutorTest : public ::testing::Test {
  protected:
   void SetUp() override {

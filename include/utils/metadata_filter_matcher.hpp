@@ -140,6 +140,17 @@ class MetadataFilterExecutor {
       return result;
     }
 
+    // TODO(P0): This path performs O(N) RocksDB reads when the index fast path
+    // is not available (any filter beyond single-condition AND on an indexed
+    // field). For large datasets, this degrades to a full table scan per query.
+    // Future work: support multi-condition index intersection to avoid this.
+    if (data_num_ > 10000) {
+      LOG_WARN(
+          "metadata filter: O(N) full-scan fallback for {} records; "
+          "consider indexing the filter fields",
+          data_num_);
+    }
+
     std::vector<IDType> ids;
     constexpr size_t kBatchSize = 1024;
     ids.reserve(kBatchSize);
@@ -254,6 +265,10 @@ class MetadataFilterExecutor {
     }
   }
 
+  // TODO(P2): Extend to support multi-condition AND by intersecting indexed ID
+  // sets, and OR by unioning them. Currently only single-condition AND filters
+  // on an indexed field can use the fast path; all other filters fall through
+  // to the O(N) full-scan in build_blocked_bitset().
   void build_index_fast_path() {
     if (filter_.logic_op != LogicOp::AND || filter_.conditions.size() != 1 ||
         !filter_.sub_filters.empty()) {
