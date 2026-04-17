@@ -17,6 +17,7 @@ include(cmake/PrintSummary.cmake)
 include(cmake/Codecov.cmake)
 
 option(ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
+option(BUILD_PYTHON "Build Python extension module" ON)
 option(BUILD_TESTING "Build tests" OFF)
 
 # ============================================================================
@@ -51,11 +52,13 @@ if(APPLE)
   list(APPEND CMAKE_PREFIX_PATH ${OPENMP_BREW_PATHS})
 endif()
 find_package(concurrentqueue REQUIRED)
-find_package(pybind11 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(OpenMP REQUIRED)
 find_package(RocksDB REQUIRED)
+if(BUILD_PYTHON)
+  find_package(pybind11 REQUIRED)
+endif()
 
 set(THIRD_PARTY_LIBS
     spdlog::spdlog_header_only
@@ -93,5 +96,7 @@ if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
 
-add_subdirectory(python)
+if(BUILD_PYTHON)
+  add_subdirectory(python)
+endif()
 print_build_summary()
