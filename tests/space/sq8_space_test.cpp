@@ -4,7 +4,6 @@
 
 #include "space/sq8_space.hpp"
 #include <gtest/gtest.h>
-#include <sys/types.h>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>

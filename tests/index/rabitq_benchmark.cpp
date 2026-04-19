@@ -2,10 +2,13 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include <unistd.h>
-#include <cerrno>
+#if defined(__unix__) || defined(__APPLE__)
+  #include <cerrno>
+  #include <cstring>
+  #include <unistd.h>
+#endif
+
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -63,10 +66,12 @@ auto try_find_repo_root(const std::filesystem::path &start) -> std::optional<std
 }
 
 auto get_self_path(const char *argv0) -> std::filesystem::path {
+#if defined(__linux__)
   const std::filesystem::path proc_self("/proc/self/exe");
   if (std::filesystem::exists(proc_self)) {
     return std::filesystem::read_symlink(proc_self);
   }
+#endif
   return std::filesystem::absolute(argv0);
 }
 
@@ -199,6 +204,7 @@ auto run_query(const DatasetSpec &spec) -> int {
 }
 
 auto exec_query_mode(const char *argv0, std::string_view mode) -> int {
+#if defined(__unix__) || defined(__APPLE__)
   const auto self_path = get_self_path(argv0);
   const std::string self = self_path.string();
   const std::string mode_str(mode);
@@ -207,15 +213,15 @@ auto exec_query_mode(const char *argv0, std::string_view mode) -> int {
     throw std::runtime_error(std::string("execl failed: ") + std::strerror(errno));
   }
   return 1;
+#else
+  const auto repo_root = find_repo_root(argv0);
+  return run_query(parse_mode(mode, repo_root));
+#endif
 }
 
 }  // namespace
 
 auto main(int argc, char **argv) -> int {
-#if !defined(__AVX512F__)
-  std::cerr << "rabitq_benchmark requires AVX512 build support.\n";
-  return 1;
-#else
   const auto repo_root = find_repo_root(argv[0]);
 
   if (argc == 3 && std::string_view(argv[1]) == kInternalQueryMode) {
@@ -236,5 +242,4 @@ auto main(int argc, char **argv) -> int {
   }
 
   return exec_query_mode(argv[0], argv[1]);
-#endif
 }

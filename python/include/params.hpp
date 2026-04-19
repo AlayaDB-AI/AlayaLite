@@ -5,7 +5,6 @@
 #pragma once
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
-#include <sys/types.h>
 #include <cstdint>
 #include <string>
 #include <vector>

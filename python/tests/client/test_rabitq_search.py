@@ -5,7 +5,6 @@
 """Test cases for RaBitQ search functionality."""
 
 import os
-import platform
 import shutil
 import tempfile
 import unittest
@@ -14,10 +13,6 @@ import numpy as np
 from alayalite import Client
 from alayalite.index import Index
 from alayalite.utils import calc_gt, calc_recall
-
-# Skip RaBitQ tests on non-x86 platforms (AVX512 required)
-SKIP_RABITQ = platform.machine() not in ("x86_64", "AMD64")
-SKIP_REASON = "RaBitQ requires AVX512 instructions (x86_64 only)"
 
 
 def calc_gt_ip(data, query, topk):
@@ -44,37 +39,26 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_search_solo(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
         vectors = np.random.rand(1000, 128).astype(np.float32)
         single_query = np.random.rand(128).astype(np.float32)
         index.fit(vectors)
-        try:
-            result = index.search(single_query, 10, 400).reshape(1, -1)
-        except RuntimeError as _:
-            print("AVX512 instruction is not supported.")
-            return
+        result = index.search(single_query, 10, 400).reshape(1, -1)
         gt = calc_gt(vectors, single_query.reshape(1, -1), 10)
         recall = calc_recall(result, gt)
         self.assertGreaterEqual(recall, 0.95)
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_batch_search(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
         vectors = np.random.rand(1000, 128).astype(np.float32)
         queries = np.random.rand(10, 128).astype(np.float32)
         index.fit(vectors)
-        try:
-            result = index.batch_search(queries, 10, 400)
-        except RuntimeError as _:
-            print("AVX512 instruction is not supported.")
-            return
+        result = index.batch_search(queries, 10, 400)
         gt = calc_gt(vectors, queries, 10)
         recall = calc_recall(result, gt)
         self.assertGreaterEqual(recall, 0.95)
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_batch_search_with_distance_unsupported(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
         vectors = np.random.rand(256, 128).astype(np.float32)
@@ -84,17 +68,12 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             index.batch_search_with_distance(queries, 10, 400)
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_save_load(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
         vectors = np.random.rand(1000, 128).astype(np.float32)
         queries = np.random.rand(10, 128).astype(np.float32)
         index.fit(vectors)
-        try:
-            result = index.batch_search(queries, 10, 400)
-        except RuntimeError as _:
-            print("AVX512 instruction is not supported.")
-            return
+        result = index.batch_search(queries, 10, 400)
         gt = calc_gt(vectors, queries, 10)
         recall = calc_recall(result, gt)
         self.assertGreaterEqual(recall, 0.95)
@@ -106,47 +85,32 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         # result_load equals result
         self.assertTrue(np.allclose(result_load, result))
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_search_solo_ip(self):
         index = self.client.create_index(name="rabitq_ip_index", metric="ip", quantization_type="rabitq")
         vectors = np.random.rand(1000, 128).astype(np.float32)
         single_query = np.random.rand(128).astype(np.float32)
         index.fit(vectors)
-        try:
-            result = index.search(single_query, 10, 400).reshape(1, -1)
-        except RuntimeError as _:
-            print("AVX512 instruction is not supported.")
-            return
+        result = index.search(single_query, 10, 400).reshape(1, -1)
         gt = calc_gt_ip(vectors, single_query.reshape(1, -1), 10)
         recall = calc_recall(result, gt)
         self.assertGreaterEqual(recall, 0.95)
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_batch_search_ip(self):
         index = self.client.create_index(name="rabitq_ip_index", metric="ip", quantization_type="rabitq")
         vectors = np.random.rand(1000, 128).astype(np.float32)
         queries = np.random.rand(10, 128).astype(np.float32)
         index.fit(vectors)
-        try:
-            result = index.batch_search(queries, 10, 400)
-        except RuntimeError as _:
-            print("AVX512 instruction is not supported.")
-            return
+        result = index.batch_search(queries, 10, 400)
         gt = calc_gt_ip(vectors, queries, 10)
         recall = calc_recall(result, gt)
         self.assertGreaterEqual(recall, 0.95)
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_save_load_ip(self):
         index = self.client.create_index(name="rabitq_ip_index", metric="ip", quantization_type="rabitq")
         vectors = np.random.rand(1000, 128).astype(np.float32)
         queries = np.random.rand(10, 128).astype(np.float32)
         index.fit(vectors)
-        try:
-            result = index.batch_search(queries, 10, 400)
-        except RuntimeError as _:
-            print("AVX512 instruction is not supported.")
-            return
+        result = index.batch_search(queries, 10, 400)
         gt = calc_gt_ip(vectors, queries, 10)
         recall = calc_recall(result, gt)
         self.assertGreaterEqual(recall, 0.95)
@@ -157,7 +121,6 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         self.assertEqual(result_load.shape, result.shape)
         self.assertTrue(np.allclose(result_load, result))
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_invalid_parameters(self):
         """Test that ef < k raises an error."""
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
@@ -165,13 +128,9 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         query = np.random.rand(128).astype(np.float32)
         index.fit(vectors)
 
-        try:
-            # ef < k should throw exception
-            with self.assertRaises((ValueError, RuntimeError)):
-                index.search(query, topk=10, ef_search=5)
-        except RuntimeError as _:
-            # AVX512 not supported, test passes
-            print("AVX512 instruction is not supported.")
+        # ef < k should throw exception
+        with self.assertRaises((ValueError, RuntimeError)):
+            index.search(query, topk=10, ef_search=5)
 
 
 if __name__ == "__main__":

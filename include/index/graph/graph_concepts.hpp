@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <sys/types.h>
 #include <concepts>
 #include <cstdint>
 #include <memory>

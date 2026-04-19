@@ -55,16 +55,13 @@ def get_target_arch() -> str:
     return platform.machine().lower()
 
 
-def get_profile_path(script_dir: Path) -> Path:
+def get_static_profile_path(script_dir: Path) -> Path:
     """
-    Select the appropriate Conan profile based on platform and architecture.
+    Select the bundled Conan profile based on platform and architecture.
 
-    Profile selection logic (matches cmake/ConanSetup.cmake):
-    - Windows: conan_profile_win.x86_64
-    - macOS aarch64/arm64: conan_profile_mac.aarch64
-    - macOS x86_64: conan_profile_mac.x86_64
-    - Linux aarch64/arm64: conan_profile.aarch64
-    - Linux x86_64: conan_profile.x86_64
+    Bundled profiles remain available as an override, but the default flow now
+    prefers Conan's detected profile so compiler versions do not need to be
+    hard-coded per platform.
     """
     system = platform.system()
     machine = get_target_arch()
@@ -86,6 +83,69 @@ def get_profile_path(script_dir: Path) -> Path:
         sys.exit(1)
 
     return script_dir / profile_name
+
+
+def get_host_profile_path(script_dir: Path) -> Path | None:
+    """
+    Resolve an optional host profile override.
+
+    Priority:
+    1. `ALAYA_CONAN_PROFILE`
+    2. bundled static profile when `ALAYA_USE_STATIC_CONAN_PROFILE=1`
+    3. no override -> use Conan's detected default profile
+    """
+    profile_override = os.environ.get("ALAYA_CONAN_PROFILE")
+    if profile_override:
+        return Path(profile_override).expanduser().resolve()
+
+    if os.environ.get("ALAYA_USE_STATIC_CONAN_PROFILE") == "1":
+        return get_static_profile_path(script_dir)
+
+    return None
+
+
+def get_conan_os() -> str:
+    """Map Python platform names to Conan OS setting names."""
+    system = platform.system()
+    if system == "Darwin":
+        return "Macos"
+    if system in {"Linux", "Windows"}:
+        return system
+    print(f"Error: Unsupported platform: {system}", file=sys.stderr)
+    sys.exit(1)
+
+
+def get_conan_arch() -> str:
+    """Map host/target architecture names to Conan arch setting names."""
+    machine = get_target_arch()
+    arch_map = {
+        "aarch64": "armv8",
+        "arm64": "armv8",
+        "amd64": "x86_64",
+        "x86_64": "x86_64",
+    }
+    if machine not in arch_map:
+        print(f"Error: Unsupported architecture: {machine}", file=sys.stderr)
+        sys.exit(1)
+    return arch_map[machine]
+
+
+def get_apple_sdk_path() -> str | None:
+    """Best-effort discovery of the active Apple SDK path."""
+    if platform.system() != "Darwin":
+        return None
+
+    result = subprocess.run(
+        ["xcrun", "--show-sdk-path"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    sdk_path = result.stdout.strip()
+    return sdk_path or None
 
 
 def run_command(cmd: list[str], cwd: Path | None = None) -> int:
@@ -120,21 +180,28 @@ def main():
         # Script is in scripts/conan_build/, project root is two levels up
         project_dir = script_dir.parent.parent
 
-    # Get the appropriate profile
-    profile_path = get_profile_path(script_dir)
-
-    if not profile_path.exists():
-        print(f"Error: Conan profile not found: {profile_path}", file=sys.stderr)
-        sys.exit(1)
+    host_profile_path = get_host_profile_path(script_dir)
+    host_os = get_conan_os()
+    host_arch = get_conan_arch()
 
     print(f"Platform: {platform.system()} (host: {platform.machine()}, target: {get_target_arch()})")
     print(f"Project directory: {project_dir}")
-    print(f"Using Conan profile: {profile_path}")
+    print(f"Host settings: os={host_os}, arch={host_arch}")
+    if host_profile_path is not None:
+        if not host_profile_path.exists():
+            print(f"Error: Conan profile not found: {host_profile_path}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Using host Conan profile override: {host_profile_path}")
+    else:
+        print("Using Conan detected default profile with dynamic host overrides")
     print(f"Build type: {args.build_type}")
 
     # Detect default profile (for build profile)
     print("\nDetecting default Conan profile...")
-    run_command(["uvx", "conan", "profile", "detect", "--force"])
+    ret = run_command(["uvx", "conan", "profile", "detect", "--force"])
+    if ret != 0:
+        print(f"Error: conan profile detect failed with exit code {ret}", file=sys.stderr)
+        sys.exit(ret)
 
     # Run conan install
     print("\nRunning conan install...")
@@ -144,13 +211,23 @@ def main():
         "install",
         str(project_dir),
         "-pr:h",
-        str(profile_path),
+        str(host_profile_path) if host_profile_path is not None else "default",
         "-pr:b",
         "default",
-        "-s",
+        "-s:h",
+        f"os={host_os}",
+        "-s:h",
+        f"arch={host_arch}",
+        "-s:h",
+        f"build_type={args.build_type}",
+        "-s:b",
         f"build_type={args.build_type}",
         "--build=missing",
     ]
+
+    sdk_path = get_apple_sdk_path()
+    if sdk_path is not None:
+        cmd.extend(["-c:h", f"tools.apple:sdk_path={sdk_path}"])
 
     ret = run_command(cmd, cwd=project_dir)
 

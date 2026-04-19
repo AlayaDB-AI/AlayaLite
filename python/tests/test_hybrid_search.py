@@ -5,7 +5,6 @@
 """Unit tests for hybrid search (vector search + metadata filtering)."""
 
 import os
-import platform
 import shutil
 import tempfile
 import time
@@ -15,9 +14,6 @@ import numpy as np
 from alayalite import Collection
 from alayalite.schema import IndexParams
 
-# Skip RaBitQ tests on non-x86 platforms (AVX512 required)
-SKIP_RABITQ = platform.machine() not in ("x86_64", "AMD64")
-SKIP_REASON = "RaBitQ requires AVX512 instructions (x86_64 only)"
 LONG_TEST_REASON = "Long-running 1M hybrid-search benchmark test; skipped in routine test runs"
 
 N_TOTAL = 1000000
@@ -107,7 +103,6 @@ class TestHybridSearch(unittest.TestCase):
         qps = 1.0 / elapsed if elapsed > 0 else float("inf")
         return recall, qps
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_hybrid_search_with_cosine(self):
         """Test hybrid query with RaBitQ quantization using cosine metric."""
         recall, qps = self._run_hybrid_search_test("test_rabitq_cos", "rabitq", ef_search=100)
@@ -216,7 +211,6 @@ class TestRaBitQBruteForceLarge(unittest.TestCase):
         qps = 1.0 / elapsed if elapsed > 0 else float("inf")
         return recall, qps, elapsed
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_1m_001pct_comparison(self):
         """Compare RaBitQ graph-based vs brute-force search on the same index."""
         # Build index once

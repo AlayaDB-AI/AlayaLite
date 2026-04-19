@@ -3,7 +3,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #pragma once
-#include <sys/types.h>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>

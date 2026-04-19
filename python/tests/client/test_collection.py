@@ -9,7 +9,6 @@ Unit tests for the AlayaLite Collection class.
 import gc
 import json
 import os
-import platform
 import random
 import shutil
 import tempfile
@@ -22,9 +21,6 @@ from alayalite import Collection
 from alayalite.index import Index
 from alayalite.schema import IndexParams
 from alayalite.utils import calc_gt, calc_recall, normalize_vectors_for_cosine_metric
-
-SKIP_RABITQ = platform.machine() not in ("x86_64", "AMD64")
-SKIP_REASON = "RaBitQ requires AVX512 instructions (x86_64 only)"
 
 
 class TestCollection(unittest.TestCase):
@@ -276,7 +272,6 @@ class TestCollection(unittest.TestCase):
         for row_ids in result["id"]:
             self.assertEqual(len(row_ids), 2)
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_collection_build_with_scalar_data_keeps_space_accessible(self):
         """RaBitQ collection build should succeed with metadata-backed scalar storage."""
         params = self._collection_params(
@@ -543,7 +538,6 @@ class TestCollection(unittest.TestCase):
         )
         self.assertEqual(result["id"][0][0], "a3")
 
-    @unittest.skipIf(SKIP_RABITQ, SKIP_REASON)
     def test_rabitq_batch_hybrid_query_uses_materialized_view_without_crashing(self):
         """Batch MV hybrid search should handle RaBitQ partition-local ids larger than 31."""
         params = self._collection_params(

@@ -27,10 +27,15 @@
 #include <stdexcept>
 #include <type_traits>
 
+#include "utils/log.hpp"
 #include "utils/rabitq_utils/defines.hpp"
 
 namespace alaya::fastscan {
 constexpr static size_t kBatchSize = 32;  // number of vectors in each batch
+
+inline auto log_scalar_fastscan_fallback() -> void {
+  LOG_INFO_ONCE("rabitq fallback: AVX-512 fastscan is unavailable, using portable fallback path");
+}
 
 // clang-format off
 constexpr static std::array<int, 16> kPos = {
@@ -43,6 +48,38 @@ constexpr static std::array<int, 16> kPos = {
 // detailed information
 constexpr static std::array<int, 16> kPerm0 =
     {0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15};
+
+namespace detail {
+
+inline void accumulate_scalar(const uint8_t *ALAYA_RESTRICT codes,
+                              const uint8_t *ALAYA_RESTRICT lp_table,
+                              uint16_t *ALAYA_RESTRICT result,
+                              size_t dim) {
+  const size_t code_length = dim << 2;
+  std::memset(result, 0, kBatchSize * sizeof(uint16_t));
+
+  for (size_t offset = 0; offset < code_length; offset += 32) {
+    for (size_t lane = 0; lane < 16; ++lane) {
+      const uint8_t code = codes[offset + lane];
+      const uint8_t low_code = code & 0x0F;
+      const uint8_t high_code = code >> 4;
+
+      result[kPerm0[lane]] += static_cast<uint16_t>(lp_table[offset + low_code]);
+      result[kPerm0[lane] + 16] += static_cast<uint16_t>(lp_table[offset + high_code]);
+    }
+
+    for (size_t lane = 0; lane < 16; ++lane) {
+      const uint8_t code = codes[offset + 16 + lane];
+      const uint8_t low_code = code & 0x0F;
+      const uint8_t high_code = code >> 4;
+
+      result[kPerm0[lane]] += static_cast<uint16_t>(lp_table[offset + 16 + low_code]);
+      result[kPerm0[lane] + 16] += static_cast<uint16_t>(lp_table[offset + 16 + high_code]);
+    }
+  }
+}
+
+}  // namespace detail
 
 template <typename T, class TA>
 static inline void get_column(const T *src,
@@ -117,8 +154,8 @@ inline void accumulate(const uint8_t *ALAYA_RESTRICT codes,
                        const uint8_t *ALAYA_RESTRICT lp_table,
                        uint16_t *ALAYA_RESTRICT result,
                        size_t dim) {
-  size_t code_length = dim << 2;
 #if defined(__AVX512F__)
+  size_t code_length = dim << 2;
   __m512i c;
   __m512i lo;
   __m512i hi;
@@ -175,6 +212,7 @@ inline void accumulate(const uint8_t *ALAYA_RESTRICT codes,
   _mm512_storeu_si512(result, ret);
 
 #elif defined(__AVX2__)
+  size_t code_length = dim << 2;
   __m256i c, lo, hi, lut, res_lo, res_hi;
 
   __m256i low_mask = _mm256_set1_epi8(0xf);
@@ -223,37 +261,8 @@ inline void accumulate(const uint8_t *ALAYA_RESTRICT codes,
 #else
   // Scalar fallback for non-x86 architectures (ARM, etc.)
   // This implementation is slower but functionally equivalent to the SIMD versions
-  std::memset(result, 0, 32 * sizeof(uint16_t));
-
-  for (size_t i = 0; i < code_length; i += 32) {
-    // First 16 bytes: upper 4-bit codes (col_0 from pack_codes)
-    for (size_t j = 0; j < 16; ++j) {
-      uint8_t c = codes[i + j];
-      uint8_t lo_code = c & 0x0f;
-      uint8_t hi_code = c >> 4;
-
-      // LUT lookup for upper 4 bits - first 16 bytes of LUT block
-      int8_t val_lo = static_cast<int8_t>(lp_table[i + lo_code]);
-      int8_t val_hi = static_cast<int8_t>(lp_table[i + hi_code]);
-
-      result[kPerm0[j]] += val_lo;       // Vector at kPerm0[j]
-      result[kPerm0[j] + 16] += val_hi;  // Vector at kPerm0[j] + 16
-    }
-
-    // Second 16 bytes: lower 4-bit codes (col_1 from pack_codes)
-    for (size_t j = 0; j < 16; ++j) {
-      uint8_t c = codes[i + 16 + j];
-      uint8_t lo_code = c & 0x0f;
-      uint8_t hi_code = c >> 4;
-
-      // LUT lookup for lower 4 bits - second 16 bytes of LUT block
-      int8_t val_lo = static_cast<int8_t>(lp_table[i + 16 + lo_code]);
-      int8_t val_hi = static_cast<int8_t>(lp_table[i + 16 + hi_code]);
-
-      result[kPerm0[j]] += val_lo;
-      result[kPerm0[j] + 16] += val_hi;
-    }
-  }
+  log_scalar_fastscan_fallback();
+  detail::accumulate_scalar(codes, lp_table, result, dim);
 #endif
 }
 // NOLINTEND
@@ -286,7 +295,11 @@ inline void estimate_distances(const uint16_t *ALAYA_RESTRICT nth_segments,
     _mm512_store_ps(result + off, est);
   }
 #else
-  throw std::runtime_error("Avx512 instruction is not supported!");
+  log_scalar_fastscan_fallback();
+  for (size_t off = 0; off < kBatchSize; ++off) {
+    const auto inner = static_cast<T>(nth_segments[off]) * lut_delta + lut_bias;
+    result[off] = f_rescale[off] * inner + f_add[off] + g_add;
+  }
 #endif
 }
 
@@ -302,8 +315,8 @@ inline void accumulate_and_estimate_distances(const uint8_t *ALAYA_RESTRICT code
                                               size_t dim) {
   static_assert(std::is_same_v<T, float>,
                 "fastscan::accumulate_and_estimate_distances only supports float.");
-  size_t code_length = dim << 2;
 #if defined(__AVX512F__)
+  size_t code_length = dim << 2;
   __m512i c;
   __m512i lo;
   __m512i hi;
@@ -365,7 +378,10 @@ inline void accumulate_and_estimate_distances(const uint8_t *ALAYA_RESTRICT code
   const __m512 est_hi = _mm512_fmadd_ps(f_rescale_hi, inner_hi, _mm512_add_ps(f_add_hi, v_gadd));
   _mm512_storeu_ps(result + 16, est_hi);
 #else
-  throw std::runtime_error("Avx512 instruction is not supported!");
+  log_scalar_fastscan_fallback();
+  alignas(64) std::array<uint16_t, kBatchSize> nth_segments{};
+  accumulate(codes, lp_table, nth_segments.data(), dim);
+  estimate_distances(nth_segments.data(), f_add, f_rescale, g_add, lut_delta, lut_bias, result);
 #endif
 }
 

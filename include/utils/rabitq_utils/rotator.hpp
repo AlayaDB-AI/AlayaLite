@@ -53,6 +53,12 @@ class Rotator {
 
 namespace rotator_impl {
 
+inline auto log_rotator_fallback_once() -> void {
+  LOG_INFO_ONCE(
+      "rabitq fallback: FhtKacRotator is using portable fallback operations for non-AVX512 "
+      "platforms");
+}
+
 // get padding requirement for different rotator
 inline size_t padding_requirement(size_t dim, RotatorType type) {
   if (type == RotatorType::MatrixRotator) {
@@ -162,6 +168,15 @@ static inline void flip_sign(const uint8_t *flip, float *data, size_t dim) {
     vec3 = _mm512_mask_xor_ps(vec3, mask3, vec3, sign_flip);
     _mm512_storeu_ps(&data[i + 48], vec3);
   }
+#else
+  log_rotator_fallback_once();
+  for (size_t i = 0; i < dim; ++i) {
+    const auto byte = flip[i / 8];
+    const auto bit = static_cast<uint8_t>((byte >> (i % 8)) & 0x1U);
+    if (bit != 0U) {
+      data[i] = -data[i];
+    }
+  }
 #endif
 }
 
@@ -259,6 +274,14 @@ class FhtKacRotator : public Rotator<float> {
       _mm512_storeu_ps(&data[i], new_x);
       _mm512_storeu_ps(&data[i + (len / 2)], new_y);
     }
+#else
+    log_rotator_fallback_once();
+    for (size_t i = 0; i < len / 2; ++i) {
+      const float x = data[i];
+      const float y = data[i + (len / 2)];
+      data[i] = x + y;
+      data[i + (len / 2)] = x - y;
+    }
 #endif
   }
 
@@ -320,13 +343,6 @@ template <typename T>
 std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
                                            RotatorType type = RotatorType::FhtKacRotator,
                                            size_t padded_dim = 0) {
-// RaBitQ requires AVX512 for FhtKacRotator, not supported on ARM
-#if defined(__aarch64__) || defined(_M_ARM64)
-  throw std::runtime_error(
-      "RaBitQ is not supported on ARM architecture. "
-      "AVX512 instructions are required for FhtKacRotator.");
-#endif
-
   if (padded_dim == 0) {
     padded_dim = rotator_impl::padding_requirement(dim, type);
     if (padded_dim != dim) {
@@ -350,6 +366,9 @@ std::unique_ptr<Rotator<T>> choose_rotator(size_t dim,
 
   if (type == RotatorType::FhtKacRotator) {
     if constexpr (std::is_same_v<T, float>) {
+      if (!simd::get_cpu_features().avx512f_) {
+        rotator_impl::log_rotator_fallback_once();
+      }
       LOG_DEBUG("FhtKacRotator is selected\n");
       return std::make_unique<rotator_impl::FhtKacRotator>(dim, padded_dim);
     } else {

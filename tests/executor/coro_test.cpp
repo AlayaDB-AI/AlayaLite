@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#if defined(__linex__)
+#if defined(__linux__)
 #include <gtest/gtest.h>
 #include <atomic>
 #include <filesystem>

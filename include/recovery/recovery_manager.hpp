@@ -4,9 +4,6 @@
 
 #pragma once
 
-#include <fcntl.h>
-#include <unistd.h>
-
 #include <chrono>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
@@ -18,6 +15,7 @@
 #include "recovery/snapshot_manifest.hpp"
 #include "recovery/write_ahead_log.hpp"
 #include "utils/log.hpp"
+#include "utils/platform_fs.hpp"
 
 namespace alaya::recovery {
 
@@ -211,18 +209,9 @@ class RecoveryManager {
       output.close();
     }
 
-    sync_file(tmp_path);
-    std::error_code ec;
-    fs::rename(tmp_path, path, ec);
-    if (ec) {
-      fs::remove(path, ec);
-      ec.clear();
-      fs::rename(tmp_path, path, ec);
-      if (ec) {
-        throw std::runtime_error("Failed to publish recovery file at " + path.string());
-      }
-    }
-    sync_directory(path.parent_path());
+    platform::sync_file(tmp_path);
+    platform::atomic_replace(tmp_path, path);
+    platform::sync_directory(path.parent_path());
   }
 
   static auto copy_directory_recursive(const fs::path &source, const fs::path &target) -> void {
@@ -237,25 +226,7 @@ class RecoveryManager {
         fs::copy_file(entry.path(), dest, fs::copy_options::overwrite_existing);
       }
     }
-    sync_directory(target);
-  }
-
-  static auto sync_file(const fs::path &path) -> void {
-    int fd = ::open(path.c_str(), O_RDONLY);
-    if (fd < 0) {
-      return;
-    }
-    ::fsync(fd);
-    ::close(fd);
-  }
-
-  static auto sync_directory(const fs::path &path) -> void {
-    int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY);
-    if (fd < 0) {
-      return;
-    }
-    ::fsync(fd);
-    ::close(fd);
+    platform::sync_directory(target);
   }
 
   fs::path root_dir_;

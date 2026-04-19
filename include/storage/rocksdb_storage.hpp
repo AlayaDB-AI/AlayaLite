@@ -19,6 +19,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstring>
+#include <filesystem>  // NOLINT(build/c++17)
 #include <functional>
 #include <limits>
 #include <memory>
@@ -30,40 +31,11 @@
 #include <utility>
 #include <vector>
 
-#include <sys/stat.h>
-#include <sys/types.h>
-
 #include "utils/index_encoding.hpp"
 #include "utils/log.hpp"
 #include "utils/scalar_data.hpp"
 
 namespace alaya {
-
-namespace detail {
-inline void create_directories_recursive(const std::string &path) {
-  if (path.empty()) {
-    return;
-  }
-  std::string current;
-  for (size_t i = 0; i < path.size(); ++i) {
-    current += path[i];
-    if (path[i] == '/' && i > 0) {
-      mkdir(current.c_str(), 0755);  // NOLINT
-    }
-  }
-  if (!current.empty() && current.back() != '/') {
-    mkdir(current.c_str(), 0755);  // NOLINT
-  }
-}
-
-inline auto get_parent_path(const std::string &path) -> std::string {
-  size_t pos = path.rfind('/');
-  if (pos == std::string::npos || pos == 0) {
-    return "";
-  }
-  return path.substr(0, pos);
-}
-}  // namespace detail
 
 /**
  * @brief Configuration for RocksDB storage
@@ -790,10 +762,9 @@ class RocksDBStorage {
     options.allow_mmap_reads = true;
 
     // Create parent directories if they don't exist
-    std::string parent_path = detail::get_parent_path(config_.db_path_);
+    auto parent_path = std::filesystem::path(config_.db_path_).parent_path();
     if (!parent_path.empty()) {
-      detail::create_directories_recursive(parent_path);
-      // Ignore error if directory already exists
+      std::filesystem::create_directories(parent_path);
     }
 
     rocksdb::DB *db = nullptr;

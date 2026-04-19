@@ -46,7 +46,7 @@ class SearchBuffer {
 
  private:
   std::vector<ANNCand, AlignedAlloc<ANNCand>> data_;
-  size_t size_ = 0, cur_ = 0, capacity_;
+  size_t size_ = 0, cur_ = 0, capacity_ = 0;
 
   [[nodiscard]] auto binary_search(T dist) const {
     size_t lo = 0;
@@ -77,6 +77,10 @@ class SearchBuffer {
 
   // insert a data point into buffer
   auto insert(PID data_id, T dist) -> bool {
+    if (capacity_ == 0) {
+      return false;
+    }
+
     if (is_full(dist)) {
       return false;
     }
@@ -112,6 +116,8 @@ class SearchBuffer {
 
   void resize(size_t new_size) {
     this->capacity_ = new_size;
+    size_ = 0;
+    cur_ = 0;
     data_ = std::vector<ANNCand, AlignedAlloc<ANNCand>>(capacity_ + 1);
   }
 
@@ -128,6 +134,9 @@ class SearchBuffer {
   }
 
   auto top_dist() const -> T {
+    if (size_ == 0 || capacity_ == 0) {
+      return std::numeric_limits<T>::max();
+    }
     return is_full() ? data_[size_ - 1].distance_ : std::numeric_limits<T>::max();
   }
 

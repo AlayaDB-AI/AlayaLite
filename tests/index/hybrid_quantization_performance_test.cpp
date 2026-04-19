@@ -335,16 +335,6 @@ auto build_rabitq_partition_bundle(const std::vector<DataType> &vectors,
   PartitionBundle<RaBitQSearchSpace, RaBitQSearchSpace> bundle;
   bundle.name_ = "rabitq_mv";
 
-#if !defined(__AVX512F__)
-  (void)vectors;
-  (void)vector_num;
-  (void)dim;
-  (void)scalar_data;
-  (void)db_path;
-  bundle.available_ = false;
-  bundle.note_ = "requires AVX512";
-  return bundle;
-#else
   Timer timer;
   RocksDBConfig config;
   config.db_path_ = db_path.string();
@@ -357,7 +347,6 @@ auto build_rabitq_partition_bundle(const std::vector<DataType> &vectors,
   bundle.build_space_ = bundle.search_space_;
   bundle.build_seconds_ = timer.elapsed_us() / 1e6;
   return bundle;
-#endif
 }
 
 void decode_item_ids_to_global_ids(const std::vector<std::string> &item_ids, IDType *ids_out) {

@@ -4,7 +4,6 @@
 
 #pragma once
 #include <pybind11/numpy.h>
-#include <sys/types.h>
 #include <any>
 #include <cstdint>
 #include <iterator>

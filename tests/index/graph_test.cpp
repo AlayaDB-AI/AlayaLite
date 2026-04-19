@@ -3,8 +3,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #include <gtest/gtest.h>
-#include <sys/types.h>
-
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>

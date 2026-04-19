@@ -7,6 +7,7 @@
 #include <spdlog/spdlog.h>
 #include <cstdarg>
 #include <cstring>
+#include <mutex>
 
 /**
  * @brief Extract relative path from full path.
@@ -25,7 +26,15 @@ inline auto extract_relative_path(const char *full_path) -> const char * {
   if (pos != nullptr) {
     return pos + 1;
   }
+  pos = std::strstr(full_path, "\\include\\");
+  if (pos != nullptr) {
+    return pos + 1;
+  }
   pos = std::strstr(full_path, "/src/");
+  if (pos != nullptr) {
+    return pos + 1;
+  }
+  pos = std::strstr(full_path, "\\src\\");
   if (pos != nullptr) {
     return pos + 1;
   }
@@ -33,9 +42,18 @@ inline auto extract_relative_path(const char *full_path) -> const char * {
   if (pos != nullptr) {
     return pos + 1;
   }
+  pos = std::strstr(full_path, "\\tests\\");
+  if (pos != nullptr) {
+    return pos + 1;
+  }
   // Fallback: return just the filename
   const char *last_slash = std::strrchr(full_path, '/');
-  return last_slash != nullptr ? last_slash + 1 : full_path;
+  const char *last_backslash = std::strrchr(full_path, '\\');
+  const char *last_sep = last_slash;
+  if (last_backslash != nullptr && (last_sep == nullptr || last_backslash > last_sep)) {
+    last_sep = last_backslash;
+  }
+  return last_sep != nullptr ? last_sep + 1 : full_path;
 }
 
 #define RELATIVE_FILE extract_relative_path(__FILE__)
@@ -62,6 +80,13 @@ inline auto extract_relative_path(const char *full_path) -> const char * {
                  __LINE__,                                                     \
                  ##__VA_ARGS__);                                               \
   }
+#define LOG_INFO_ONCE(msg, ...)                 \
+  do {                                          \
+    static std::once_flag alaya_log_once_flag;  \
+    std::call_once(alaya_log_once_flag, [&]() { \
+      LOG_INFO(msg, ##__VA_ARGS__);             \
+    });                                         \
+  } while (0)
 #define LOG_WARN(msg, ...)                                                     \
   {                                                                            \
     spdlog::warn(::fmt::runtime(CONCATENATE_STRINGS("[Alaya] [{}:{}] ", msg)), \

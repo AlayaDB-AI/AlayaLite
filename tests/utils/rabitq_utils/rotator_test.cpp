@@ -155,9 +155,7 @@ TEST_F(RotatorTest, FhtKacRotator_Interface) {
   size_t print_size = 10;
 
   auto rot = std::make_unique<rotator_impl::FhtKacRotator>(dim, padded);
-#if defined(__AVX512F__)
   EXPECT_EQ(rot->size(), padded);
-#endif
 
   auto input = random_vector(dim);
   std::vector<float> output(padded);
@@ -176,18 +174,14 @@ TEST_F(RotatorTest, FhtKacRotator_Interface) {
     std::vector<float> output2(padded);
     rot2->rotate(input.data(), output2.data());
     print_vec(output2.data(), print_size, "output2");
-#if defined(__AVX512F__)
     EXPECT_TRUE(approx_equal(output.data(), output2.data(), padded));
-#endif
   }
 }
 
 TEST_F(RotatorTest, FhtKacRotator_Padding) {
   size_t dim = 100;
   auto rot = choose_rotator<float>(dim, RotatorType::FhtKacRotator);
-#if defined(__AVX512F__)
   EXPECT_EQ(rot->size(), 128);  // 100 → 128
-#endif
 
   auto input = random_vector(dim);
   std::vector<float> output(128);
@@ -201,9 +195,7 @@ TEST_F(RotatorTest, FhtKacRotator_Padding) {
       break;
     }
   }
-#if defined(__AVX512F__)
   EXPECT_FALSE(all_zero);
-#endif
 }
 
 TEST_F(RotatorTest, FhtKacRotator_NormPreservation) {
@@ -224,11 +216,9 @@ TEST_F(RotatorTest, FhtKacRotator_NormPreservation) {
     output_norm_sum += out_norm;
   }
 
-#if defined(__AVX512F__)
   float avg_in = input_norm_sum / trials;
   float avg_out = output_norm_sum / trials;
   EXPECT_NEAR(avg_out, avg_in, 0.2f);  // loose due to randomness
-#endif
 }
 
 // ----------------------------
@@ -237,9 +227,7 @@ TEST_F(RotatorTest, FhtKacRotator_NormPreservation) {
 TEST_F(RotatorTest, Edge_MaxDim) {
   // FhtKac supports up to 2^11 = 2048
   auto rot = choose_rotator<float>(2048, RotatorType::FhtKacRotator);
-#if defined(__AVX512F__)
   EXPECT_EQ(rot->size(), 2048);
-#endif
   auto input = random_vector(2048);
   std::vector<float> output(2048);
   rot->rotate(input.data(), output.data());

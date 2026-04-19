@@ -4,14 +4,24 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <limits>
 #include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <unordered_set>
 #include <vector>
 
 #include "index/neighbor.hpp"
 #include "space/rabitq_space.hpp"
 #include "space/space_concepts.hpp"
 #include "utils/log.hpp"
+#include "utils/openmp.hpp"
 #include "utils/rabitq_utils/search_utils/buffer.hpp"
 #include "utils/rabitq_utils/search_utils/hashset.hpp"
 #include "utils/random.hpp"
@@ -48,7 +58,7 @@ class QGBuilder {
     degrees_.resize(num_nodes_, static_cast<uint32_t>(degree_bound_));
 
     num_threads_ = std::min(num_threads, static_cast<size_t>(configured_thread_limit()));
-    omp_set_num_threads(static_cast<int>(num_threads_));
+    platform::set_openmp_thread_count(num_threads_);
 
     size_t pool_capacity = std::min(ef_build_ * ef_build_, num_nodes_ / 10);
     visited_list_.clear();
@@ -114,8 +124,8 @@ class QGBuilder {
       angle_based_supplement();
     }
 
-// update result with space and graph in the end of every iteration
-#pragma omp parallel for schedule(dynamic)
+    // update result with space and graph in the end of every iteration
+    ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
       if (sup && new_neighbors_[i].size() < degree_bound_) {
         LOG_ERROR("After supplement, node_{} only has {} neighbors.", i, new_neighbors_[i].size());
@@ -127,11 +137,10 @@ class QGBuilder {
 
   void search_new_neighbors(bool sup) {
     LOG_INFO("Searching for new neighbor candidates...");
-#if defined(__AVX512F__)
-  #pragma omp parallel for schedule(dynamic)
+    ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
       IDType cur_id = static_cast<IDType>(i);
-      auto tid = omp_get_thread_num();
+      auto tid = platform::openmp_thread_num();
       CandidateList candidates;
       HashBasedBooleanSet &vis = visited_list_[tid];
       candidates.reserve(2 * kMaxCandidatePoolSize);
@@ -155,15 +164,13 @@ class QGBuilder {
       // prune and update qg
       heuristic_prune(cur_id, candidates, new_neighbors_[cur_id], sup);
     }
-#endif
   }
 
   void add_reverse_edges(bool sup) {
     LOG_INFO("Adding reverse edges...");
-#if defined(__AVX512F__)
     std::vector<std::mutex> locks(num_nodes_);
     std::vector<CandidateList> reverse_buffer(num_nodes_);
-  #pragma omp parallel for schedule(dynamic)
+    ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t data_id = 0; data_id < static_cast<int64_t>(num_nodes_);
          ++data_id) {  // for every vertex
       for (const auto &nei : new_neighbors_[data_id]) {
@@ -190,7 +197,7 @@ class QGBuilder {
         }
       }
     }
-  #pragma omp parallel for schedule(dynamic)
+    ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t data_id = 0; data_id < static_cast<int64_t>(num_nodes_);
          ++data_id) {  // prune for every vertex
       CandidateList &tmp_pool = reverse_buffer[data_id];
@@ -202,7 +209,6 @@ class QGBuilder {
       std::sort(tmp_pool.begin(), tmp_pool.end());
       heuristic_prune(data_id, tmp_pool, new_neighbors_[data_id], sup);
     }
-#endif
   }
 
   /**
@@ -213,8 +219,7 @@ class QGBuilder {
    */
   void angle_based_supplement() {
     LOG_INFO("Supplementing edges...");
-#if defined(__AVX512F__)
-  #pragma omp parallel for schedule(dynamic)
+    ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
       CandidateList &cur_neighbors = new_neighbors_[i];
       size_t cur_degree = cur_neighbors.size();
@@ -265,11 +270,9 @@ class QGBuilder {
 
       cur_neighbors = new_result;
     }
-#endif
     LOG_INFO("Supplementing finished...");
   }
 
-#if defined(__AVX512F__)
   /**
    * @brief Use est_dist to find candidate neighbors for cur_id, exclude the vertex itself
    *
@@ -441,14 +444,13 @@ class QGBuilder {
       ++start;
     }
   }
-#endif
 
   void cal_ep() {
     // compute centroid
     std::vector<std::vector<DataType>> all_results(num_threads_, std::vector<DataType>(dim_, 0));
-#pragma omp parallel for schedule(dynamic)
+    ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
-      auto tid = omp_get_thread_num();
+      auto tid = platform::openmp_thread_num();
       std::vector<DataType> &cur_results = all_results[tid];
       auto cur_data = space_->get_data_by_id(i);
       for (size_t k = 0; k < dim_; ++k) {
@@ -470,9 +472,9 @@ class QGBuilder {
     std::vector<Neighbor<IDType, DistanceType>>
         best_entries(num_threads_,
                      Neighbor<IDType, DistanceType>{0, std::numeric_limits<DistanceType>::max()});
-#pragma omp parallel for schedule(dynamic)
+    ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
-      auto tid = omp_get_thread_num();
+      auto tid = platform::openmp_thread_num();
       Neighbor<IDType, DistanceType> &cur_entry = best_entries[tid];
       auto cur_data = space_->get_data_by_id(i);
       DistanceType distance = space_->get_dist_func()(cur_data, centroid.data(), dim_);
@@ -497,7 +499,7 @@ class QGBuilder {
   }
 
   void random_init() {
-#pragma omp parallel for schedule(dynamic)
+    ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
       // generate random neighbors
       std::unordered_set<IDType> neighbor_set;

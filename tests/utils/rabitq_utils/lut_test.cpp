@@ -3,8 +3,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 #include <gtest/gtest.h>
+#include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <vector>
 
@@ -33,6 +35,21 @@ TEST(LutTest, InvalidDataType) {
   size_t padded_dim = 64;
   std::vector<int> rotated_query(padded_dim, 1);
   EXPECT_THROW(auto lookup_table = Lut(rotated_query.data(), padded_dim), std::invalid_argument);
+}
+
+TEST(LutTest, ScalarFastScanAccumulatesUnsignedLookupValues) {
+  std::array<uint8_t, fastscan::kBatchSize> codes{};
+  std::array<uint8_t, fastscan::kBatchSize> lookup_table{};
+  std::array<uint16_t, fastscan::kBatchSize> result{};
+
+  lookup_table[0] = 200;
+  lookup_table[16] = 250;
+
+  fastscan::detail::accumulate_scalar(codes.data(), lookup_table.data(), result.data(), 8);
+
+  for (const auto value : result) {
+    EXPECT_EQ(value, 450);
+  }
 }
 
 }  // namespace alaya

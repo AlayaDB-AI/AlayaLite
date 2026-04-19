@@ -88,15 +88,8 @@ TEST_F(RaBitQSiftSmallTest, SiftSmallQGTest) {  // for code coverage
       LOG_INFO("current ef in this round:{}", ef);
       for (uint32_t n = 0; n < ds_.query_num_; ++n) {
         timer.reset();
-#if defined(__AVX512F__)
         search_job->rabitq_search_solo(ds_.queries_.data() + (n * ds_.dim_), topk, results.data(),
                                        ef);
-#else
-        EXPECT_THROW(search_job->rabitq_search_solo(ds_.queries_.data() + (n * ds_.dim_), topk,
-                                                    results.data(), ef),
-                     std::runtime_error);
-        return;
-#endif
 
         total_time += timer.elapsed_us();
         // recall
@@ -150,14 +143,7 @@ TEST_F(RaBitQSiftSmallTest, InvalidParameterTest) {
   std::vector<IDType> results(topk);
   auto query = ds_.queries_.data();
 
-#if defined(__AVX512F__)
-  // Should throw invalid_argument exception when ef < k
   EXPECT_THROW(search_job->rabitq_search_solo(query, topk, results.data(), ef),
                std::invalid_argument);
-#else
-  // On non-AVX512 platforms, should throw runtime_error
-  EXPECT_THROW(search_job->rabitq_search_solo(query, topk, results.data(), ef),
-               std::runtime_error);
-#endif
 }
 }  // namespace alaya

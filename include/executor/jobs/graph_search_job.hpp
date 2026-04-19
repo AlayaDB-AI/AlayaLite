@@ -63,7 +63,6 @@ struct GraphSearchJob {
   /// Compile-time flag: whether rerank is needed
   static constexpr bool kNeedsRerank = !std::is_same_v<DistanceSpaceType, BuildSpaceType>;
 
-#if defined(__AVX512F__)
   /**
    * @brief Supplement results for rabitq_search if rabitq_search failed to find enough knn
    *
@@ -98,7 +97,6 @@ struct GraphSearchJob {
     }
     return supplement_count;
   }
-#endif
 
   explicit GraphSearchJob(std::shared_ptr<DistanceSpaceType> space,
                           std::shared_ptr<Graph<DataType, IDType>> graph,
@@ -342,7 +340,6 @@ struct GraphSearchJob {
   }
 
   void rabitq_search_solo(const DataType *query, uint32_t k, IDType *ids, uint32_t ef) {
-#if defined(__AVX512F__)
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");
     }
@@ -407,14 +404,10 @@ struct GraphSearchJob {
 
     // return result
     res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids));
-#else
-    throw std::runtime_error("Avx512 instruction is not supported!");
-#endif
   }
 
 #if defined(__linux__)
   auto rabitq_search(const DataType *query, uint32_t k, IDType *ids, uint32_t ef) -> coro::task<> {
-  #if defined(__AVX512F__)
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");
     }
@@ -485,9 +478,6 @@ struct GraphSearchJob {
     res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids));
 
     co_return;
-  #else
-    throw std::runtime_error("Avx512 instruction is not supported!");
-  #endif
   }
 #endif
 #if defined(__linux__)

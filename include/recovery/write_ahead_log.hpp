@@ -4,9 +4,6 @@
 
 #pragma once
 
-#include <fcntl.h>
-#include <unistd.h>
-
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -21,6 +18,7 @@
 #include <vector>
 
 #include "utils/log.hpp"
+#include "utils/platform_fs.hpp"
 
 namespace alaya::recovery {
 
@@ -198,7 +196,7 @@ class WriteAheadLog {
     if (wal_stream_.is_open()) {
       wal_stream_.flush();
     }
-    sync_file(path_);
+    platform::sync_file(path_);
   }
 
   [[nodiscard]] auto replayable_records(uint64_t applied_through,
@@ -338,7 +336,7 @@ class WriteAheadLog {
     // flush — a crash between PREPARE and COMMIT leaves an uncommitted record
     // that is correctly skipped during replay.
     if (frame_type == WalFrameType::COMMIT) {
-      sync_file(path_);
+      platform::sync_file(path_);
     }
   }
 
@@ -384,15 +382,6 @@ class WriteAheadLog {
         op_id,
         payload_size,
     };
-  }
-
-  static auto sync_file(const fs::path &path) -> void {
-    int fd = ::open(path.c_str(), O_RDONLY);
-    if (fd < 0) {
-      return;
-    }
-    ::fsync(fd);
-    ::close(fd);
   }
 
   fs::path path_;

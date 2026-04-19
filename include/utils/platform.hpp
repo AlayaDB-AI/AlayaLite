@@ -95,12 +95,15 @@
 // ============================================================================
 
 inline auto alaya_aligned_alloc_impl(size_t size, size_t alignment) -> void * {
+  if (size == 0 || alignment == 0) {
+    return nullptr;
+  }
+
+  const size_t rounded_size = ((size + alignment - 1) / alignment) * alignment;
 #ifdef ALAYA_OS_WINDOWS
-  return _aligned_malloc(size, alignment);
+  return _aligned_malloc(rounded_size, alignment);
 #else
-  // Notice: C++17 std::aligned_alloc requires size to be a multiple of alignment
-  //  size % alignment == 0
-  return std::aligned_alloc(alignment, size);
+  return std::aligned_alloc(alignment, rounded_size);
 #endif
 }
 
