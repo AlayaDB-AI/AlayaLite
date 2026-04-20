@@ -16,7 +16,15 @@ build
 .vscode/*
 *.so
 
+# logs
+.claude
+.codex
+logs/
+results/
+openspec/
 
+# lint
+build-tidy
 
 #python extension module ignores
 *.py[cod]
