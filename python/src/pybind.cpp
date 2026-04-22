@@ -21,6 +21,15 @@
 #include <pybind11/pytypes.h>
 #include <pybind11/stl.h>
 
+// Laser port pulls <omp.h> transitively via qg.hpp. Include this before
+// AlayaLite's own QGBuilder header (via index.hpp) so `omp_set_num_threads`
+// is visible at the point AlayaLite's template definition is parsed — the
+// pre-existing `include/index/graph/qg/qg_builder.hpp` uses OMP calls
+// without explicitly including <omp.h>.
+#ifdef ALAYA_ENABLE_LASER
+#include "alayalite/laser/_bindings.hpp"
+#endif
+
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "index/index_type.hpp"
 // #include "reg.hpp"
@@ -37,6 +46,16 @@ namespace py = pybind11;
 
 PYBIND11_MODULE(_alayalitepy, m) {
   m.doc() = "AlayaLite";
+
+#ifdef ALAYA_ENABLE_LASER
+  // Laser on-disk Quantized Graph index lives under a submodule so its
+  // `Index` class does not collide with AlayaLite's top-level `Index`.
+  // Accessed from Python as `alayalite._alayalitepy.laser.Index`; the
+  // `alayalite.laser` package re-exports it — see
+  // python/src/alayalite/laser/__init__.py.
+  auto laser_mod = m.def_submodule("laser", "Laser on-disk QG index");
+  alaya::laser::bindings::register_laser_module(laser_mod);
+#endif
 
   // define version info
 #ifdef VERSION_INFO

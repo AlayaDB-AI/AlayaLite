@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Disk-based vector index (DiskANN) for billion-scale datasets
 - Real-time update support for dynamic vector insertion and deletion
 - Scalar-vector fusion search for hybrid queries
+- Laser on-disk Quantized Graph index (`laser-disk-index` capability).
+  New `alayalite.laser.Index` Python surface, CLI pipeline at
+  `examples/laser/`, and the `alaya::laser::QuantizedGraph` C++ class
+  under `include/index/graph/laser/`. Consumes DiskANN-format Vamana
+  `.index` + `.fbin` inputs; produces a FastScan + RabitQ quantized
+  on-disk layout served via `libaio` beam search. See `docs/LASER.md`.
+- Build-time `ALAYA_ENABLE_LASER` CMake option (default ON on Linux).
+  Adds a new system build dependency on `libaio-dev` for Linux builds
+  when the option is ON.
+- `scripts/gen_synth_100k_512d.py` — synthetic dataset generator used
+  as a secondary alignment judge for the Laser port.
 
 ## [0.1.1-alpha1] - 2026-01-28
 

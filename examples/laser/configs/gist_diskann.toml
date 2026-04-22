@@ -1,0 +1,28 @@
+# gist1m + DiskANN-built Vamana input (DiskV variant of gist.toml).
+
+[dataset]
+name = "gist"
+metric = "l2"
+degree = 64
+main_dimension = 256
+
+[paths]
+base   = "/md1/huangliang/alaya-dev/data/gist1m/gist_base.fbin"
+query  = "/md1/huangliang/alaya-dev/data/gist1m/gist_query.fbin"
+gt     = "/md1/huangliang/alaya-dev/data/gist1m/gist_gt.ibin"
+vamana = "/md1/huangliang/alaya-dev/build_graph/gist1m/diskann_gt/R64_L100_a1.2/graph"
+output = "/md1/huangliang/alaya-dev/build_graph/gist1m/laser_port_diskann"
+
+[build]
+build_threads = 48
+ef_indexing = 200
+
+[search]
+topk = 10
+threads = 1
+beam_width = 16
+dram_budget = 1.0
+ep_num = 300
+warmup = 10
+runs = 30
+efs = [80, 90, 100, 110, 130, 150, 200, 250, 300, 400, 500]

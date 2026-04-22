@@ -1,0 +1,26 @@
+[dataset]
+name = "cohere"
+metric = "l2"
+degree = 64
+main_dimension = 256
+
+[paths]
+base = "/md1/huangliang/alaya-dev/data/cohere/cohere_base.fbin"
+query = "/md1/huangliang/alaya-dev/data/cohere/cohere_query.fbin"
+gt = "/md1/huangliang/alaya-dev/data/cohere/cohere_gt"
+vamana = "/md1/huangliang/alaya-dev/build_graph/cohere/alaya/R64_L200_a1.2/graph.index"
+output = "/md1/huangliang/alaya-dev/build_graph/cohere/laser_gate2_alaya"
+
+[build]
+build_threads = 48
+ef_indexing = 200
+
+[search]
+# topk = 10
+# threads = 1
+# beam_width = 16
+dram_budget = 10.0
+# ep_num = 300
+# warmup = 10
+# runs = 30
+# efs = [80, 90, 100, 110, 130, 150, 200, 250, 300, 400, 500]

@@ -1,0 +1,169 @@
+"""PCA transformation utilities for vector datasets."""
+
+import os
+import struct
+
+import numpy as np
+from sklearn.decomposition import IncrementalPCA
+from tqdm import tqdm
+
+from alayalite.laser.io import read_fbin
+
+
+def save_pca_params(pca, filepath):
+    """
+    Save PCA parameters to binary file for C++ loading.
+
+    File format:
+      - uint64: dimension
+      - float32[dim]: mean vector
+      - float32[dim * dim]: components matrix (row-major)
+    """
+    dim = pca.n_components_
+    mean = pca.mean_.astype(np.float32)
+    components = pca.components_.astype(np.float32)
+
+    with open(filepath, "wb") as f:
+        f.write(struct.pack("<Q", dim))
+        mean.tofile(f)
+        components.tofile(f)
+
+    print(f"PCA parameters saved to {filepath}")
+    print(f"  - Dimension: {dim}")
+    print(f"  - Mean shape: {mean.shape}")
+    print(f"  - Components shape: {components.shape}")
+
+
+class PCATransformer:
+    """Lightweight PCA transformer reconstructed from saved parameters."""
+
+    def __init__(self, mean, components):
+        self.mean_ = mean
+        self.components_ = components
+        self.n_components_ = components.shape[0]
+
+    def transform(self, X):
+        return np.dot(X - self.mean_, self.components_.T)
+
+
+def load_pca_params(filepath):
+    """Load PCA parameters from binary file and return a PCATransformer."""
+    with open(filepath, "rb") as f:
+        (dim,) = struct.unpack("<Q", f.read(8))
+        mean = np.frombuffer(f.read(dim * 4), dtype=np.float32).copy()
+        components = (
+            np.frombuffer(f.read(dim * dim * 4), dtype=np.float32)
+            .copy()
+            .reshape(dim, dim)
+        )
+    print(f"PCA parameters loaded from {filepath} (dim={dim})")
+    return PCATransformer(mean, components)
+
+
+def fit_incremental_pca(sample_vectors, n_components, batch_size=200000):
+    """
+    Fit PCA model using Incremental PCA for memory efficiency.
+
+    Args:
+        sample_vectors: Training vectors for fitting the PCA model
+        n_components: Number of principal components to compute
+        batch_size: Number of vectors processed per batch
+
+    Returns:
+        Fitted IncrementalPCA model
+    """
+    n_samples = sample_vectors.shape[0]
+    ipca = IncrementalPCA(
+        n_components=n_components, batch_size=min(batch_size, n_samples)
+    )
+    for i in tqdm(range(0, n_samples, batch_size), desc="Training IncrementalPCA"):
+        end_idx = min(i + batch_size, n_samples)
+        ipca.partial_fit(sample_vectors[i:end_idx])
+    return ipca
+
+
+def sample_vectors_from_fbin(filepath, sample_ratio=0.25, seed=None):
+    """
+    Sample a subset of vectors from an fbin file for PCA fitting.
+
+    Args:
+        filepath: Path to the fbin file
+        sample_ratio: Fraction of vectors to sample
+        seed: RNG seed. ``None`` preserves upstream Laser's non-deterministic
+            behaviour (np.random.choice on the global state). Pass an int to
+            make sample selection reproducible — required for any alignment
+            or byte-equality gate across runs.
+
+    Returns:
+        Tuple of (all_vectors, sample_vectors)
+    """
+    vectors = read_fbin(filepath)
+    n, d = vectors.shape
+    sample_size = int(sample_ratio * n)
+
+    if n > sample_size:
+        rng = np.random.default_rng(seed) if seed is not None else np.random
+        sample_indices = rng.choice(n, sample_size, replace=False)
+        sample_indices = np.sort(sample_indices)
+
+        sample_vecs = np.empty((sample_size, d), dtype=np.float32)
+        with open(filepath, "rb") as f:
+            for i, idx in enumerate(
+                tqdm(sample_indices, desc="Reading sample vectors")
+            ):
+                f.seek(8 + idx * d * 4)
+                sample_vecs[i] = np.frombuffer(f.read(d * 4), dtype=np.float32)
+        return vectors, sample_vecs
+    return vectors, vectors
+
+
+def pca_transform_and_save(vectors, pca, output_path, chunk_size=100000):
+    """
+    Transform vectors with PCA and save to fbin file in chunks.
+    Supports resuming from an incomplete file.
+
+    Args:
+        vectors: Input vectors array
+        pca: Fitted PCA model
+        output_path: Output fbin file path
+        chunk_size: Number of vectors per chunk
+    """
+    n, d = vectors.shape
+    num_chunks = (n + chunk_size - 1) // chunk_size
+    header_size = 8  # two int32s (n, d)
+    bytes_per_vector = d * 4
+    start_chunk = 0
+
+    if os.path.exists(output_path):
+        file_size = os.path.getsize(output_path)
+        if file_size > header_size:
+            data_bytes = file_size - header_size
+            completed_vectors = data_bytes // bytes_per_vector
+            start_chunk = completed_vectors // chunk_size
+            # Truncate to last complete chunk boundary
+            valid_size = header_size + start_chunk * chunk_size * bytes_per_vector
+            if file_size != valid_size:
+                with open(output_path, "r+b") as f:
+                    f.truncate(valid_size)
+                print(f"Truncated partial chunk: {file_size} -> {valid_size} bytes")
+            if start_chunk > 0:
+                print(
+                    f"Resuming PCA transform from chunk {start_chunk}/{num_chunks} "
+                    f"({start_chunk * chunk_size:,} vectors done)"
+                )
+
+    if start_chunk == 0:
+        with open(output_path, "wb") as f:
+            np.array([n, d], dtype=np.int32).tofile(f)
+
+    for chunk_idx in tqdm(
+        range(start_chunk, num_chunks),
+        desc="PCA transforming",
+        initial=start_chunk,
+        total=num_chunks,
+    ):
+        start_idx = chunk_idx * chunk_size
+        end_idx = min(start_idx + chunk_size, n)
+        transformed = pca.transform(vectors[start_idx:end_idx])
+        with open(output_path, "ab") as f:
+            transformed.astype(np.float32).tofile(f)
