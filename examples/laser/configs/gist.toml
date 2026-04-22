@@ -1,21 +1,66 @@
+# gist.toml — canonical example for `uv run examples/laser/main.py`.
+#
+# This is the ONLY config tracked in git under examples/laser/configs/.
+# Other files in this directory are .gitignored because their [paths]
+# entries are machine-specific. To run the pipeline on your own data:
+#
+#   cp examples/laser/configs/gist.toml examples/laser/configs/my.toml
+#   $EDITOR examples/laser/configs/my.toml      # edit [paths] below
+#   uv run examples/laser/main.py -c examples/laser/configs/my.toml all
+#
+# Field contract lives in docs/LASER.md.
+
 [dataset]
 name = "gist"
 metric = "l2"
-degree = 64
-main_dimension = 256
+degree = 64          # Vamana build R; also the Laser degree_bound
+main_dimension = 256 # PCA-reduced dim fed to Laser; residual = dim - main_dim
 
 [paths]
-base = "/md1/huangliang/alaya-dev/data/gist1m/gist_base.fbin"
-query = "/md1/huangliang/alaya-dev/data/gist1m/gist_query.fbin"
-gt = "/md1/huangliang/alaya-dev/data/gist1m/gist_gt.ibin"
-vamana = "/md1/huangliang/alaya-dev/build_graph/gist1m/alaya/R64_L100_a1.2/graph.index"
-output = "/md1/huangliang/alaya-dev/build_graph/gist1m/laser_port"
+# Required — edit to point at the gist1m files on your machine.
+# gist1m is the Jégou 2011 ANN_GIST dataset (1M × 960 float32 vectors);
+# the .fbin format is `<int32 N><int32 dim>` header + row-major data.
+base  = "/path/to/gist1m/gist_base.fbin"
+query = "/path/to/gist1m/gist_query.fbin"
+gt    = "/path/to/gist1m/gist_gt.ibin"
 
-# All fields below are optional (defaults shown)
+# Optional. When absent (or the file is missing), step_vamana writes to
+# {output}/data/{name}/vamana/graph.index. When present and the file has
+# a valid DiskANN header (R = [dataset].degree, frozen_pts = 0), the
+# build is skipped and the existing file is reused — this is how the
+# external-DiskANN-built graph workflow stays compatible.
+# vamana = "/path/to/build_graph/gist1m/alaya/R64_L100_a1.2/graph.index"
+
+# Required — all pipeline artefacts land under this directory.
+output = "/path/to/build_graph/gist1m/laser_port"
+
+# Optional Vamana build parameters. Defaults come from
+# `alaya::vamana::kDefaultVamanaBuildParams` in
+# include/index/graph/vamana/build_dispatch.hpp:
+#   L = 100, alpha = 1.2, seed = 1234, num_threads = 0 (= omp_get_num_procs),
+#   dram_budget_gb = 32.0
+#
+# R is NOT listed here — it is read from [dataset].degree to enforce the
+# three-way contract (Vamana build R = written max_observed_degree =
+# Laser degree_bound). Setting [build_vamana].R raises a config-load error.
+#
+# num_threads tuning note: on a 96-core dual-NUMA box, T=80 (unbound)
+# gives the best Vamana build throughput; T=48 bound to a single NUMA
+# node with `numactl --cpunodebind=0 --membind=0` produces slightly lower
+# but more reproducible recall. See docs/LASER.md for the full table.
+# [build_vamana]
+# L = 100
+# alpha = 1.2
+# seed = 1234
+# num_threads = 0
+# dram_budget_gb = 32.0
+
+# Optional Laser index-build parameters.
 # [build]
-# build_threads = 48   # threads for index construction
-# ef_indexing = 200    # ef parameter for index construction
+# build_threads = 48   # threads for QG index construction
+# ef_indexing = 200    # ef parameter for QG index construction
 
+# Optional search sweep parameters.
 # [search]
 # topk = 10
 # threads = 1

@@ -37,8 +37,11 @@ from alayalite.laser.pretty import (
     warn,
 )
 
-STEPS = ["pca", "medoid", "index", "search"]
+STEPS = ["vamana", "pca", "medoid", "index", "search"]
 
+# DEFAULTS for all optional fields. The `build_vamana_*` entries mirror
+# `alaya::vamana::kDefaultVamanaBuildParams` in
+# `include/index/graph/vamana/build_dispatch.hpp` — keep in lockstep.
 DEFAULTS = {
     "topk": 10,
     "threads": 1,
@@ -50,6 +53,11 @@ DEFAULTS = {
     "ef_indexing": 200,
     "warmup": 10,
     "runs": 30,
+    "build_vamana_L": 100,
+    "build_vamana_alpha": 1.2,
+    "build_vamana_seed": 1234,
+    "build_vamana_num_threads": 0,
+    "build_vamana_dram_budget_gb": 32.0,
 }
 
 
@@ -87,7 +95,7 @@ def parse_args():
         "steps",
         nargs="+",
         choices=STEPS + ["all"],
-        help="Steps to run: pca, medoid, index, search, or all",
+        help="Steps to run: vamana, pca, medoid, index, search, or all",
     )
     parser.add_argument("--topk", type=int, default=None)
     parser.add_argument("--threads", type=int, default=None)
@@ -113,6 +121,17 @@ def load_config(toml_path, cli_args):
     paths = raw["paths"]
     build = raw.get("build", {})
     search = raw.get("search", {})
+    build_vamana = raw.get("build_vamana", {})
+
+    # Three-way R contract: Vamana build R, TOML [dataset].degree, and
+    # Laser degree_bound must match. R is sourced from [dataset].degree;
+    # permitting R under [build_vamana] would let it diverge from the
+    # other two sites. See proposal D7.
+    if "R" in build_vamana:
+        raise ValueError(
+            "R must be set via [dataset].degree; remove R from [build_vamana] — "
+            "see proposal integrate-vamana-into-laser-pipeline D7"
+        )
 
     def resolve_search(key, cli_val):
         if cli_val is not None:
@@ -124,16 +143,31 @@ def load_config(toml_path, cli_args):
             return cli_val
         return build.get(key, DEFAULTS[key])
 
+    def resolve_build_vamana(toml_key, defaults_key):
+        return build_vamana.get(toml_key, DEFAULTS[defaults_key])
+
+    name = ds["name"]
+    output = paths["output"]
+
+    # [paths].vamana is optional: when omitted, step_vamana writes to a
+    # derived path under {output}/data/{name}/vamana/graph.index. Existing
+    # configs that pin a path (e.g. gist_diskann.toml's externally-built
+    # graph) continue to work unchanged — step_vamana's idempotence check
+    # detects the valid file and skips the build.
+    vamana_path = paths.get("vamana")
+    if vamana_path is None:
+        vamana_path = f"{output}/data/{name}/vamana/graph.index"
+
     return {
-        "name": ds["name"],
+        "name": name,
         "metric": ds["metric"],
         "degree": cli_args.degree or ds["degree"],
         "main_dimension": cli_args.main_dim or ds["main_dimension"],
         "base": paths["base"],
         "query": paths["query"],
         "gt": paths["gt"],
-        "vamana": paths["vamana"],
-        "output": paths["output"],
+        "vamana": vamana_path,
+        "output": output,
         "build_threads": resolve_build("build_threads", cli_args.build_threads),
         "ef_indexing": resolve_build("ef_indexing", cli_args.ef_indexing),
         "topk": resolve_search("topk", cli_args.topk),
@@ -144,6 +178,15 @@ def load_config(toml_path, cli_args):
         "efs": resolve_search("efs", cli_args.efs),
         "warmup": resolve_search("warmup", cli_args.warmup),
         "runs": resolve_search("runs", cli_args.runs),
+        "build_vamana_L": resolve_build_vamana("L", "build_vamana_L"),
+        "build_vamana_alpha": resolve_build_vamana("alpha", "build_vamana_alpha"),
+        "build_vamana_seed": resolve_build_vamana("seed", "build_vamana_seed"),
+        "build_vamana_num_threads": resolve_build_vamana(
+            "num_threads", "build_vamana_num_threads"
+        ),
+        "build_vamana_dram_budget_gb": resolve_build_vamana(
+            "dram_budget_gb", "build_vamana_dram_budget_gb"
+        ),
     }
 
 
@@ -152,6 +195,109 @@ def data_dir(cfg):
 
 
 # ── Steps ──
+
+
+# DiskANN single-file .index header: 24 bytes total.
+#   offset 0..7   uint64  expected_file_size
+#   offset 8..11  uint32  max_observed_degree  (= R)
+#   offset 12..15 uint32  start                (medoid id)
+#   offset 16..23 uint64  frozen_pts           (0 in this port)
+_VAMANA_HEADER_BYTES = 24
+
+
+def _read_vamana_header(path):
+    """Return (file_size, max_degree, start, frozen_pts) or None if unreadable."""
+    try:
+        file_size = os.path.getsize(path)
+    except OSError:
+        return None
+    if file_size < _VAMANA_HEADER_BYTES:
+        return None
+    with open(path, "rb") as f:
+        buf = f.read(_VAMANA_HEADER_BYTES)
+    if len(buf) != _VAMANA_HEADER_BYTES:
+        return None
+    expected_size = int.from_bytes(buf[0:8], "little")
+    max_degree = int.from_bytes(buf[8:12], "little")
+    start = int.from_bytes(buf[12:16], "little")
+    frozen_pts = int.from_bytes(buf[16:24], "little")
+    return file_size, expected_size, max_degree, start, frozen_pts
+
+
+def step_vamana(cfg):
+    from alayalite import vamana
+
+    name = cfg["name"]
+    degree = cfg["degree"]
+    target_path = cfg["vamana"]
+
+    # Idempotence: skip if the target file exists with a valid DiskANN
+    # header matching the expected degree. This preserves the external-
+    # DiskANN trajectory (gist_diskann.toml) where the .index file is
+    # pre-built by upstream DiskANN and must not be overwritten.
+    if os.path.exists(target_path):
+        parsed = _read_vamana_header(target_path)
+        if parsed is not None:
+            file_size, expected_size, max_degree, _start, frozen_pts = parsed
+            if (
+                file_size == expected_size
+                and max_degree == degree
+                and frozen_pts == 0
+            ):
+                warn(
+                    name,
+                    f"Vamana graph already valid at {target_path} "
+                    f"(R={max_degree}, {file_size:,} bytes). Skipping build.",
+                )
+                return
+            warn(
+                name,
+                f"Vamana graph at {target_path} is stale "
+                f"(expected R={degree}, frozen=0; got R={max_degree}, "
+                f"frozen={frozen_pts}, size={file_size}/{expected_size}). "
+                f"Rebuilding.",
+            )
+        else:
+            warn(
+                name,
+                f"Vamana graph at {target_path} has a malformed header. "
+                f"Rebuilding.",
+            )
+
+    # target_path may be a plain filename (relative to cwd) with no parent
+    # component; os.makedirs("", ...) raises FileNotFoundError, so gate on
+    # a non-empty dirname.
+    parent = os.path.dirname(target_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    info(
+        name,
+        f"Building Vamana graph R{degree} L{cfg['build_vamana_L']} "
+        f"α={cfg['build_vamana_alpha']} seed={cfg['build_vamana_seed']} "
+        f"threads={cfg['build_vamana_num_threads']} "
+        f"budget={cfg['build_vamana_dram_budget_gb']}GiB → {target_path}",
+    )
+    t1 = time()
+    try:
+        vamana.build_index(
+            data_path=cfg["base"],
+            output_path=target_path,
+            R=degree,
+            L=cfg["build_vamana_L"],
+            alpha=cfg["build_vamana_alpha"],
+            seed=cfg["build_vamana_seed"],
+            num_threads=cfg["build_vamana_num_threads"],
+            dram_budget_gb=cfg["build_vamana_dram_budget_gb"],
+        )
+    except MemoryError as e:
+        # Surface a clearer hint for the partition-budget path's OOM case.
+        raise MemoryError(
+            f"Vamana build ran out of memory. Consider lowering "
+            f"[build_vamana].dram_budget_gb (currently "
+            f"{cfg['build_vamana_dram_budget_gb']}) to force a larger "
+            f"number of shards. Underlying error: {e}"
+        ) from e
+    success(name, f"Vamana graph done in {time() - t1:.1f}s → {target_path}")
 
 
 def step_pca(cfg):
@@ -441,6 +587,7 @@ def step_search(cfg):
 
 
 STEP_FUNCS = {
+    "vamana": step_vamana,
     "pca": step_pca,
     "medoid": step_medoid,
     "index": step_index,

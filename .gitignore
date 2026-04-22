@@ -44,6 +44,11 @@ venv*/**
 # data
 data/*
 
+# Laser reproduce configs: paths are machine-specific (dev-box hard-coded).
+# Only gist.toml is tracked as the canonical example; copy + edit locally.
+examples/laser/configs/*.toml
+!examples/laser/configs/gist.toml
+
 # codecov
 .coverage
 coverage.xml

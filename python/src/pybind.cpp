@@ -30,6 +30,12 @@
 #include "alayalite/laser/_bindings.hpp"
 #endif
 
+// Vamana builder bindings. Not gated on ALAYA_ENABLE_LASER because the
+// builder is header-only (no libaio, no Linux-only dependencies) and the
+// spec requires `from alayalite import vamana` to succeed on non-Laser
+// builds as well.
+#include "alayalite/vamana/_bindings.hpp"
+
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "index/index_type.hpp"
 // #include "reg.hpp"
@@ -56,6 +62,11 @@ PYBIND11_MODULE(_alayalitepy, m) {
   auto laser_mod = m.def_submodule("laser", "Laser on-disk QG index");
   alaya::laser::bindings::register_laser_module(laser_mod);
 #endif
+
+  // Vamana graph builder — produces a DiskANN-format .index file.
+  // Registered unconditionally; the builder has no Linux-only deps.
+  auto vamana_mod = m.def_submodule("vamana", "Vamana graph builder");
+  alaya::vamana::bindings::register_vamana_module(vamana_mod);
 
   // define version info
 #ifdef VERSION_INFO
