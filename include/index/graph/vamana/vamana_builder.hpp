@@ -95,15 +95,14 @@ class VamanaBuilder {
              params_.num_threads,
              medoid_);
 
-    if (params_.alpha > 1.0f) {
-      LOG_INFO("Pass 1/2: alpha=1.0");
-      link(1.0f);
-      LOG_INFO("Pass 2/2: alpha={}", params_.alpha);
-      link(params_.alpha);
-    } else {
-      LOG_INFO("Pass 1/1: alpha={}", params_.alpha);
-      link(params_.alpha);
-    }
+    // Single-pass link aligned with DiskANN v0.7.0 (df225d3) — the α ramp
+    // (cur_alpha ∈ {1.0, ..., alpha}) lives inside occlude_list, not as an
+    // outer loop. Previous two-pass dispatch (link(1.0) then link(alpha))
+    // left ~8x more orphans because Pass 1's α=1.0 pruning yielded a graph
+    // from which Pass 2's greedy search could no longer reach the isolated
+    // nodes. See graph_diff log in full_test/stage1_smoke/.
+    LOG_INFO("Link pass: alpha={}", params_.alpha);
+    link(params_.alpha);
   }
 
   const std::vector<std::vector<uint32_t>> &graph() const { return graph_; }
@@ -243,14 +242,13 @@ class VamanaBuilder {
       s.id_scratch.clear();
       s.dist_scratch.clear();
       // Do NOT skip `m == query_id` here. DiskANN lets the query itself
-      // enter the candidate pool when it is reachable through a neighbor,
-      // which makes Pass 2 of the two-pass α build re-expand the query's
-      // own Pass-1 neighbors (populating the pruning pool with the
-      // currently closest candidates). search_for_point_and_prune strips
-      // self from the pool right before prune_neighbors, so correctness
-      // is preserved. Skipping here caused a ~0.17 avg-degree deficit and
-      // ~2x orphan-count excess vs the DiskANN reference; see
-      // openspec/changes/port-diskann-vamana Gate 1 report.
+      // enter the candidate pool when reachable through a neighbor, which
+      // populates the pruning pool with the currently-closest candidates.
+      // search_for_point_and_prune strips self from the pool right before
+      // prune_neighbors, so correctness is preserved. Skipping here caused
+      // a ~0.17 avg-degree deficit and ~2x orphan-count excess vs the
+      // DiskANN reference; see openspec/changes/port-diskann-vamana Gate 1
+      // report.
       for (uint32_t m : nbrs) {
         if (visit(m)) {
           s.id_scratch.push_back(m);

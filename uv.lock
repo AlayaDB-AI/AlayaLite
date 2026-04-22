@@ -16,7 +16,6 @@ source = { editable = "." }
 dependencies = [
     { name = "pandas", version = "2.0.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
     { name = "pandas", version = "2.2.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.9'" },
-    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.dev-dependencies]
@@ -50,6 +49,7 @@ dev = [
     { name = "scikit-learn", version = "1.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
     { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "tqdm" },
     { name = "uvicorn", version = "0.33.0", source = { registry = "https://pypi.org/simple" }, extra = ["standard"], marker = "python_full_version < '3.9'" },
     { name = "uvicorn", version = "0.37.0", source = { registry = "https://pypi.org/simple" }, extra = ["standard"], marker = "python_full_version >= '3.9'" },
@@ -66,6 +66,7 @@ laser = [
     { name = "scikit-learn", version = "1.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.9.*'" },
     { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
     { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "tqdm" },
 ]
 lint = [
@@ -80,10 +81,7 @@ test = [
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "pandas", specifier = ">=1.3.3" },
-    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
-]
+requires-dist = [{ name = "pandas", specifier = ">=1.3.3" }]
 
 [package.metadata.requires-dev]
 api = [
@@ -104,6 +102,7 @@ dev = [
     { name = "pytest-cov" },
     { name = "ruff" },
     { name = "scikit-learn", specifier = ">=1.3" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
     { name = "tqdm", specifier = ">=4.65" },
     { name = "uvicorn", extras = ["standard"] },
 ]
@@ -112,6 +111,7 @@ laser = [
     { name = "matplotlib", specifier = ">=3.7.5" },
     { name = "psutil", specifier = ">=5.9" },
     { name = "scikit-learn", specifier = ">=1.3" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
     { name = "tqdm", specifier = ">=4.65" },
 ]
 lint = [{ name = "ruff" }]
