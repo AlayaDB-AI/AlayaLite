@@ -239,15 +239,37 @@ inline uint64_t merge_shards(
   // advance through per-node `[k, nbrs[k]]` records. Because each shard's
   // idmap is sorted ascending and we iterate global ids ascending, each
   // shard's reader is consumed in shard-local order 0..shard_size-1.
+  //
+  // As we open each reader, also harvest the shard-local medoid from the
+  // header (offset 12, uint32) and translate to a global id via the shard's
+  // idmap — DiskANN's `merge_shards` (disk_utils.cpp:389) uses these to
+  // populate the `_medoids.bin` auxiliary file written at the end.
   std::vector<std::ifstream> readers(nshards);
   std::vector<size_t> shard_cursor(nshards, 0);
+  std::vector<uint32_t> shard_medoids_global(nshards, 0);
   for (size_t s = 0; s < nshards; ++s) {
     readers[s].open(shard_graph_paths[s], std::ios::binary);
     if (!readers[s].is_open()) {
       throw std::runtime_error("merge_shards: cannot open shard graph " +
                                shard_graph_paths[s].string());
     }
-    readers[s].seekg(24, std::ios::beg);  // skip header
+    readers[s].seekg(12, std::ios::beg);
+    uint32_t shard_local_medoid = 0;
+    readers[s].read(reinterpret_cast<char *>(&shard_local_medoid),
+                    sizeof(uint32_t));
+    if (!readers[s].good()) {
+      throw std::runtime_error("merge_shards: cannot read shard medoid: " +
+                               shard_graph_paths[s].string());
+    }
+    if (shard_local_medoid >= idmaps[s].size()) {
+      throw std::runtime_error(
+          "merge_shards: shard " + std::to_string(s) +
+          " medoid (local " + std::to_string(shard_local_medoid) +
+          ") is out of range for idmap size " +
+          std::to_string(idmaps[s].size()));
+    }
+    shard_medoids_global[s] = idmaps[s][shard_local_medoid];
+    readers[s].seekg(24, std::ios::beg);  // skip to per-node records
   }
 
   // Open output. Reserve 24 bytes for the header; patch bytes 0..7 after
@@ -341,6 +363,32 @@ inline uint64_t merge_shards(
     throw std::runtime_error("merge_shards: write error on output");
   }
   out.close();
+
+  // DiskANN-format medoids file: uint32 nshards, uint32 1 (stride),
+  // nshards × uint32 global_medoid. Path = `<output>_medoids.bin`,
+  // matching disk_utils.cpp:376's destination. Consumers (DiskANN SSD
+  // search, PQ flash index) use this for multi-entry-point init.
+  const std::filesystem::path medoids_path(
+      output_path.string() + "_medoids.bin");
+  {
+    std::ofstream mf(medoids_path, std::ios::binary | std::ios::trunc);
+    if (!mf.is_open()) {
+      throw std::runtime_error("merge_shards: cannot open medoids file: " +
+                               medoids_path.string());
+    }
+    const uint32_t nshards_u32 = static_cast<uint32_t>(nshards);
+    const uint32_t one_stride = 1;
+    mf.write(reinterpret_cast<const char *>(&nshards_u32), sizeof(uint32_t));
+    mf.write(reinterpret_cast<const char *>(&one_stride), sizeof(uint32_t));
+    mf.write(reinterpret_cast<const char *>(shard_medoids_global.data()),
+             static_cast<std::streamsize>(nshards) * sizeof(uint32_t));
+    if (!mf.good()) {
+      throw std::runtime_error("merge_shards: write error on " +
+                               medoids_path.string());
+    }
+  }
+  LOG_INFO("merge_shards: wrote medoids to {} ({} entries)",
+           medoids_path.string(), nshards);
 
   if (missing_nodes > 0) {
     LOG_WARN("merge_shards: {} node id(s) absent from all shards (wrote k=0)",

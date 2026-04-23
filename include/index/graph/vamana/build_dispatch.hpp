@@ -192,15 +192,16 @@ inline void gen_random_slice(const std::string &path,
   }
 }
 
-// Per DiskANN: single-shard RAM ≈ data_bytes + R * N * sizeof(uint32_t)
-// plus ~1.3× transient graph overhead during link. We use the same
-// formula + a 1.3 safety factor to decide if we must partition.
+// estimate_single_shard_gb — thin wrapper around the shared RAM formula in
+// budget_estimator.hpp. Historically this used a simplified formula (no
+// ROUND_UP(dim,8), no per-node locks, no 1.1× overhead) that could disagree
+// with the inner `partition_with_ram_budget` loop near the budget boundary
+// and produce a different dispatch decision than DiskANN would make. The
+// wrapper guarantees top-level dispatch and the inner budget loop use the
+// same bytes-per-shard estimate.
 inline double estimate_single_shard_gb(uint32_t num, uint32_t dim, uint32_t R) {
-  const double data_bytes =
-      static_cast<double>(num) * static_cast<double>(dim) * sizeof(float);
-  const double graph_bytes =
-      static_cast<double>(num) * static_cast<double>(R) * sizeof(uint32_t) * 1.3;
-  return (data_bytes + graph_bytes) / (1024.0 * 1024.0 * 1024.0);
+  return alaya::vamana::estimate_ram_usage_gib(
+      static_cast<size_t>(num), dim, sizeof(float), R);
 }
 
 // run_single_shard — Phase 1 path. Loads full .fbin, builds Vamana, saves.
@@ -292,6 +293,37 @@ inline void run_partition_merge(const BuildVamanaParams &args, uint32_t num, uin
       dim, bp, pivots);
   LOG_INFO("partition path: frozen num_parts={}", num_parts);
 
+  // Write pivots alongside the merged output. DiskANN's
+  // `build_merged_vamana_index` (disk_utils.cpp:694) renames the pivot file
+  // from `<tempFiles>_centroids.bin` into `<centroids_file>`; we write
+  // directly to `<output>_centroids.bin` — same byte layout as
+  // `diskann::save_bin<float>` (utils.h:719): int32 num_parts,
+  // int32 dim, float32[num_parts * dim]. Downstream tools
+  // (e.g. DiskANN's `search_memory_index` sharded init) rely on this file.
+  const std::filesystem::path centroids_path =
+      out_path.parent_path() /
+      (out_path.filename().string() + "_centroids.bin");
+  {
+    std::ofstream cf(centroids_path, std::ios::binary | std::ios::trunc);
+    if (!cf.is_open()) {
+      throw std::runtime_error("cannot open centroids file: " +
+                               centroids_path.string());
+    }
+    const int32_t np = static_cast<int32_t>(num_parts);
+    const int32_t dd = static_cast<int32_t>(dim);
+    cf.write(reinterpret_cast<const char *>(&np), sizeof(int32_t));
+    cf.write(reinterpret_cast<const char *>(&dd), sizeof(int32_t));
+    cf.write(reinterpret_cast<const char *>(pivots.data()),
+             static_cast<std::streamsize>(num_parts) *
+                 static_cast<std::streamsize>(dim) * sizeof(float));
+    if (!cf.good()) {
+      throw std::runtime_error("write error on centroids file: " +
+                               centroids_path.string());
+    }
+  }
+  LOG_INFO("wrote centroids: {} ({} × {})",
+           centroids_path.string(), num_parts, dim);
+
   // Free sample memory before streaming assignment (which may allocate a
   // 512MB read buffer).
   train_sample = {};
@@ -323,9 +355,14 @@ inline void run_partition_merge(const BuildVamanaParams &args, uint32_t num, uin
     alaya::vamana::VamanaBuilder b(shard_data.data(), snum, sdim, vp);
     b.build();
 
+    // File naming matches DiskANN's `build_merged_vamana_index`
+    // (`disk_utils.cpp:712`): `<prefix>_subshard-<i>_mem.index`. Using the
+    // same suffix lets DiskANN's `search_memory_index` and AlayaLite's
+    // `diff_vamana_index.py` consume these per-shard graphs without a
+    // naming shim.
     const std::filesystem::path graph_path =
         work_dir /
-        (std::string("s_subshard-") + std::to_string(s) + "_graph.index");
+        (std::string("s_subshard-") + std::to_string(s) + "_mem.index");
     alaya::vamana::save_graph(b.graph(), graph_path, shard_R, b.medoid());
     shard_graphs[s] = graph_path;
     LOG_INFO("shard {}/{} built + saved in {}s -> {}",

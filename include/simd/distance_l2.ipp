@@ -115,6 +115,41 @@ inline auto l2_sqr_avx2(const float *__restrict x, const float *__restrict y, si
   return result;
 }
 
+#ifdef ALAYA_ARCH_X86
+// l2_sqr_avx2_diskann_compat — byte-compatible with DiskANN v0.7.0
+// `DistanceL2Float::compare` (include/simd_utils.h + src/distance.cpp:177).
+// Uses a single accumulator and DiskANN's `_mm256_reduce_add_ps` reduction
+// order so the FP rounding matches bit-for-bit. This is ~4× slower than
+// our ILP-heavy kernel and exists only for byte-identical alignment runs
+// (enabled via ALAYA_FORCE_DISKANN_COMPAT_L2=1).
+ALAYA_NOINLINE
+ALAYA_TARGET_AVX2
+inline auto l2_sqr_avx2_diskann_compat(const float *__restrict x,
+                                       const float *__restrict y,
+                                       size_t dim) -> float {
+  const size_t niters = dim / 8;
+  __m256 sum = _mm256_setzero_ps();
+  for (size_t j = 0; j < niters; ++j) {
+    __m256 a = _mm256_loadu_ps(x + 8 * j);
+    __m256 b = _mm256_loadu_ps(y + 8 * j);
+    __m256 diff = _mm256_sub_ps(a, b);
+    sum = _mm256_fmadd_ps(diff, diff, sum);
+  }
+  // Reduction identical to DiskANN's _mm256_reduce_add_ps (simd_utils.h:95-105)
+  const __m128 x128 = _mm_add_ps(_mm256_extractf128_ps(sum, 1), _mm256_castps256_ps128(sum));
+  const __m128 x64 = _mm_add_ps(x128, _mm_movehl_ps(x128, x128));
+  const __m128 x32 = _mm_add_ss(x64, _mm_shuffle_ps(x64, x64, 0x55));
+  float result = _mm_cvtss_f32(x32);
+  // Tail: DiskANN assumes size % 8 == 0, but we add a scalar loop for safety.
+  // On our workloads (GIST 960d, synth 512d) this loop never executes.
+  for (size_t i = niters * 8; i < dim; ++i) {
+    float d = x[i] - y[i];
+    result += d * d;
+  }
+  return result;
+}
+#endif
+
 // AVX-512 Implementation (Optimized with 4 accumulators + loop unrolling)
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX512
@@ -677,6 +712,22 @@ inline auto l2_sqr_sq4_avx512(const uint8_t *__restrict x,
 
 inline auto get_l2_sqr_func() -> L2SqrFunc {
   static const L2SqrFunc kFunc = []() -> L2SqrFunc {
+    // Debug/diagnostic: env var to force the scalar kernel so SIMD-induced
+    // ULP-level noise can be isolated during DiskANN byte-identical alignment
+    // experiments. Cost is ~20-30× slower L2 — only use for alignment tests.
+    if (const char *force = std::getenv("ALAYA_FORCE_SCALAR_L2");
+        force != nullptr && force[0] == '1' && force[1] == '\0') {
+      return l2_sqr_generic;
+    }
+#ifdef ALAYA_ARCH_X86
+    // Byte-identical-with-DiskANN mode: use the same 1-accumulator AVX2
+    // kernel + reduction as DiskANN to remove the last ULP-level divergence
+    // in the Vamana build. Still FMA, so faster than scalar.
+    if (const char *force = std::getenv("ALAYA_FORCE_DISKANN_COMPAT_L2");
+        force != nullptr && force[0] == '1' && force[1] == '\0') {
+      return l2_sqr_avx2_diskann_compat;
+    }
+#endif
 #ifdef ALAYA_ARCH_X86
     const auto &f = get_cpu_features();
     switch (select_fp32_distance_level(f, get_distance_dispatch_policy())) {

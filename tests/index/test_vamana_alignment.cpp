@@ -503,11 +503,11 @@ int final_exit_code(const Verdict &v) {
   return 0;
 }
 
-// Count AlayaLite shard-graph files `<prefix>_subshard-<i>_graph.index`
+// Count AlayaLite shard-graph files `<prefix>_subshard-<i>_mem.index`
 // written by build_vamana_index's partition path. The naming convention
-// mirrors `shard_assigner::shard_data_path` composed with the `_graph.index`
-// suffix set by the CLI when it invokes `save_graph` on each per-shard
-// build result. Returns the number of matching files found.
+// mirrors DiskANN's `build_merged_vamana_index` (`disk_utils.cpp:712`),
+// so DiskANN's `search_memory_index` can also consume these files.
+// Returns the number of matching files found.
 uint32_t count_alaya_shards(const std::filesystem::path &work_dir) {
   if (!std::filesystem::exists(work_dir) || !std::filesystem::is_directory(work_dir)) {
     return 0;
@@ -516,10 +516,10 @@ uint32_t count_alaya_shards(const std::filesystem::path &work_dir) {
   for (const auto &entry : std::filesystem::directory_iterator(work_dir)) {
     if (!entry.is_regular_file()) continue;
     const std::string name = entry.path().filename().string();
-    // Accept both `<prefix>_subshard-<i>_graph.index` (what the CLI writes
-    // under the work dir) and the shorter `s_subshard-<i>_graph.index` used
-    // by the CLI default prefix. The suffix is the reliable discriminator.
-    const std::string suffix = "_graph.index";
+    // The `_mem.index` suffix matches DiskANN's shard graph naming; the
+    // `_subshard-` infix is the reliable discriminator against unrelated
+    // `.index` files the work dir might accumulate.
+    const std::string suffix = "_mem.index";
     if (name.size() > suffix.size() &&
         name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0 &&
         name.find("_subshard-") != std::string::npos) {
