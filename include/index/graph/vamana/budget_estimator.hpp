@@ -97,7 +97,13 @@ struct BudgetLoopParams {
   double sampling_rate = 0.01;     // fraction of base data used for train/test
   double ram_budget_gib = 32.0;    // per-shard build budget (GiB)
   KMeansParams base_kmeans{};      // .seed, .max_reps carry through; .num_centers is overridden
-  size_t max_num_parts = 256;      // safety cap on the growth loop
+  // Safety cap on the growth loop. 1024 is enough for GIST 1M at 0.1 GiB
+  // budget (which lands near ~250 shards) plus comfortable headroom for
+  // BIGANN-100M-class experiments. Raise further only if a real workload
+  // needs it; a runaway loop at > 1024 almost always indicates a
+  // misconfigured budget (too small) or sampling rate (too low → kmeans
+  // can't balance).
+  size_t max_num_parts = 1024;
 };
 
 // determine_num_parts_with_ram_budget — DiskANN's

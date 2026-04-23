@@ -101,6 +101,15 @@ class VamanaBuilder {
     // left ~8x more orphans because Pass 1's α=1.0 pruning yielded a graph
     // from which Pass 2's greedy search could no longer reach the isolated
     // nodes. See graph_diff log in full_test/stage1_smoke/.
+    //
+    // Do NOT switch to 2-pass without re-reading the validation study at
+    // openspec/changes/archive/2026-04-22-sharded-vamana-validation/design.md.
+    // Upstream DiskANN post-v0.7.0 (f198a8a5) added a 2-pass wrapper in
+    // build_with_data_populated (index.cpp:1561-1575). Our empirical
+    // measurement on GIST 1M (3 shard-count regimes, 2 search paths, NUMA-
+    // pinned) shows 2-pass helps only in an extreme-sharding + low-L_search
+    // corner that Laser users don't hit; and 1-pass is 2.7× faster to build.
+    // Changing this without new data is a regression.
     LOG_INFO("Link pass: alpha={}", params_.alpha);
     link(params_.alpha);
   }
