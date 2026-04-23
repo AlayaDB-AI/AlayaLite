@@ -187,6 +187,8 @@ def load_config(toml_path, cli_args):
         "build_vamana_dram_budget_gb": resolve_build_vamana(
             "dram_budget_gb", "build_vamana_dram_budget_gb"
         ),
+        "pca_seed": raw.get("pca_seed"),
+        "seed": raw.get("seed"),
     }
 
 
