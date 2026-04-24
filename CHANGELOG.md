@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Build-time `ALAYA_ENABLE_LASER` CMake option (default ON on Linux).
   Adds a new system build dependency on `libaio-dev` for Linux builds
   when the option is ON.
-- `scripts/gen_synth_100k_512d.py` — synthetic dataset generator used
-  as a secondary alignment judge for the Laser port.
+- `scripts/laser_alignment/gen_synth_100k_512d.py` — synthetic dataset
+  generator used as a secondary alignment judge for the Laser port.
 
 ## [0.1.1-alpha1] - 2026-01-28
 

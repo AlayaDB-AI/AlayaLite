@@ -15,7 +15,7 @@ import sys
 from time import time
 
 # tomllib is stdlib from Python 3.11 onwards; fall back to the tomli backport
-# on older interpreters (AlayaLite supports 3.8+ per pyproject.toml).
+# on 3.9 / 3.10 (the oldest supported interpreters per pyproject.toml).
 if sys.version_info >= (3, 11):
     import tomllib
 else:
@@ -141,10 +141,58 @@ def load_config(toml_path, cli_args):
     def resolve_build(key, cli_val):
         if cli_val is not None:
             return cli_val
+        # TOML root takes precedence over [build] so seed/thread invariants
+        # (pca_seed, build_threads, ...) stay visible at a glance.
+        if key in raw:
+            return raw[key]
         return build.get(key, DEFAULTS[key])
 
     def resolve_build_vamana(toml_key, defaults_key):
         return build_vamana.get(toml_key, DEFAULTS[defaults_key])
+
+    pca_seed = raw.get("pca_seed")
+    medoid_seed = raw.get("medoid_seed")
+    rotator_seed = int(raw.get("rotator_seed", 0))
+    force_single_thread = bool(raw.get("force_single_thread", False))
+    dump_rotator = bool(raw.get("dump_rotator", False))
+
+    build_threads_resolved = resolve_build("build_threads", cli_args.build_threads)
+
+    # `qg_builder`'s `#pragma omp parallel for num_threads(num_threads_)`
+    # overrides OMP_NUM_THREADS, so process-level single-thread pinning is
+    # silently defeated unless build_threads is also 1. Fail loudly.
+    if force_single_thread and int(build_threads_resolved) != 1:
+        raise ValueError(
+            f"force_single_thread=true requires build_threads=1 "
+            f"(got build_threads={build_threads_resolved!r})."
+        )
+
+    # force_single_thread signals "I want byte-reproducible builds". Any
+    # unseeded RNG silently defeats that intent, so require all three
+    # seeds explicitly rather than falling back to defaults.
+    if force_single_thread:
+        missing_seeds = [
+            key for key, val in (
+                ("pca_seed", pca_seed),
+                ("medoid_seed", medoid_seed),
+            ) if val is None
+        ]
+        if rotator_seed == 0:
+            missing_seeds.append("rotator_seed (nonzero)")
+        if missing_seeds:
+            raise ValueError(
+                f"force_single_thread=true requires explicit seeds, "
+                f"missing: {missing_seeds}"
+            )
+
+    # dump_rotator with an unseeded rotator produces a different file
+    # every run, which is useless for the byte-equality comparison that
+    # dump_rotator exists to support. Catch this at config load.
+    if dump_rotator and rotator_seed == 0:
+        raise ValueError(
+            "dump_rotator=true requires rotator_seed ≠ 0 "
+            "(unseeded rotator produces a different dump every run)."
+        )
 
     name = ds["name"]
     output = paths["output"]
@@ -168,7 +216,7 @@ def load_config(toml_path, cli_args):
         "gt": paths["gt"],
         "vamana": vamana_path,
         "output": output,
-        "build_threads": resolve_build("build_threads", cli_args.build_threads),
+        "build_threads": build_threads_resolved,
         "ef_indexing": resolve_build("ef_indexing", cli_args.ef_indexing),
         "topk": resolve_search("topk", cli_args.topk),
         "threads": resolve_search("threads", cli_args.threads),
@@ -187,7 +235,11 @@ def load_config(toml_path, cli_args):
         "build_vamana_dram_budget_gb": resolve_build_vamana(
             "dram_budget_gb", "build_vamana_dram_budget_gb"
         ),
-        "pca_seed": raw.get("pca_seed"),
+        "pca_seed": pca_seed,
+        "medoid_seed": medoid_seed,
+        "rotator_seed": rotator_seed,
+        "force_single_thread": force_single_thread,
+        "dump_rotator": dump_rotator,
         "seed": raw.get("seed"),
     }
 
@@ -339,11 +391,9 @@ def step_pca(cfg):
 
     os.makedirs(ddir, exist_ok=True)
     info(name, f"Loading base vectors from {cfg['base']}")
-    # Seed the PCA training-sample selection so baselines are byte-reproducible.
-    # Upstream Laser leaves np.random.choice on the uninitialised global state,
-    # which produces different PCA components on every run; see
-    # openspec/changes/port-laser-disk-index/design.md D10.
-    vectors, sample_vecs = sample_vectors_from_fbin(cfg["base"], seed=cfg.get("pca_seed", 42))
+    # seed=None falls through to numpy's global RNG (non-deterministic) —
+    # reproducible runs must set pca_seed in the TOML.
+    vectors, sample_vecs = sample_vectors_from_fbin(cfg["base"], seed=cfg["pca_seed"])
     _, d = vectors.shape
     info(
         name, f"Vectors: {vectors.shape[0]:,} x {d}d, samples: {sample_vecs.shape[0]:,}"
@@ -378,7 +428,7 @@ def step_medoid(cfg):
     t1 = time()
     generate_and_save_medoids(
         base_path, indices_path, vectors_path, cfg["ep_num"],
-        seed=cfg.get("pca_seed", 42),
+        seed=cfg["medoid_seed"],
     )
     success(name, f"Medoid done in {time() - t1:.1f}s")
 
@@ -403,6 +453,17 @@ def step_index(cfg):
     N, D = base.shape
     info(name, f"Vectors: {N:,} x {D}d")
 
+    rotator_seed = cfg["rotator_seed"]
+    rotator_dump_path = (
+        f"{ddir}/dsqg_{name}_rotator_signs.bin" if cfg["dump_rotator"] else ""
+    )
+    if rotator_seed or rotator_dump_path:
+        info(
+            name,
+            f"alignment-mode: rotator_seed={rotator_seed}  "
+            f"dump_path={rotator_dump_path or '(off)'}",
+        )
+
     t1 = time()
     index = laser.Index(
         index_type="QG",
@@ -411,6 +472,8 @@ def step_index(cfg):
         main_dimension=md,
         dimension=D,
         degree_bound=degree,
+        rotator_seed=rotator_seed,
+        rotator_dump_path=rotator_dump_path,
     )
     index_path = f"{ddir}/dsqg_{name}"
     index.build_index(
@@ -597,6 +660,55 @@ STEP_FUNCS = {
 }
 
 
+_SINGLE_THREAD_LIMITER = None
+
+
+def apply_single_thread_invariant():
+    """Force the process into single-thread mode and assert observed state.
+
+    Byte-reproducible builds need OpenMP, BLAS/MKL, and faiss all pinned
+    at 1 thread BEFORE any parallel region runs (IncrementalPCA, faiss
+    k-means, QG link). Env-level OMP_NUM_THREADS=1 covers most cases,
+    but faiss needs a direct `omp_set_num_threads(1)` call, and
+    `qg_builder`'s `num_threads(num_threads_)` pragma is only neutralised
+    by `build_threads=1` in the TOML (see config-load fail-fast above).
+
+    Asserts the observed thread counts all land at 1; raises on mismatch.
+    """
+    import faiss
+    import threadpoolctl
+
+    faiss.omp_set_num_threads(1)
+    # Keep a module-level reference to the limiter so it outlives this
+    # function. `threadpool_limits` is a context manager; the limit is
+    # removed via `__exit__`, and some threadpoolctl versions wire that
+    # into `__del__`. Holding the reference sidesteps both and keeps the
+    # single-thread pin in place for every downstream pipeline step.
+    global _SINGLE_THREAD_LIMITER  # noqa: PLW0603
+    _SINGLE_THREAD_LIMITER = threadpoolctl.threadpool_limits(limits=1)
+
+    faiss_n = faiss.omp_get_max_threads()
+    omp_n = None
+    blas_report = []
+    for pool in threadpoolctl.threadpool_info():
+        if pool["user_api"] == "openmp":
+            omp_n = pool["num_threads"]
+        if pool["user_api"] == "blas":
+            blas_report.append((pool["prefix"], pool["num_threads"]))
+
+    print(
+        f"[single-thread self-check] faiss.omp_get_max_threads={faiss_n}  "
+        f"openmp.num_threads={omp_n}  "
+        f"blas={blas_report}",
+        flush=True,
+    )
+
+    assert faiss_n == 1, f"faiss.omp_get_max_threads() = {faiss_n}, expected 1"
+    assert omp_n == 1, f"openmp.num_threads = {omp_n}, expected 1"
+    for prefix, n in blas_report:
+        assert n == 1, f"blas/{prefix} num_threads = {n}, expected 1"
+
+
 def main():
     args = parse_args()
     steps = STEPS if "all" in args.steps else args.steps
@@ -605,6 +717,9 @@ def main():
         cfg = load_config(toml_path, args)
         header(f"{cfg['name']}  ({toml_path})")
         print_config(cfg)
+
+        if cfg["force_single_thread"]:
+            apply_single_thread_invariant()
 
         for step in steps:
             step_header(step)

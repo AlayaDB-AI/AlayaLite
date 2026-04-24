@@ -182,7 +182,14 @@ class QuantizedGraph {
     ) const;
 
    public:
-    explicit QuantizedGraph(size_t, size_t, size_t, size_t);
+    explicit QuantizedGraph(
+        size_t num,
+        size_t max_deg,
+        size_t main_dim,
+        size_t dim,
+        uint64_t rotator_seed = 0,
+        std::string rotator_dump_path = ""
+    );
 
     ~QuantizedGraph();
 
@@ -236,15 +243,29 @@ class QuantizedGraph {
     }
 };
 
-inline QuantizedGraph::QuantizedGraph(size_t num, size_t max_deg, size_t main_dim, size_t dim)
+inline QuantizedGraph::QuantizedGraph(
+    size_t num,
+    size_t max_deg,
+    size_t main_dim,
+    size_t dim,
+    uint64_t rotator_seed,
+    std::string rotator_dump_path
+)
     : num_points_(num)
     , degree_bound_(max_deg)
     , dimension_(main_dim)
     , residual_dimension_(dim - dimension_)  // Residual dimension for extended vector representation (e.g., for GIST dataset)
     , padded_dim_(1 << ceil_log2(dimension_))
     , scanner_(padded_dim_, degree_bound_)
-    , rotator_(dimension_)
+    , rotator_(dimension_, rotator_seed)
     , node_len_((32 * dimension_ + 32 * residual_dimension_ + 128 * degree_bound_ + degree_bound_ * padded_dim_) / 8) {
+    // Dump the rotator's sign-scaled mat_ vector BEFORE any consumer
+    // (RaBitQ training, search path) reads from it. When `rotator_dump_path`
+    // is empty, no file is written and the on-disk dsqg.index is unchanged.
+    if (!rotator_dump_path.empty()) {
+        rotator_.dump_signs(rotator_dump_path);
+    }
+
     node_per_page_ = std::max(1, static_cast<int>(kSectorLen / node_len_));
     page_size_ = (node_per_page_ * node_len_ + kSectorLen - 1) / kSectorLen * kSectorLen;
 

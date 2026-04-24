@@ -60,6 +60,46 @@ def load_pca_params(filepath):
     return PCATransformer(mean, components)
 
 
+def _canonicalize_pca_sign(pca):
+    """Pin PCA component signs so two sklearn versions produce identical output.
+
+    sklearn's ``svd_flip`` picks per-row signs from the max-magnitude
+    element of U/VT, and that choice changed between 1.7.x and 1.8.x for
+    near-zero max elements. A flipped row inverts the matching column of
+    ``pca.transform(X)``, which cascades into every downstream artifact.
+
+    Canonical rule: ``components[i].sum() ≥ 0``. Unlike an ``argmax(|v|)``
+    rule, picking the non-negative-sum representative is robust to
+    single-element perturbations that cross two near-equal magnitudes.
+    For rows whose sum is indistinguishable from zero (intrinsic ambiguity),
+    fall back to ``argmax(|v|)`` for deterministic tie-breaking.
+
+    Limitation: this only disambiguates per-row SIGN. It cannot align two
+    differently-rotated bases of the same degenerate eigen-subspace — when
+    ``explained_variance_[i] ≈ explained_variance_[i+1]``, sklearn versions
+    may return arbitrary rotations within that subspace and the byte-equal
+    gate will fall through to the 1e-6 element-wise PCA demotion path.
+    """
+    components = pca.components_
+    row_sums = components.sum(axis=1)
+    row_norms = np.linalg.norm(components, axis=1)
+    near_zero = np.abs(row_sums) < 1e-10 * np.maximum(row_norms, 1e-20)
+    signs = np.sign(row_sums).astype(components.dtype)
+    if near_zero.any():
+        max_abs_idx = np.argmax(np.abs(components), axis=1)
+        row_indices = np.arange(components.shape[0])
+        fallback_signs = np.sign(
+            components[row_indices, max_abs_idx]
+        ).astype(components.dtype)
+        signs = np.where(near_zero, fallback_signs, signs)
+    signs[signs == 0] = 1.0
+    pca.components_ = components * signs[:, None]
+    # IncrementalPCA exposes no public API for rotating U alongside
+    # components_, but the only consumers here (save_pca_params and
+    # transform) read components_ directly, so in-place mutation suffices.
+    return pca
+
+
 def fit_incremental_pca(sample_vectors, n_components, batch_size=200000):
     """
     Fit PCA model using Incremental PCA for memory efficiency.
@@ -70,7 +110,7 @@ def fit_incremental_pca(sample_vectors, n_components, batch_size=200000):
         batch_size: Number of vectors processed per batch
 
     Returns:
-        Fitted IncrementalPCA model
+        Fitted IncrementalPCA model (with canonical component signs).
     """
     n_samples = sample_vectors.shape[0]
     ipca = IncrementalPCA(
@@ -79,6 +119,7 @@ def fit_incremental_pca(sample_vectors, n_components, batch_size=200000):
     for i in tqdm(range(0, n_samples, batch_size), desc="Training IncrementalPCA"):
         end_idx = min(i + batch_size, n_samples)
         ipca.partial_fit(sample_vectors[i:end_idx])
+    _canonicalize_pca_sign(ipca)
     return ipca
 
 

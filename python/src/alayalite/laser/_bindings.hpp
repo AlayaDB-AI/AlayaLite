@@ -52,7 +52,9 @@ struct Index {
         size_t num_points,
         size_t main_dim,
         size_t dim,
-        size_t degree
+        size_t degree,
+        uint64_t rotator_seed = 0,
+        const std::string& rotator_dump_path = ""
     ) {
         if (metric != "l2") {
             throw py::value_error("Laser Index: only metric='l2' is supported, got '" + metric + "'");
@@ -64,7 +66,9 @@ struct Index {
         if (index_type != "QG") {
             throw py::value_error("Laser Index: only index_type='QG' is supported, got '" + index_type + "'");
         }
-        index = std::make_unique<alaya::laser::QuantizedGraph>(num_points, degree, main_dim, dim);
+        index = std::make_unique<alaya::laser::QuantizedGraph>(
+            num_points, degree, main_dim, dim, rotator_seed, rotator_dump_path
+        );
     }
 
     void load(const std::string& filename, float search_DRAM_budget) const {
@@ -116,13 +120,23 @@ inline void register_laser_module(py::module_& m) {
 
     py::class_<Index>(m, "Index")
         .def(
-            py::init<const std::string&, const std::string&, size_t, size_t, size_t, size_t>(),
+            py::init<
+                const std::string&,
+                const std::string&,
+                size_t,
+                size_t,
+                size_t,
+                size_t,
+                uint64_t,
+                const std::string&>(),
             py::arg("index_type"),
             py::arg("metric"),
             py::arg("num_elements"),
             py::arg("main_dimension"),
             py::arg("dimension"),
-            py::arg("degree_bound") = 32
+            py::arg("degree_bound") = 32,
+            py::arg("rotator_seed") = 0,
+            py::arg("rotator_dump_path") = ""
         )
         .def("load", &Index::load, py::arg("filename"), py::arg("search_DRAM_budget"))
         .def("set_params",

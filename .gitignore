@@ -45,9 +45,12 @@ venv*/**
 data/*
 
 # Laser reproduce configs: paths are machine-specific (dev-box hard-coded).
-# Only gist.toml is tracked as the canonical example; copy + edit locally.
+# Only canonical examples + alignment-contract configs are tracked;
+# copy + edit locally for your own runs.
 examples/laser/configs/*.toml
 !examples/laser/configs/gist.toml
+!examples/laser/configs/synth_20k_768d_alayaP.toml
+!examples/laser/configs/synth_100k_512d_alayaP.toml
 
 # codecov
 .coverage

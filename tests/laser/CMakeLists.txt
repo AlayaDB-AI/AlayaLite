@@ -18,3 +18,15 @@ target_compile_options(test_laser_compile PRIVATE
 )
 
 add_test(NAME laser_test_compile COMMAND $<TARGET_FILE:test_laser_compile>)
+
+# Round-trip test for FHTRotator::dump_signs: seeded determinism,
+# seed sensitivity, and on-disk layout. See the test source for details.
+add_executable(test_rotator_dump ${CMAKE_CURRENT_SOURCE_DIR}/test_rotator_dump.cpp)
+target_link_libraries(test_rotator_dump PRIVATE alaya_laser)
+target_compile_features(test_rotator_dump PRIVATE cxx_std_20)
+target_compile_options(test_rotator_dump PRIVATE
+  -O3 -DNDEBUG -Wall -Wextra
+  ${ALAYA_LASER_CONSUMER_OPTIONS}
+)
+
+add_test(NAME laser_test_rotator_dump COMMAND $<TARGET_FILE:test_rotator_dump>)

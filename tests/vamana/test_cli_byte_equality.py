@@ -94,7 +94,7 @@ def dataset_ready() -> None:
     if not SYNTH_BASE_FBIN.exists():
         pytest.skip(
             f"synth_100k_512d dataset missing at {SYNTH_BASE_FBIN}; "
-            f"generate via scripts/gen_synth_100k_512d.py"
+            f"generate via scripts/laser_alignment/gen_synth_100k_512d.py"
         )
 
 
