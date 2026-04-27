@@ -1,0 +1,289 @@
+---
+name       : cross-platform-perf
+
+on         :
+  workflow_dispatch:
+    inputs:
+      query_num:
+        description: Number of query vectors to benchmark
+        required: false
+        default: '100'
+      topk:
+        description: Top-k per query
+        required: false
+        default: '50'
+      ef_search:
+        description: ef_search for hybrid_query
+        required: false
+        default: '100'
+      rounds:
+        description: Number of benchmark rounds
+        required: false
+        default: '3'
+      selectivity:
+        description: Target filter selectivity
+        required: false
+        default: '0.01'
+      build_threads:
+        description: Build threads (0 = auto)
+        required: false
+        default: '0'
+      query_threads:
+        description: Batch hybrid query threads
+        required: false
+        default: '1'
+
+permissions:
+  contents: read
+
+jobs       :
+  benchmark:
+    name: Benchmark on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - os: ubuntu-latest
+          arch: x86_64
+          label: ubuntu-latest
+        - os: ubuntu-24.04-arm
+          arch: aarch64
+          label: ubuntu-24.04-arm
+        - os: macos-15-intel
+          arch: x86_64
+          label: macos-15-intel
+        - os: macos-14
+          arch: arm64
+          label: macos-14
+        - os: windows-2022
+          arch: AMD64
+          label: windows-2022
+
+    env:
+      CONAN_NON_INTERACTIVE: 1
+      UV_CACHE_DIR: ./.github-tmp/uv-cache
+      ALAYALITE_BENCH_DATA_ROOT: ./.github-tmp/alayalite-bench-data
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Restore Conan cache
+      uses: ./.github/actions/cache-restore
+
+    - name: Install project dependencies
+      shell: bash
+      run: uv sync --dev
+
+    - name: Download qdrant_random_ints_1m
+      shell: bash
+      run: |
+        uv run python scripts/benchmarks/download_qdrant_filtered_dataset.py \
+          --dataset qdrant_random_ints_1m \
+          --output-dir "$ALAYALITE_BENCH_DATA_ROOT"
+
+    - name: Run Collection.hybrid_query benchmark
+      shell: bash
+      run: |
+        output_path="artifacts/raw-hybrid-collection-${{ matrix.label }}.json"
+        dataset_dir="$ALAYALITE_BENCH_DATA_ROOT/qdrant-random-ints-1m"
+        extra_args=()
+        if [ "${{ github.event.inputs.build_threads }}" != "0" ]; then
+          extra_args+=(--build-threads "${{ github.event.inputs.build_threads }}")
+        fi
+
+        uv run python scripts/benchmarks/raw_hybrid_collection_benchmark.py \
+          --dataset-dir "$dataset_dir" \
+          --query-num "${{ github.event.inputs.query_num }}" \
+          --topk "${{ github.event.inputs.topk }}" \
+          --ef-search "${{ github.event.inputs.ef_search }}" \
+          --rounds "${{ github.event.inputs.rounds }}" \
+          --selectivity "${{ github.event.inputs.selectivity }}" \
+          --query-threads "${{ github.event.inputs.query_threads }}" \
+          --output "$output_path" \
+          "${extra_args[@]}"
+
+    - name: Upload benchmark artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: raw-hybrid-collection-benchmark-${{ matrix.label }}
+        path: artifacts/raw-hybrid-collection-${{ matrix.label }}.json
+
+    - name: Append benchmark summary
+      shell: bash
+      run: |
+        python - <<'PY'
+        import json
+        from pathlib import Path
+
+        result_path = Path("artifacts/raw-hybrid-collection-${{ matrix.label }}.json")
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        benchmark = result["benchmark"]
+        dataset = result["dataset"]
+        filter_info = result["filter"]
+        platform_info = result["platform"]
+
+        lines = [
+            f"## Raw Hybrid Collection Benchmark ({platform_info['system']} / {platform_info['machine']})",
+            "",
+            "| Metric | Value |",
+            "| --- | --- |",
+            f"| Dataset | `{dataset['name']}` |",
+            f"| Data size | `{dataset['data_num']}` |",
+            f"| Dimension | `{dataset['dim']}` |",
+            f"| Queries | `{benchmark['query_num']}` |",
+            f"| Top-k | `{benchmark['topk']}` |",
+            f"| ef_search | `{benchmark['ef_search']}` |",
+            f"| Rounds | `{benchmark['rounds']}` |",
+            f"| Filter | `{filter_info['field']} <= {filter_info['threshold']}` |",
+            f"| Target selectivity | `{filter_info['target_selectivity']:.4f}` |",
+            f"| Actual selectivity | `{filter_info['actual_selectivity']:.4f}` |",
+            f"| Build seconds | `{benchmark['build_seconds']:.3f}` |",
+            f"| Median query seconds | `{benchmark['median_query_seconds']:.3f}` |",
+            f"| Median ms/query | `{benchmark['median_avg_ms_per_query']:.3f}` |",
+            f"| Median QPS | `{benchmark['median_qps']:.3f}` |",
+            "",
+            "### Per-round results",
+            "",
+            "| Round | Query Seconds | Avg ms/query | QPS |",
+            "| --- | --- | --- | --- |",
+        ]
+
+        for round_result in benchmark["round_results"]:
+            lines.append(
+                f"| {round_result['round']} | "
+                f"{round_result['query_seconds']:.3f} | "
+                f"{round_result['avg_ms_per_query']:.3f} | "
+                f"{round_result['qps']:.3f} |"
+            )
+
+        import os
+
+        summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+        with summary_path.open("a", encoding="utf-8") as summary:
+            summary.write("\n".join(lines))
+            summary.write("\n")
+        PY
+
+  aggregate-summary:
+    name: Aggregate benchmark summary
+    runs-on: ubuntu-latest
+    if: always()
+    needs: benchmark
+    steps:
+    - name: Download benchmark artifacts
+      uses: actions/download-artifact@v4
+      continue-on-error: true
+      with:
+        pattern: raw-hybrid-collection-benchmark-*
+        path: artifacts/benchmarks
+        merge-multiple: true
+
+    - name: Append aggregated benchmark summary
+      shell: bash
+      run: |
+        python - <<'PY'
+        import json
+        import os
+        from pathlib import Path
+
+        result_dir = Path("artifacts/benchmarks")
+        result_paths = sorted(result_dir.glob("raw-hybrid-collection-*.json"))
+        if not result_paths:
+            raise SystemExit("No benchmark artifacts found to aggregate.")
+
+        expected_labels = [
+            "ubuntu-latest",
+            "ubuntu-24.04-arm",
+            "macos-15-intel",
+            "macos-14",
+            "windows-2022",
+        ]
+        label_order = {label: index for index, label in enumerate(expected_labels)}
+
+        results = []
+        for result_path in result_paths:
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            benchmark = result["benchmark"]
+            dataset = result["dataset"]
+            filter_info = result["filter"]
+            platform_info = result["platform"]
+            label = result_path.stem.removeprefix("raw-hybrid-collection-")
+            results.append(
+                {
+                    "label": label,
+                    "platform": f"{platform_info['system']} / {platform_info['machine']}",
+                    "dataset_name": dataset["name"],
+                    "data_num": dataset["data_num"],
+                    "dim": dataset["dim"],
+                    "query_num": benchmark["query_num"],
+                    "topk": benchmark["topk"],
+                    "ef_search": benchmark["ef_search"],
+                    "rounds": benchmark["rounds"],
+                    "filter_expr": f"{filter_info['field']} <= {filter_info['threshold']}",
+                    "target_selectivity": filter_info["target_selectivity"],
+                    "actual_selectivity": filter_info["actual_selectivity"],
+                    "build_seconds": benchmark["build_seconds"],
+                    "median_query_seconds": benchmark["median_query_seconds"],
+                    "median_avg_ms_per_query": benchmark["median_avg_ms_per_query"],
+                    "median_qps": benchmark["median_qps"],
+                }
+            )
+
+        results.sort(key=lambda item: label_order.get(item["label"], len(label_order)))
+        missing_labels = [label for label in expected_labels if label not in {item["label"] for item in results}]
+        baseline = results[0]
+
+        lines = [
+            "## Cross-platform Raw Hybrid Collection Benchmark Summary",
+            "",
+            "| Metric | Value |",
+            "| --- | --- |",
+            f"| Dataset | `{baseline['dataset_name']}` |",
+            f"| Data size | `{baseline['data_num']}` |",
+            f"| Dimension | `{baseline['dim']}` |",
+            f"| Queries | `{baseline['query_num']}` |",
+            f"| Top-k | `{baseline['topk']}` |",
+            f"| ef_search | `{baseline['ef_search']}` |",
+            f"| Rounds | `{baseline['rounds']}` |",
+            f"| Filter | `{baseline['filter_expr']}` |",
+            f"| Target selectivity | `{baseline['target_selectivity']:.4f}` |",
+            "",
+            "| Platform | Label | Build Seconds | Median Query Seconds | Median ms/query | Median QPS | Actual Selectivity |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+
+        for item in results:
+            lines.append(
+                f"| {item['platform']} | `{item['label']}` | "
+                f"{item['build_seconds']:.3f} | "
+                f"{item['median_query_seconds']:.3f} | "
+                f"{item['median_avg_ms_per_query']:.3f} | "
+                f"{item['median_qps']:.3f} | "
+                f"{item['actual_selectivity']:.4f} |"
+            )
+
+        if missing_labels:
+            lines.extend(
+                [
+                    "",
+                    "### Missing results",
+                    "",
+                    ", ".join(f"`{label}`" for label in missing_labels),
+                ]
+            )
+
+        summary_path = Path(os.environ["GITHUB_STEP_SUMMARY"])
+        with summary_path.open("a", encoding="utf-8") as summary:
+            summary.write("\n".join(lines))
+            summary.write("\n")
+        PY

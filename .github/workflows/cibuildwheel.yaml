@@ -10,7 +10,7 @@ on  :
 
 jobs:
   build_wheels:
-    name: Build wheels on ${{ matrix.os }}
+    name: Build wheels on ${{ matrix.os }} (${{ matrix.build_id }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -23,14 +23,22 @@ jobs:
         include:
         - os: ubuntu-latest
           arch: x86_64
+          build: cp3{8,9,10,11,12,13}-*
+          build_id: all
         - os: ubuntu-24.04-arm
           arch: aarch64
+          build: cp3{8,9,10,11,12,13}-*
+          build_id: all
         - os: macos-15-intel
           arch: x86_64
         - os: macos-15
           arch: arm64
+          build: cp3{8,9,10,11,12,13}-*
+          build_id: all
         - os: windows-2022
           arch: AMD64
+          build: cp3{8,9,10,11,12,13}-*
+          build_id: all
 
     env:
       CONAN_NON_INTERACTIVE: 1
@@ -77,8 +85,17 @@ jobs:
     - uses: actions/upload-artifact@v4
       if: matrix.os != 'windows-2022'
       with:
-        name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}
+        name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.build_id }}
         path: ./wheelhouse/*.whl
+        compression-level: 0
+        overwrite: true
+
+    - name: Fail if artifact upload never succeeded
+      if: always() && steps.upload_wheels_1.outcome == 'failure' && steps.upload_wheels_2.outcome == 'failure' && 
+        steps.upload_wheels_3.outcome == 'failure'
+      run: |
+        echo "::error::Artifact upload failed after 3 attempts."
+        exit 1
 
   # upload_pypi:
   #   needs: [build_wheels]

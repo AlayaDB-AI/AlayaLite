@@ -8,7 +8,7 @@ BUILD_DIR="${ROOT_DIR}/build"
 BUILD_JOBS="${BUILD_JOBS:-4}"
 CTEST_JOBS="${CTEST_JOBS:-4}"
 CTEST_LABELS="${CTEST_LABELS:-unit|storage|recovery|simd|space|utils}"
-CTEST_EXCLUDE_REGEX="${CTEST_EXCLUDE_REGEX:-^utils_test_dataset_utils$}"
+CTEST_EXCLUDE_REGEX="${CTEST_EXCLUDE_REGEX:-}"
 GCOV_TOOL="${GCOV_TOOL:-/usr/bin/gcov-13}"
 CMAKE_LAUNCHER_ARGS=()
 if [[ -n "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ]]; then
@@ -16,12 +16,26 @@ if [[ -n "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ]]; then
 fi
 
 COVERAGE_TARGETS=(
+  coro_test
+  search_test
+  update_test
+  mutex_test
+  scheduler_test
+  task_queue_test
+  worker_test
+  fusion_graph_test
+  graph_test
+  hnsw_test
+  nndescent_test
+  nsg_test
+  rabitq_test
   recovery_test
   l2_sqr_test
   ip_test
   fht_test
   cpu_features_test
   quant_test
+  quant_sq8_test
   raw_space_test
   sq4_space_test
   sq8_space_test
@@ -34,6 +48,7 @@ COVERAGE_TARGETS=(
   evaluate_test
   metric_type_test
   data_utils_test
+  dataset_utils_test
   index_encoding_test
   metadata_filter_test
   rotator_utils_test
