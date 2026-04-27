@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -28,7 +29,7 @@ namespace alaya::index_encoding {
 inline auto encode_int64(int64_t value) -> std::string {
   uint64_t encoded = static_cast<uint64_t>(value) ^ (1ULL << 63);
   char buf[17];
-  snprintf(buf, sizeof(buf), "%016lx", encoded);
+  std::snprintf(buf, sizeof(buf), "%016" PRIx64, encoded);
   return {buf};
 }
 
@@ -56,7 +57,7 @@ inline auto encode_double(double value) -> std::string {
     bits ^= (1ULL << 63);  // Positive: flip sign bit
   }
   char buf[17];
-  snprintf(buf, sizeof(buf), "%016lx", bits);
+  std::snprintf(buf, sizeof(buf), "%016" PRIx64, bits);
   return {buf};
 }
 

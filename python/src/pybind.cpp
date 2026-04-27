@@ -92,8 +92,8 @@ PYBIND11_MODULE(_alayalitepy, m) {
       .value("GE", alaya::FilterOp::GE)
       .value("LT", alaya::FilterOp::LT)
       .value("LE", alaya::FilterOp::LE)
-      .value("IN", alaya::FilterOp::IN)
-      .value("NOT_IN", alaya::FilterOp::NOT_IN)
+      .value("IN", alaya::FilterOp::IN_SET)
+      .value("NOT_IN", alaya::FilterOp::NOT_IN_SET)
       .value("CONTAINS", alaya::FilterOp::CONTAINS)
       .export_values();
 

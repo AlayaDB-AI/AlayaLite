@@ -267,7 +267,7 @@ inline auto analyze_materialized_view_filter(const MetadataFilter &filter,
       case FilterOp::EQ:
         append_unique_metadata_value(condition_values, condition->value);
         break;
-      case FilterOp::IN:
+      case FilterOp::IN_SET:
         for (const auto &value : condition->values) {
           append_unique_metadata_value(condition_values, value);
         }

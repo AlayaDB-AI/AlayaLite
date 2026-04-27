@@ -18,15 +18,15 @@ namespace alaya {
 // NOLINTBEGIN
 /// Comparison operators for filter conditions
 enum class FilterOp : uint8_t {
-  EQ,       ///< Equal (==)
-  NE,       ///< Not equal (!=)
-  GT,       ///< Greater than (>)
-  GE,       ///< Greater than or equal (>=)
-  LT,       ///< Less than (<)
-  LE,       ///< Less than or equal (<=)
-  IN,       ///< Value in list
-  NOT_IN,   ///< Value not in list
-  CONTAINS  ///< String contains substring
+  EQ,          ///< Equal (==)
+  NE,          ///< Not equal (!=)
+  GT,          ///< Greater than (>)
+  GE,          ///< Greater than or equal (>=)
+  LT,          ///< Less than (<)
+  LE,          ///< Less than or equal (<=)
+  IN_SET,      ///< Value in list
+  NOT_IN_SET,  ///< Value not in list
+  CONTAINS     ///< String contains substring
 };
 
 /// Logical operators for combining filter conditions
@@ -82,9 +82,9 @@ struct FilterCondition {
         auto cmp = compare(actual, value);
         return cmp.has_value() && *cmp <= 0;
       }
-      case FilterOp::IN:
+      case FilterOp::IN_SET:
         return std::find(values.begin(), values.end(), actual) != values.end();
-      case FilterOp::NOT_IN:
+      case FilterOp::NOT_IN_SET:
         return std::find(values.begin(), values.end(), actual) == values.end();
       case FilterOp::CONTAINS:
         return contains_string(actual, value);
@@ -298,7 +298,7 @@ struct MetadataFilter {
   auto add_in(const std::string &field, std::vector<MetadataValue> values) -> MetadataFilter & {
     FilterCondition cond;
     cond.field = field;
-    cond.op = FilterOp::IN;
+    cond.op = FilterOp::IN_SET;
     cond.values = std::move(values);
     conditions.push_back(std::move(cond));
     return *this;

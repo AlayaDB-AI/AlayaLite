@@ -102,6 +102,20 @@ class Client:
             logger.info("Index %s does not exist", name)
             return None
 
+    @staticmethod
+    def _close_collection(collection: Collection) -> None:
+        try:
+            collection.close()
+        except (AttributeError, RuntimeError):
+            pass
+
+    @staticmethod
+    def _close_index(index: Index) -> None:
+        try:
+            index.close()
+        except (AttributeError, RuntimeError):
+            pass
+
     def create_collection(self, name: str = "default", **kwargs) -> Collection:
         """
         Create a new collection with the given name.
@@ -193,7 +207,8 @@ class Client:
         """
         if collection_name not in self.__collection_map:
             raise RuntimeError(f"Collection '{collection_name}' does not exist")
-        del self.__collection_map[collection_name]
+        collection = self.__collection_map.pop(collection_name)
+        self._close_collection(collection)
         if delete_on_disk:
             if self.__url is None:
                 raise RuntimeError("Client is not initialized with a url for disk operations")
@@ -215,7 +230,8 @@ class Client:
         """
         if index_name not in self.__index_map:
             raise RuntimeError(f"Index '{index_name}' does not exist")
-        del self.__index_map[index_name]
+        index = self.__index_map.pop(index_name)
+        self._close_index(index)
         if delete_on_disk:
             if self.__url is None:
                 raise RuntimeError("Client is not initialized with a url for disk operations")
@@ -232,11 +248,24 @@ class Client:
             if self.__url is None:
                 raise RuntimeError("Client is not initialized with a url for disk operations")
 
-            for collection_name in self.__collection_map:
-                index_url = os.path.join(self.__url, collection_name)
+        collection_items = list(self.__collection_map.items())
+        index_items = list(self.__index_map.items())
+
+        for _, collection in collection_items:
+            self._close_collection(collection)
+        for _, index in index_items:
+            self._close_index(index)
+
+        if delete_on_disk:
+            for collection_name, _ in collection_items:
+                collection_url = os.path.join(self.__url, collection_name)
+                if os.path.exists(collection_url):
+                    shutil.rmtree(collection_url)
+
+            for index_name, _ in index_items:
+                index_url = os.path.join(self.__url, index_name)
                 if os.path.exists(index_url):
                     shutil.rmtree(index_url)
-                    # logger.info(f'rm {index_url}')
 
         self.__collection_map = {}
         self.__index_map = {}

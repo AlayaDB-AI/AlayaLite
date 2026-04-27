@@ -178,7 +178,7 @@ class MetadataFilterExecutor {
     switch (cond.op) {
       case FilterOp::EQ:
         return storage_->get_ids_by_field_value(cond.field, cond.value);
-      case FilterOp::IN:
+      case FilterOp::IN_SET:
         ids.reserve(cond.values.size());
         for (const auto &value : cond.values) {
           auto partial = storage_->get_ids_by_field_value(cond.field, value);

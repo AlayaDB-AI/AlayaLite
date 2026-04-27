@@ -89,8 +89,9 @@ class Index:
         if self.__is_initialized:
             raise RuntimeError("An index can be only fitted once")
 
+        vectors = np.asarray(vectors)
         _assert(vectors.ndim == 2, "vectors must be a 2D array")
-        data_type = np.array(vectors).dtype
+        data_type = vectors.dtype
         if self.__params.data_type is None:
             self.__params.data_type = data_type
         elif self.__params.data_type != data_type:
@@ -251,3 +252,20 @@ class Index:
         instance.__is_initialized = True
         instance.__dim = instance.__index.get_data_dim()
         return instance
+
+    def close(self):
+        """
+        Explicitly release native resources held by the index.
+        """
+        if self.__index is not None:
+            self.__index.close_db()
+            self.__index = None
+
+    def __del__(self):
+        """
+        Destructor.
+        """
+        try:
+            self.close()
+        except (RuntimeError, AttributeError):
+            pass
