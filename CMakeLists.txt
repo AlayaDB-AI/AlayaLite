@@ -20,15 +20,14 @@ option(ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
 option(BUILD_PYTHON "Build Python extension module" ON)
 option(BUILD_TESTING "Build tests" OFF)
 
-# Laser on-disk QG index module. Linux-only because it depends on libaio
-# (kernel io_submit / io_getevents). Non-Linux builds skip it silently.
+# Laser on-disk QG index module. Linux-only because it depends on libaio (kernel io_submit / io_getevents). Non-Linux
+# builds skip it silently.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  set(_ALAYA_ENABLE_LASER_DEFAULT ON)
+  set(ALAYA_ENABLE_LASER_DEFAULT ON)
 else()
-  set(_ALAYA_ENABLE_LASER_DEFAULT OFF)
+  set(ALAYA_ENABLE_LASER_DEFAULT OFF)
 endif()
-option(ALAYA_ENABLE_LASER "Build the Laser disk-index module (requires Linux + libaio)"
-       ${_ALAYA_ENABLE_LASER_DEFAULT})
+option(ALAYA_ENABLE_LASER "Build the Laser disk-index module (requires Linux + libaio)" ${ALAYA_ENABLE_LASER_DEFAULT})
 
 # ============================================================================
 # 1. C++ STANDARD AND COMPILER CONFIGURATION
@@ -89,58 +88,50 @@ endif()
 # ============================================================================
 if(ALAYA_ENABLE_LASER)
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(FATAL_ERROR
-      "ALAYA_ENABLE_LASER=ON but this is not Linux. "
-      "Configure with -DALAYA_ENABLE_LASER=OFF to skip the Laser module."
+    message(FATAL_ERROR "ALAYA_ENABLE_LASER=ON but this is not Linux. "
+                        "Configure with -DALAYA_ENABLE_LASER=OFF to skip the Laser module."
     )
   endif()
   find_library(AIO_LIBRARY aio)
   find_path(AIO_INCLUDE_DIR libaio.h)
   if(NOT AIO_LIBRARY OR NOT AIO_INCLUDE_DIR)
-    message(FATAL_ERROR
-      "Laser module requires libaio. Install it via:\n"
-      "  sudo apt-get install libaio-dev   (Debian / Ubuntu)\n"
-      "  sudo dnf install libaio-devel     (Fedora / RHEL)\n"
-      "or configure with -DALAYA_ENABLE_LASER=OFF to skip the Laser module."
+    message(
+      FATAL_ERROR
+        "Laser module requires libaio. Install it via:\n" "  sudo apt-get install libaio-dev   (Debian / Ubuntu)\n"
+        "  sudo dnf install libaio-devel     (Fedora / RHEL)\n"
+        "or configure with -DALAYA_ENABLE_LASER=OFF to skip the Laser module."
     )
   endif()
   if(NOT TARGET AIO::aio)
     add_library(AIO::aio UNKNOWN IMPORTED)
-    set_target_properties(AIO::aio PROPERTIES
-      IMPORTED_LOCATION "${AIO_LIBRARY}"
-      INTERFACE_INCLUDE_DIRECTORIES "${AIO_INCLUDE_DIR}"
+    set_target_properties(
+      AIO::aio PROPERTIES IMPORTED_LOCATION "${AIO_LIBRARY}" INTERFACE_INCLUDE_DIRECTORIES "${AIO_INCLUDE_DIR}"
     )
   endif()
 
-  # INTERFACE target that exposes the ported Laser header tree plus its
-  # runtime dependency surface. Consumers (pybind module, alignment test,
-  # examples) link against this to pick up include paths and transitive libs.
+  # INTERFACE target that exposes the ported Laser header tree plus its runtime dependency surface. Consumers (pybind
+  # module, alignment test, examples) link against this to pick up include paths and transitive libs.
   add_library(alaya_laser INTERFACE)
-  target_include_directories(alaya_laser INTERFACE
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
+  target_include_directories(
+    alaya_laser INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>
   )
-  target_link_libraries(alaya_laser INTERFACE
-    AIO::aio
-    Eigen3::Eigen
-    OpenMP::OpenMP_CXX
-    concurrentqueue::concurrentqueue
-    spdlog::spdlog_header_only
+  target_link_libraries(
+    alaya_laser
+    INTERFACE AIO::aio
+              Eigen3::Eigen
+              OpenMP::OpenMP_CXX
+              concurrentqueue::concurrentqueue
+              spdlog::spdlog_header_only
   )
   target_compile_features(alaya_laser INTERFACE cxx_std_20)
-  # NOTE: Laser's FastScan / L2 kernels dispatch on __AVX2__ / __AVX512F__ and
-  # therefore require SIMD compile flags at the TU that instantiates them.
-  # Those flags (and EIGEN_DONT_PARALLELIZE, needed so Eigen's thread pool
-  # doesn't contend with Laser's OpenMP) are applied PRIVATE on the two actual
-  # consumers (python/CMakeLists.txt and tests/laser/CMakeLists.txt) instead
-  # of on this INTERFACE, to avoid polluting every downstream that links
-  # alaya_laser. ALAYA_LASER_CONSUMER_OPTIONS lists the flags each consumer
-  # must apply itself.
-  set(ALAYA_LASER_CONSUMER_OPTIONS
-    -march=native
-    -ftree-vectorize
-    -DEIGEN_DONT_PARALLELIZE
-    CACHE INTERNAL "Compile options a Laser-consuming target must apply PRIVATEly"
+  # NOTE: Laser's FastScan / L2 kernels dispatch on __AVX2__ / __AVX512F__ and therefore require SIMD compile flags at
+  # the TU that instantiates them. Those flags (and EIGEN_DONT_PARALLELIZE, needed so Eigen's thread pool doesn't
+  # contend with Laser's OpenMP) are applied PRIVATE on the two actual consumers (python/CMakeLists.txt and
+  # tests/laser/CMakeLists.txt) instead of on this INTERFACE, to avoid polluting every downstream that links
+  # alaya_laser. _ALAYA_LASER_CONSUMER_OPTIONS lists the flags each consumer must apply itself.
+  set(_ALAYA_LASER_CONSUMER_OPTIONS
+      -march=native -ftree-vectorize -DEIGEN_DONT_PARALLELIZE
+      CACHE INTERNAL "Compile options a Laser-consuming target must apply PRIVATEly"
   )
 endif()
 
