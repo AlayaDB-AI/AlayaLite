@@ -1,3 +1,5 @@
+"""Utilities for reading and writing Faiss-style vector binary files."""
+
 import numpy as np
 
 
@@ -5,7 +7,7 @@ def ivecs_read(filename):
     print(f"Reading File - {filename}")
     a = np.fromfile(filename, dtype="int32")
     d = a[0]
-    print(f"\t{filename} readed")
+    print(f"\t{filename} read")
     return a.reshape(-1, d + 1)[:, 1:].copy()
 
 
@@ -125,9 +127,7 @@ def read_ibin(filename, start_idx=0, chunk_size=None):
     with open(filename, "rb") as f:
         nvecs, dim = np.fromfile(f, count=2, dtype=np.int32)
         nvecs = (nvecs - start_idx) if chunk_size is None else chunk_size
-        arr = np.fromfile(
-            f, count=nvecs * dim, dtype=np.int32, offset=start_idx * 4 * dim
-        )
+        arr = np.fromfile(f, count=nvecs * dim, dtype=np.int32, offset=start_idx * 4 * dim)
     return arr.reshape(nvecs, dim)
 
 

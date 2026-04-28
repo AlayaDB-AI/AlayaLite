@@ -8,6 +8,7 @@ import sys
 # so Python output stays in sync with C++ stdout.
 builtins.print = functools.partial(builtins.print, flush=True)
 
+# pylint: disable=invalid-name
 DIM = "\033[2m"
 BOLD = "\033[1m"
 GREEN = "\033[32m"
@@ -21,14 +22,14 @@ if not sys.stdout.isatty():
 
 
 def header(text, width=60):
-    print(f"\n{BOLD}{CYAN}{'=' * width}{RESET}")
+    print(f"\n{BOLD}{CYAN}" + "=" * width + f"{RESET}")
     print(f"{BOLD}{CYAN}  {text}{RESET}")
-    print(f"{BOLD}{CYAN}{'=' * width}{RESET}")
+    print(f"{BOLD}{CYAN}" + "=" * width + f"{RESET}")
 
 
 def step_header(name, width=40):
     print(f"\n{BOLD}>> {name.upper()}{RESET}")
-    print(f"{DIM}{'─' * width}{RESET}")
+    print(f"{DIM}" + "─" * width + f"{RESET}")
 
 
 def info(tag, msg):
@@ -44,4 +45,4 @@ def warn(tag, msg):
 
 
 def separator(width=56):
-    print(f"  {DIM}{'─' * width}{RESET}")
+    print(f"  {DIM}" + "─" * width + f"{RESET}")

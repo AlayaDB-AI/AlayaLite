@@ -1,3 +1,5 @@
+"""Utilities for monitoring process memory usage."""
+
 import psutil
 
 

@@ -42,7 +42,7 @@ class PCATransformer:
         self.components_ = components
         self.n_components_ = components.shape[0]
 
-    def transform(self, X):
+    def transform(self, X):  # pylint: disable=invalid-name
         return np.dot(X - self.mean_, self.components_.T)
 
 
@@ -51,11 +51,7 @@ def load_pca_params(filepath):
     with open(filepath, "rb") as f:
         (dim,) = struct.unpack("<Q", f.read(8))
         mean = np.frombuffer(f.read(dim * 4), dtype=np.float32).copy()
-        components = (
-            np.frombuffer(f.read(dim * dim * 4), dtype=np.float32)
-            .copy()
-            .reshape(dim, dim)
-        )
+        components = np.frombuffer(f.read(dim * dim * 4), dtype=np.float32).copy().reshape(dim, dim)
     print(f"PCA parameters loaded from {filepath} (dim={dim})")
     return PCATransformer(mean, components)
 
@@ -88,9 +84,7 @@ def _canonicalize_pca_sign(pca):
     if near_zero.any():
         max_abs_idx = np.argmax(np.abs(components), axis=1)
         row_indices = np.arange(components.shape[0])
-        fallback_signs = np.sign(
-            components[row_indices, max_abs_idx]
-        ).astype(components.dtype)
+        fallback_signs = np.sign(components[row_indices, max_abs_idx]).astype(components.dtype)
         signs = np.where(near_zero, fallback_signs, signs)
     signs[signs == 0] = 1.0
     pca.components_ = components * signs[:, None]
@@ -113,9 +107,7 @@ def fit_incremental_pca(sample_vectors, n_components, batch_size=200000):
         Fitted IncrementalPCA model (with canonical component signs).
     """
     n_samples = sample_vectors.shape[0]
-    ipca = IncrementalPCA(
-        n_components=n_components, batch_size=min(batch_size, n_samples)
-    )
+    ipca = IncrementalPCA(n_components=n_components, batch_size=min(batch_size, n_samples))
     for i in tqdm(range(0, n_samples, batch_size), desc="Training IncrementalPCA"):
         end_idx = min(i + batch_size, n_samples)
         ipca.partial_fit(sample_vectors[i:end_idx])
@@ -149,9 +141,7 @@ def sample_vectors_from_fbin(filepath, sample_ratio=0.25, seed=None):
 
         sample_vecs = np.empty((sample_size, d), dtype=np.float32)
         with open(filepath, "rb") as f:
-            for i, idx in enumerate(
-                tqdm(sample_indices, desc="Reading sample vectors")
-            ):
+            for i, idx in enumerate(tqdm(sample_indices, desc="Reading sample vectors")):
                 f.seek(8 + idx * d * 4)
                 sample_vecs[i] = np.frombuffer(f.read(d * 4), dtype=np.float32)
         return vectors, sample_vecs

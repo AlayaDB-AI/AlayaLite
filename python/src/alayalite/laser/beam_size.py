@@ -1,3 +1,5 @@
+"""Beam-size helpers for iterative ANN search."""
+
 from math import log10
 
 

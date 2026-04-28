@@ -1,7 +1,7 @@
 """Medoid generation for graph-based nearest neighbor search entry points."""
 
-import numpy as np
 import faiss
+import numpy as np
 from tqdm import tqdm
 
 from alayalite.laser.io import read_fbin, write_fbin, write_ibin
@@ -27,12 +27,10 @@ def generate_medoids(base_path, n_clusters, sample_ratio=0.10, seed=None):
     Returns:
         Tuple of (medoid_indices, medoid_vectors) as numpy arrays
     """
-    X = read_fbin(base_path)
+    X = read_fbin(base_path)  # pylint: disable=invalid-name
     n, d = X.shape
     sample_size = int(sample_ratio * n)
-    print(
-        f"Total vectors: {n}, dimension: {d}, sample size for clustering: {sample_size}"
-    )
+    print(f"Total vectors: {n}, dimension: {d}, sample size for clustering: {sample_size}")
 
     if n > sample_size:
         rng = np.random.default_rng(seed) if seed is not None else np.random
@@ -41,9 +39,7 @@ def generate_medoids(base_path, n_clusters, sample_ratio=0.10, seed=None):
 
         sample_vectors = np.empty((sample_size, d), dtype=np.float32)
         with open(base_path, "rb") as f:
-            for i, idx in enumerate(
-                tqdm(sample_indices, desc="Reading sample vectors")
-            ):
+            for i, idx in enumerate(tqdm(sample_indices, desc="Reading sample vectors")):
                 f.seek(8 + idx * d * 4)
                 sample_vectors[i] = np.frombuffer(f.read(d * 4), dtype=np.float32)
     else:
