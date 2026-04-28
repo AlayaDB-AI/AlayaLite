@@ -4,3 +4,9 @@ extend-exclude = []
 
 [default.extend-words]
 secon = "secon" # keep don't change it
+Rabit = "Rabit"
+PN = "PN"
+nd = "nd"
+thr = "thr"
+ba = "ba"
+po = "po"
