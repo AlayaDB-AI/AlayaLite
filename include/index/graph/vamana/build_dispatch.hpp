@@ -69,6 +69,17 @@ struct BuildVamanaParams {
   uint32_t num_threads = 0;  // 0 → omp_get_num_procs() at call time
   uint64_t seed = 1234;
   float build_dram_budget_gb = 32.0F;
+  // Partition kmeans sampling rate. Negative is the sentinel meaning
+  // "auto" — the partition path resolves it to
+  // `min(1.0, MAX_PQ_TRAINING_SET_SIZE_F / N)` (mirrors DiskANN's
+  // `disk_utils.cpp:1291`). Discovered scope on
+  // `align-diskann-sharded-with-upstream`: the historic literal 0.01
+  // was numerically unstable on small datasets (synth_100k_512d at
+  // budget=0.05 ran the growth loop into the `max_num_parts=1024`
+  // safety cap). The sentinel preserves byte-equality with DiskANN
+  // builds at matched seeds while keeping callers who explicitly pass
+  // a sampling rate in (0, 1] on the historic 0.01.
+  float sampling_rate = -1.0F;
 };
 
 // Single source of truth for Vamana build defaults. Both the CLI's argv
@@ -93,6 +104,7 @@ struct VamanaNumericDefaults {
   uint32_t num_threads;
   uint64_t seed;
   float build_dram_budget_gb;
+  float sampling_rate;
 };
 inline constexpr VamanaNumericDefaults kFrozenDefaults{
     .R = 64,
@@ -101,6 +113,7 @@ inline constexpr VamanaNumericDefaults kFrozenDefaults{
     .num_threads = 0,
     .seed = 1234,
     .build_dram_budget_gb = 32.0F,
+    .sampling_rate = -1.0F,
 };
 static_assert(kDefaultVamanaBuildParams.R == kFrozenDefaults.R,
               "Vamana default R drifted — update CLI / binding / fixtures together");
@@ -115,6 +128,9 @@ static_assert(kDefaultVamanaBuildParams.seed == kFrozenDefaults.seed,
 static_assert(kDefaultVamanaBuildParams.build_dram_budget_gb ==
                   kFrozenDefaults.build_dram_budget_gb,
               "Vamana default dram_budget drifted — update CLI / binding / fixtures together");
+static_assert(kDefaultVamanaBuildParams.sampling_rate ==
+                  kFrozenDefaults.sampling_rate,
+              "Vamana default sampling_rate drifted — update CLI / binding / fixtures together");
 
 // read_fbin_header — read the 8-byte (num, dim) header of a .fbin without
 // loading any vectors. Used by the partition path to decide dispatch
@@ -244,7 +260,15 @@ inline void run_single_shard(const BuildVamanaParams &args) {
 // assignments to per-shard data files, builds each shard's Vamana graph
 // in-memory, then merges (union-shuffle-cut) into a single output file.
 inline void run_partition_merge(const BuildVamanaParams &args, uint32_t num, uint32_t dim) {
-  constexpr double kSamplingRate = 0.01;
+  // Resolve sampling rate. Negative `args.sampling_rate` means "auto":
+  // mirror DiskANN's `disk_utils.cpp:1291` (`min(1.0, 256000/N)`) so the
+  // patched-DiskANN Tier A reference and AlayaLite agree on sample size
+  // at matched seeds. A positive override forces the historic 0.01
+  // path (or any user-supplied rate in (0, 1]) for callers who depend on it.
+  constexpr double kMaxPqTrainingSetSize = 256000.0;
+  const double kSamplingRate = (args.sampling_rate > 0.0F)
+      ? static_cast<double>(args.sampling_rate)
+      : std::min(1.0, kMaxPqTrainingSetSize / static_cast<double>(num));
   const std::string data_path(args.data_path);
   const std::string out_path_str(args.output_path);
 
@@ -418,6 +442,10 @@ inline void build_vamana(const BuildVamanaParams &params_in) {
   }
   if (params.alpha < 1.0F) {
     throw std::invalid_argument("alpha must be >= 1.0");
+  }
+  if (!(params.sampling_rate < 0.0F ||
+        (params.sampling_rate > 0.0F && params.sampling_rate <= 1.0F))) {
+    throw std::invalid_argument("sampling_rate must be negative for auto or in (0, 1]");
   }
   if (params.num_threads == 0) {
     params.num_threads = static_cast<uint32_t>(omp_get_num_procs());

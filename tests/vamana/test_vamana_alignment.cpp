@@ -87,7 +87,18 @@ struct Args {
   float stat_threshold = 0.05f;
   float recall_delta_pp = 0.5f;
   bool force_partition = false;  // Gate 2 mode: relax recall, check num_parts
-  uint32_t expected_num_parts = 0;  // 0 = disabled; only used in --force_partition
+  // Strict mode: AlayaLite num_parts MUST equal `expected_num_parts`
+  // (set via `--expected_num_parts <N>`).
+  uint32_t expected_num_parts = 0;  // 0 = disabled
+  // Envelope mode: AlayaLite num_parts MUST satisfy
+  // `expected_num_parts_lo <= alaya_parts <= expected_num_parts_hi`
+  // (set via `--expected_num_parts_envelope <lo> <hi>`). Tier B uses
+  // this when the DiskANN reference is unseeded, so its num_parts is
+  // a 3-rerun envelope rather than a fixed value. Both bounds must be
+  // > 0 for envelope mode to activate; `--expected_num_parts <N>` is
+  // shorthand for `--expected_num_parts_envelope <N> <N>`.
+  uint32_t expected_num_parts_lo = 0;
+  uint32_t expected_num_parts_hi = 0;
   std::string alaya_shard_work_dir;  // default derived from alaya_index
   bool show_help = false;
 };
@@ -118,6 +129,10 @@ void print_help(std::ostream &os) {
      << "  --force_partition               Gate 2 mode: relax recall threshold to 1.0pp min,\n"
      << "                                  enable num_parts consistency check (when\n"
      << "                                  --expected_num_parts is provided).\n"
+     << "  --expected_num_parts_envelope <lo> <hi>\n"
+     << "                                  Tier B mode: AlayaLite num_parts must lie\n"
+     << "                                  in [lo, hi]. Use when DiskANN reference is\n"
+     << "                                  unseeded — bounds derived from ≥3 reruns.\n"
      << "  --expected_num_parts <uint32>   DiskANN reference's num_parts value; with\n"
      << "                                  --force_partition, the test counts AlayaLite's\n"
      << "                                  shard graph files under `<alaya_index>_shard_work/`\n"
@@ -232,6 +247,10 @@ Args parse_args(int argc, char **argv) {
       a.force_partition = true;
     else if (f == "--expected_num_parts")
       a.expected_num_parts = static_cast<uint32_t>(std::stoul(need_value(i)));
+    else if (f == "--expected_num_parts_envelope") {
+      a.expected_num_parts_lo = static_cast<uint32_t>(std::stoul(need_value(i)));
+      a.expected_num_parts_hi = static_cast<uint32_t>(std::stoul(need_value(i)));
+    }
     else if (f == "--alaya_shard_work_dir")
       a.alaya_shard_work_dir = need_value(i);
     else
@@ -562,11 +581,19 @@ int main(int argc, char **argv) {
 
   // Gate 2 pre-check — num_parts consistency. Runs before L1/L2/L3 so that
   // a partition-count mismatch fails the harness with a clear diagnostic
-  // rather than surfacing as a downstream recall divergence. Only active
-  // when `--force_partition` is set and `--expected_num_parts > 0` is
-  // supplied (the reference value comes from a separate DiskANN
-  // `build_disk_index` run at the same budget).
-  if (args.force_partition && args.expected_num_parts > 0) {
+  // rather than surfacing as a downstream recall divergence. Active when
+  // `--force_partition` is set together with either `--expected_num_parts`
+  // (strict mode) or `--expected_num_parts_envelope <lo> <hi>` (Tier B
+  // mode, used with unseeded DiskANN references). Strict supersedes
+  // envelope when both are provided so existing harness invocations stay
+  // bit-exact.
+  uint32_t lo = args.expected_num_parts;
+  uint32_t hi = args.expected_num_parts;
+  if (args.expected_num_parts == 0 && args.expected_num_parts_lo > 0) {
+    lo = args.expected_num_parts_lo;
+    hi = args.expected_num_parts_hi;
+  }
+  if (args.force_partition && lo > 0) {
     std::filesystem::path work_dir = args.alaya_shard_work_dir.empty()
         ? std::filesystem::path(args.alaya_index + "_shard_work")
         : std::filesystem::path(args.alaya_shard_work_dir);
@@ -574,7 +601,7 @@ int main(int argc, char **argv) {
     std::cout << "Gate2 num_parts check:\n"
               << "  alaya_shard_work_dir = " << work_dir << "\n"
               << "  alaya num_parts      = " << alaya_parts << "\n"
-              << "  expected (DiskANN)   = " << args.expected_num_parts << "\n";
+              << "  expected envelope    = [" << lo << ", " << hi << "]\n";
     if (alaya_parts == 0) {
       std::cerr << "  FAIL: no AlayaLite shard graphs found in " << work_dir
                 << " (partition path not run, or build_vamana_index work "
@@ -582,9 +609,9 @@ int main(int argc, char **argv) {
       verdict.num_parts_pass = false;
       return final_exit_code(verdict);
     }
-    if (alaya_parts != args.expected_num_parts) {
-      std::cerr << "  FAIL: num_parts mismatch (alaya " << alaya_parts
-                << " vs diskann reference " << args.expected_num_parts << ")\n";
+    if (alaya_parts < lo || alaya_parts > hi) {
+      std::cerr << "  FAIL: num_parts " << alaya_parts
+                << " outside expected envelope [" << lo << ", " << hi << "]\n";
       verdict.num_parts_pass = false;
       return final_exit_code(verdict);
     }

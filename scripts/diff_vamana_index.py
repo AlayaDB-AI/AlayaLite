@@ -8,7 +8,7 @@ and reports whether their graphs are structurally similar enough to plausibly
 yield equivalent recall.
 
 This is a debugging / investigation tool — not a pass/fail gate. The pass/fail
-gate lives in the C++ harness at `tests/index/test_vamana_alignment.cpp`.
+gate lives in the C++ harness at `tests/vamana/test_vamana_alignment.cpp`.
 
 Usage:
     python3 diff_vamana_index.py <path_a> <path_b> [--csv <out.csv>] [--bfs-samples N]
@@ -112,7 +112,7 @@ def _histogram(values: Sequence[int], bins: int) -> List[Tuple[int, int, int]]:
 
 def compute_in_degrees(idx: VamanaIndex) -> List[int]:
     in_deg = [0] * idx.num_nodes
-    for node_id, nbrs in enumerate(idx.adjacency):
+    for _node_id, nbrs in enumerate(idx.adjacency):
         for m in nbrs:
             if 0 <= m < idx.num_nodes:
                 in_deg[m] += 1

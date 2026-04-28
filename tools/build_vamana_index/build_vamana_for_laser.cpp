@@ -72,6 +72,8 @@ void print_help(std::ostream &os) {
      << kDefaultVamanaBuildParams.seed << ")\n"
      << "      --build_dram_budget <GB>   Single-shard budget in GiB (default "
      << kDefaultVamanaBuildParams.build_dram_budget_gb << ")\n"
+     << "      --sampling_rate <float>    Partition kmeans sampling rate (default "
+     << "auto = min(1.0, 256000 / N))\n"
      << "  -h, --help                     Show this message\n"
      << "\n"
      << "Dispatch:\n"
@@ -157,6 +159,8 @@ Cli parse_args(int argc, char **argv) {
       c.params.seed = parse_u64(need_value(i), std::string(flag));
     } else if (flag == "--build_dram_budget") {
       c.params.build_dram_budget_gb = parse_f32(need_value(i), std::string(flag));
+    } else if (flag == "--sampling_rate") {
+      c.params.sampling_rate = parse_f32(need_value(i), std::string(flag));
     } else {
       die(std::string("unknown flag '") + argv[i] + "'");
     }

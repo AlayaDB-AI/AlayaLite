@@ -1,0 +1,103 @@
+{
+  "alaya": {
+    "centroids_header": {
+      "actual_size": 26632,
+      "dim": 512,
+      "num_parts": 13
+    },
+    "medoids_sha256": "7546708cea23ab91cd8c639dc100dbab640fdc345a5ba56e33f4ac16a70a3a02",
+    "merged_header": {
+      "R": 64,
+      "actual_size": 25433820,
+      "expected_size": 25433820,
+      "frozen_pts": 0,
+      "medoid": 57515
+    },
+    "num_shards": 13,
+    "per_shard_sha256": [
+      "481a18c97a35a340d2fd0c05e9a82dc12d24c5be12f55bcd38f5047515e6098b",
+      "7aaddf79efcc73f71557baefe4f45ae6b562b5d697374cdabaee8cda669e5c2b",
+      "5fb79e894296c852804f0773df3b39771ea9c4ccc0852048b2e84afc20eab4b0",
+      "9df712b61af31e0fe4e904583251928c74b2a87817d4e882819f6983b9366373",
+      "9e31d74b4b1e856fe9a39b6eb259dddd205be2b15a36bbf431b8225c5079d10b",
+      "8817e04f082b90095f633d194de298a38279388774e5c2e4710f9654938d572e",
+      "3b0f66a1baaca91392413a65d5792caf2c5d246ead20eb08a1d78f0be55efeac",
+      "5f3e2030f2119fc2f8be86040933901ab7ea4a6055da37d4d46edf6d540a4bbd",
+      "a0cf6604d788cb31a681d5b003523ed55c537124e433f7b1a8233a8ba0929749",
+      "39d3b9f68428507eb233f687f145f5b0f36b6eee5e9b2ae97fb817e1f1beed53",
+      "3dc29ecaf7adc5dd60d68c57ca1b67d0b75b21439b2fa9fbe1191f5ba2cc09bf",
+      "0b035713bf837d4e5408d5627c822f5810f4a2754364c3e437f34ac5067f0e0f",
+      "ebb2e1c5a37fdce22638918e1f30ba72036b48cd34a709410ae9f3194ae376a7"
+    ],
+    "per_shard_size": [
+      2622928,
+      2814848,
+      2662356,
+      3594048,
+      2197160,
+      2250880,
+      2631500,
+      2553800,
+      2723732,
+      2693004,
+      2147200,
+      2678276,
+      2828608
+    ]
+  },
+  "budget_gib": "0.05",
+  "dataset": "synth_100k_512d",
+  "diskann": {
+    "centroids_header": {
+      "actual_size": 26632,
+      "dim": 512,
+      "num_parts": 13
+    },
+    "medoids_sha256": "7546708cea23ab91cd8c639dc100dbab640fdc345a5ba56e33f4ac16a70a3a02",
+    "merged_header": {
+      "R": 64,
+      "actual_size": 25435900,
+      "expected_size": 25435900,
+      "frozen_pts": 0,
+      "medoid": 57515
+    },
+    "num_shards": 13,
+    "per_shard_sha256": [
+      "47320d9f18fe7358ad67d5bce364b738434bfa22ca08caad2d8d28c29658bb92",
+      "c860f73a701521e0b3b45a9c1f848d4f2da94b7c91a8ba2ce0e424742b198cec",
+      "6ba5d71d00e1f3a64690103aa001b2fb71264d3b307cf82d7c7bfe38df90ebde",
+      "c4bf58e34d99f0e96a47a6e29d5737c0057207b2070cc4808fe21e0fc5121b0e",
+      "f80525bb5a5f860f625b12a434aa42377afd6cb427b509752035302aeb369034",
+      "2b34f4107857fef44ebbf93a0b79bf5c9f079344d97d0f13f44b0618faf2188e",
+      "99f844998103a622543988227729af98010403da1dc8c701851d0f89b3278340",
+      "338320f4a830452903a300bad077057ae33f244bc7aa6c7f660d9c8a4817c739",
+      "781fa0f754d6c0a5617ffef1ed27d6ad6d195678eb30f4df790580d1f4e501f9",
+      "67fecb02f914eb59527aa4a90720bde6edfd234fe4296e4703d2527546721e18",
+      "251c90e7b0d7adf139c33d582f3e1971467fbee8fe51ddb4f2f79adb3aab4ed6",
+      "e298fffab2d3bb5fc9a6429627ba1b0c3da6ca5018bb891d1f445a1d76759e31",
+      "a429d247e32d85c3362d583c55afa5d114dd2a07d7bd40a847811a3248bf9447"
+    ],
+    "per_shard_size": [
+      2623444,
+      2816164,
+      2661668,
+      3593876,
+      2197844,
+      2251056,
+      2631500,
+      2553112,
+      2723732,
+      2691976,
+      2147276,
+      2678292,
+      2828440
+    ]
+  },
+  "params": {
+    "L": "100",
+    "R": "64",
+    "alpha": "1.2",
+    "num_threads": "1",
+    "seed": "1234"
+  }
+}

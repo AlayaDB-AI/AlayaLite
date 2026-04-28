@@ -60,7 +60,8 @@ inline void build_index(const std::string& data_path,
                         float alpha,
                         uint64_t seed,
                         uint32_t num_threads,
-                        float dram_budget_gb) {
+                        float dram_budget_gb,
+                        float sampling_rate) {
     // Pre-check for OSError semantics. The underlying C++ code would raise
     // std::runtime_error on open() failure (mapping to RuntimeError via
     // pybind11 default), but the spec contract is OSError for unreadable
@@ -102,6 +103,7 @@ inline void build_index(const std::string& data_path,
     params.seed = seed;
     params.num_threads = num_threads;
     params.build_dram_budget_gb = dram_budget_gb;
+    params.sampling_rate = sampling_rate;
 
     build_vamana(params);
 }
@@ -130,6 +132,7 @@ single-file `.index` binary, directly consumable by `alayalite.laser.Index.build
         py::arg("seed") = kDefaultVamanaBuildParams.seed,
         py::arg("num_threads") = kDefaultVamanaBuildParams.num_threads,
         py::arg("dram_budget_gb") = kDefaultVamanaBuildParams.build_dram_budget_gb,
+        py::arg("sampling_rate") = kDefaultVamanaBuildParams.sampling_rate,
         R"pbdoc(
 Build a Vamana graph and write a DiskANN-format .index file.
 

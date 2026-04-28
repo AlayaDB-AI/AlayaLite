@@ -37,11 +37,3 @@ add_test(NAME index_test_nsg COMMAND $<TARGET_FILE:nsg_test>)
 add_test(NAME index_test_rabitq COMMAND $<TARGET_FILE:rabitq_test>)
 add_test(NAME index_test_rabitq_performance COMMAND $<TARGET_FILE:rabitq_performance_test>)
 set_tests_properties(index_test_rabitq_performance PROPERTIES LABELS "performance")
-
-# test_vamana_alignment — Gate 1 alignment harness, hand-written main with
-# exit codes 10/11/12 for L1/L2/L3 tiers (not a GTest target). Requires CLI
-# args (--alaya_index, --diskann_index, --data_path, --query_path, --gt_path),
-# so it is not registered with add_test — run manually.
-add_executable(test_vamana_alignment ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_alignment.cpp)
-target_link_libraries(test_vamana_alignment PRIVATE ${PROJECT_NAME})
-target_compile_features(test_vamana_alignment PRIVATE cxx_std_20)

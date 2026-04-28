@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the option is ON.
 - `scripts/laser_alignment/gen_synth_100k_512d.py` — synthetic dataset
   generator used as a secondary alignment judge for the Laser port.
+- Sharded Vamana partition-merge alignment with patched upstream
+  DiskANN (`diskann-sharded-alignment-gate` capability). Tier A
+  asserts byte-equality on `_medoids.bin` (the partition-stage
+  invariant) and structural parity on the other artifact classes
+  between AlayaLite's `build_vamana_index` CLI and the patched
+  DiskANN `build_merged_vamana_standalone` CLI at matched seeds on
+  `synth_100k_512d`. Test driver: `tests/vamana/test_sharded_byte_equality.py`.
+  Exposed `BuildVamanaParams::sampling_rate` (sentinel auto =
+  `min(1.0, 256000/N)`) so the partition growth loop is numerically
+  stable on small datasets. Tier B retained as nightly statistical
+  envelope; harness now accepts `--expected_num_parts_envelope <lo> <hi>`.
+  See `openspec/changes/archive/2026-04-25-align-diskann-sharded-with-upstream/`.
 
 ## [0.1.1-alpha1] - 2026-01-28
 
