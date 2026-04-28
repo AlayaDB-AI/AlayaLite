@@ -21,9 +21,8 @@ if sys.version_info >= (3, 11):
 else:
     import tomli as tomllib
 
-import numpy as np
-
-from alayalite.laser.pretty import (
+import numpy as np  # pylint: disable=wrong-import-position
+from alayalite.laser.pretty import (  # pylint: disable=wrong-import-position
     BOLD,
     GREEN,
     RED,
@@ -62,6 +61,7 @@ DEFAULTS = {
 
 
 def print_config(cfg):
+    # pylint: disable=inconsistent-quotes
     info(
         "config",
         f"metric={cfg['metric']}  degree={cfg['degree']}  main_dim={cfg['main_dimension']}",
@@ -72,7 +72,8 @@ def print_config(cfg):
     )
     info(
         "search",
-        f"topk={cfg['topk']}  threads={cfg['threads']}  bw={cfg['beam_width']}  dram={cfg['dram_budget']}GB  warmup={cfg['warmup']}  runs={cfg['runs']}",
+        f"topk={cfg['topk']}  threads={cfg['threads']}  bw={cfg['beam_width']}  "
+        f"dram={cfg['dram_budget']}GB  warmup={cfg['warmup']}  runs={cfg['runs']}",
     )
 
 
@@ -163,8 +164,7 @@ def load_config(toml_path, cli_args):
     # silently defeated unless build_threads is also 1. Fail loudly.
     if force_single_thread and int(build_threads_resolved) != 1:
         raise ValueError(
-            f"force_single_thread=true requires build_threads=1 "
-            f"(got build_threads={build_threads_resolved!r})."
+            f"force_single_thread=true requires build_threads=1 (got build_threads={build_threads_resolved!r})."
         )
 
     # force_single_thread signals "I want byte-reproducible builds". Any
@@ -172,26 +172,24 @@ def load_config(toml_path, cli_args):
     # seeds explicitly rather than falling back to defaults.
     if force_single_thread:
         missing_seeds = [
-            key for key, val in (
+            key
+            for key, val in (
                 ("pca_seed", pca_seed),
                 ("medoid_seed", medoid_seed),
-            ) if val is None
+            )
+            if val is None
         ]
         if rotator_seed == 0:
             missing_seeds.append("rotator_seed (nonzero)")
         if missing_seeds:
-            raise ValueError(
-                f"force_single_thread=true requires explicit seeds, "
-                f"missing: {missing_seeds}"
-            )
+            raise ValueError(f"force_single_thread=true requires explicit seeds, missing: {missing_seeds}")
 
     # dump_rotator with an unseeded rotator produces a different file
     # every run, which is useless for the byte-equality comparison that
     # dump_rotator exists to support. Catch this at config load.
     if dump_rotator and rotator_seed == 0:
         raise ValueError(
-            "dump_rotator=true requires rotator_seed ≠ 0 "
-            "(unseeded rotator produces a different dump every run)."
+            "dump_rotator=true requires rotator_seed ≠ 0 (unseeded rotator produces a different dump every run)."
         )
 
     name = ds["name"]
@@ -229,12 +227,8 @@ def load_config(toml_path, cli_args):
         "build_vamana_L": resolve_build_vamana("L", "build_vamana_L"),
         "build_vamana_alpha": resolve_build_vamana("alpha", "build_vamana_alpha"),
         "build_vamana_seed": resolve_build_vamana("seed", "build_vamana_seed"),
-        "build_vamana_num_threads": resolve_build_vamana(
-            "num_threads", "build_vamana_num_threads"
-        ),
-        "build_vamana_dram_budget_gb": resolve_build_vamana(
-            "dram_budget_gb", "build_vamana_dram_budget_gb"
-        ),
+        "build_vamana_num_threads": resolve_build_vamana("num_threads", "build_vamana_num_threads"),
+        "build_vamana_dram_budget_gb": resolve_build_vamana("dram_budget_gb", "build_vamana_dram_budget_gb"),
         "pca_seed": pca_seed,
         "medoid_seed": medoid_seed,
         "rotator_seed": rotator_seed,
@@ -245,7 +239,7 @@ def load_config(toml_path, cli_args):
 
 
 def data_dir(cfg):
-    return f"{cfg['output']}/data/{cfg['name']}"
+    return f"{cfg['output']}/data/{cfg['name']}"  # pylint: disable=inconsistent-quotes
 
 
 # ── Steps ──
@@ -279,7 +273,7 @@ def _read_vamana_header(path):
 
 
 def step_vamana(cfg):
-    from alayalite import vamana
+    from alayalite import vamana  # pylint: disable=import-outside-toplevel
 
     name = cfg["name"]
     degree = cfg["degree"]
@@ -292,12 +286,8 @@ def step_vamana(cfg):
     if os.path.exists(target_path):
         parsed = _read_vamana_header(target_path)
         if parsed is not None:
-            file_size, expected_size, max_degree, _start, frozen_pts = parsed
-            if (
-                file_size == expected_size
-                and max_degree == degree
-                and frozen_pts == 0
-            ):
+            file_size, expected_size, max_degree, _, frozen_pts = parsed
+            if file_size == expected_size and max_degree == degree and frozen_pts == 0:
                 warn(
                     name,
                     f"Vamana graph already valid at {target_path} "
@@ -314,8 +304,7 @@ def step_vamana(cfg):
         else:
             warn(
                 name,
-                f"Vamana graph at {target_path} has a malformed header. "
-                f"Rebuilding.",
+                f"Vamana graph at {target_path} has a malformed header. Rebuilding.",
             )
 
     # target_path may be a plain filename (relative to cwd) with no parent
@@ -326,10 +315,10 @@ def step_vamana(cfg):
         os.makedirs(parent, exist_ok=True)
     info(
         name,
-        f"Building Vamana graph R{degree} L{cfg['build_vamana_L']} "
-        f"α={cfg['build_vamana_alpha']} seed={cfg['build_vamana_seed']} "
-        f"threads={cfg['build_vamana_num_threads']} "
-        f"budget={cfg['build_vamana_dram_budget_gb']}GiB → {target_path}",
+        f"Building Vamana graph R{degree} L{cfg['build_vamana_L']} "  # pylint: disable=inconsistent-quotes
+        f"α={cfg['build_vamana_alpha']} seed={cfg['build_vamana_seed']} "  # pylint: disable=inconsistent-quotes
+        f"threads={cfg['build_vamana_num_threads']} "  # pylint: disable=inconsistent-quotes
+        f"budget={cfg['build_vamana_dram_budget_gb']}GiB → {target_path}",  # pylint: disable=inconsistent-quotes
     )
     t1 = time()
     try:
@@ -348,13 +337,14 @@ def step_vamana(cfg):
         raise MemoryError(
             f"Vamana build ran out of memory. Consider lowering "
             f"[build_vamana].dram_budget_gb (currently "
-            f"{cfg['build_vamana_dram_budget_gb']}) to force a larger "
+            f"{cfg['build_vamana_dram_budget_gb']}) to force a larger "  # pylint: disable=inconsistent-quotes
             f"number of shards. Underlying error: {e}"
         ) from e
     success(name, f"Vamana graph done in {time() - t1:.1f}s → {target_path}")
 
 
 def step_pca(cfg):
+    # pylint: disable=import-outside-toplevel
     from alayalite.laser.io import read_fbin
     from alayalite.laser.pca import (
         fit_incremental_pca,
@@ -374,8 +364,8 @@ def step_pca(cfg):
         file_size = os.path.getsize(pca_base_path)
         if file_size >= 8:
             with open(pca_base_path, "rb") as f:
-                header = np.fromfile(f, dtype=np.int32, count=2)
-            expected_size = 8 + int(header[0]) * int(header[1]) * 4
+                header_arr = np.fromfile(f, dtype=np.int32, count=2)
+            expected_size = 8 + int(header_arr[0]) * int(header_arr[1]) * 4
             if file_size >= expected_size:
                 warn(name, "PCA files already exist. Skipping.")
                 return
@@ -390,14 +380,12 @@ def step_pca(cfg):
             return
 
     os.makedirs(ddir, exist_ok=True)
-    info(name, f"Loading base vectors from {cfg['base']}")
+    info(name, f"Loading base vectors from {cfg['base']}")  # pylint: disable=inconsistent-quotes
     # seed=None falls through to numpy's global RNG (non-deterministic) —
     # reproducible runs must set pca_seed in the TOML.
     vectors, sample_vecs = sample_vectors_from_fbin(cfg["base"], seed=cfg["pca_seed"])
     _, d = vectors.shape
-    info(
-        name, f"Vectors: {vectors.shape[0]:,} x {d}d, samples: {sample_vecs.shape[0]:,}"
-    )
+    info(name, f"Vectors: {vectors.shape[0]:,} x {d}d, samples: {sample_vecs.shape[0]:,}")
 
     t1 = time()
     pca = fit_incremental_pca(sample_vecs, n_components=d)
@@ -407,7 +395,7 @@ def step_pca(cfg):
 
 
 def step_medoid(cfg):
-    from alayalite.laser.medoid import generate_and_save_medoids
+    from alayalite.laser.medoid import generate_and_save_medoids  # pylint: disable=import-outside-toplevel
 
     name = cfg["name"]
     ddir = data_dir(cfg)
@@ -424,16 +412,20 @@ def step_medoid(cfg):
         warn(name, "Medoids already exist. Skipping.")
         return
 
-    info(name, f"Generating {cfg['ep_num']} medoids...")
+    info(name, f"Generating {cfg['ep_num']} medoids...")  # pylint: disable=inconsistent-quotes
     t1 = time()
     generate_and_save_medoids(
-        base_path, indices_path, vectors_path, cfg["ep_num"],
+        base_path,
+        indices_path,
+        vectors_path,
+        cfg["ep_num"],
         seed=cfg["medoid_seed"],
     )
     success(name, f"Medoid done in {time() - t1:.1f}s")
 
 
 def step_index(cfg):
+    # pylint: disable=import-outside-toplevel
     from alayalite import laser
     from alayalite.laser.io import read_fbin
 
@@ -450,18 +442,15 @@ def step_index(cfg):
         f"Building index R{degree}_MD{md} (threads={build_threads}, ef={ef_indexing})...",
     )
     base = read_fbin(f"{ddir}/dsqg_{name}_pca_base.fbin", use_mmap=True)
-    N, D = base.shape
+    N, D = base.shape  # pylint: disable=invalid-name
     info(name, f"Vectors: {N:,} x {D}d")
 
     rotator_seed = cfg["rotator_seed"]
-    rotator_dump_path = (
-        f"{ddir}/dsqg_{name}_rotator_signs.bin" if cfg["dump_rotator"] else ""
-    )
+    rotator_dump_path = f"{ddir}/dsqg_{name}_rotator_signs.bin" if cfg["dump_rotator"] else ""
     if rotator_seed or rotator_dump_path:
         info(
             name,
-            f"alignment-mode: rotator_seed={rotator_seed}  "
-            f"dump_path={rotator_dump_path or '(off)'}",
+            f"alignment-mode: rotator_seed={rotator_seed}  dump_path={rotator_dump_path or '(off)'}",  # pylint: disable=inconsistent-quotes
         )
 
     t1 = time()
@@ -476,14 +465,12 @@ def step_index(cfg):
         rotator_dump_path=rotator_dump_path,
     )
     index_path = f"{ddir}/dsqg_{name}"
-    index.build_index(
-        cfg["vamana"], index_path, EF=ef_indexing, num_thread=build_threads
-    )
+    index.build_index(cfg["vamana"], index_path, EF=ef_indexing, num_thread=build_threads)
     success(name, f"Index R{degree}_MD{md} done in {time() - t1:.1f}s")
 
 
 def _find_efs(index, query, gt, nq, topk):
-    from alayalite.laser.beam_size import beam_size_gen
+    from alayalite.laser.beam_size import beam_size_gen  # pylint: disable=import-outside-toplevel
 
     efs = []
     gen = beam_size_gen(topk)
@@ -503,9 +490,7 @@ def _find_efs(index, query, gt, nq, topk):
             results.append(pred)
             total_time += t2 - t1
 
-        total_correct = sum(
-            1 for i in range(nq) for j in range(topk) if gt[i][j] in set(results[i])
-        )
+        total_correct = sum(1 for i in range(nq) for j in range(topk) if gt[i][j] in set(results[i]))
         recall = total_correct / (nq * topk) * 100
         qps = nq / total_time
 
@@ -517,7 +502,7 @@ def _find_efs(index, query, gt, nq, topk):
 
 
 def step_search(cfg):
-    import numpy as np
+    # pylint: disable=import-outside-toplevel
     import pandas as pd
     from alayalite import laser
     from alayalite.laser.io import read_fbin, read_ibin
@@ -539,8 +524,8 @@ def step_search(cfg):
     query = read_fbin(cfg["query"])
     gt = read_ibin(cfg["gt"])
 
-    NQ = query.shape[0]
-    N, D = base.shape
+    NQ = query.shape[0]  # pylint: disable=invalid-name
+    N, D = base.shape  # pylint: disable=invalid-name
     info(name, f"Base: {N:,} x {D}d, Queries: {NQ:,}, GT: {gt.shape}")
 
     info(name, f"Loading index R{degree}_MD{md}...")
@@ -558,18 +543,13 @@ def step_search(cfg):
     memory = get_memory_usage() - m1
     info(name, f"Index loaded, memory: {memory:.1f} MB")
 
-    cur_efs = (
-        cfg["efs"] if len(cfg["efs"]) > 0 else _find_efs(index, query, gt, NQ, topk)
-    )
+    cur_efs = cfg["efs"] if len(cfg["efs"]) > 0 else _find_efs(index, query, gt, NQ, topk)
     info(name, f"EFS: {cur_efs}")
     info(name, f"Warmup: {num_warmup} rounds, Runs: {num_runs} per EF")
     info(name, "Running benchmark...\n")
 
     # Print table header
-    print(
-        f"  {BOLD}{'EF':>6}  {'QPS':>10}  {'Recall':>8}  "
-        f"{'Latency(us)':>12}  {'P99.9(us)':>10}{RESET}"
-    )
+    print(f"  {BOLD}{'EF':>6}  {'QPS':>10}  {'Recall':>8}  {'Latency(us)':>12}  {'P99.9(us)':>10}{RESET}")  # pylint: disable=inconsistent-quotes
     separator()
 
     all_qps, all_recall, all_lat, all_p99 = [], [], [], []
@@ -601,9 +581,7 @@ def step_search(cfg):
                 total_time += t2 - t1
                 latencies.append(0)
 
-        total_correct = sum(
-            1 for i in range(NQ) for j in range(topk) if gt[i][j] in set(results[i])
-        )
+        total_correct = sum(1 for i in range(NQ) for j in range(topk) if gt[i][j] in set(results[i]))
 
         qps = NQ * num_runs / total_time
         recall = total_correct / (NQ * topk) * 100
@@ -613,11 +591,7 @@ def step_search(cfg):
         # Print row immediately
         recall_color = GREEN if recall >= 95 else YELLOW if recall >= 90 else RED
         print(
-            f"  {ef:>6d}  "
-            f"{qps:>10.1f}  "
-            f"{recall_color}{recall:>7.2f}%{RESET}  "
-            f"{mean_lat:>12.1f}  "
-            f"{p99_lat:>10.1f}",
+            f"  {ef:>6d}  {qps:>10.1f}  {recall_color}{recall:>7.2f}%{RESET}  {mean_lat:>12.1f}  {p99_lat:>10.1f}",
             flush=True,
         )
 
@@ -641,7 +615,7 @@ def step_search(cfg):
         }
     )
 
-    res_dir = f"{cfg['output']}/results/{name}/dsqg/"
+    res_dir = f"{cfg['output']}/results/{name}/dsqg/"  # pylint: disable=inconsistent-quotes
     os.makedirs(res_dir, exist_ok=True)
     csv_path = f"{res_dir}dsqg_R{degree}_MD{md}_TOP{topk}_T{num_threads}.csv"
     df.to_csv(csv_path, index=False)
@@ -675,8 +649,8 @@ def apply_single_thread_invariant():
 
     Asserts the observed thread counts all land at 1; raises on mismatch.
     """
-    import faiss
-    import threadpoolctl
+    import faiss  # pylint: disable=import-outside-toplevel
+    import threadpoolctl  # pylint: disable=import-outside-toplevel
 
     faiss.omp_set_num_threads(1)
     # Keep a module-level reference to the limiter so it outlives this
@@ -715,7 +689,7 @@ def main():
 
     for toml_path in args.config:
         cfg = load_config(toml_path, args)
-        header(f"{cfg['name']}  ({toml_path})")
+        header(f"{cfg['name']}  ({toml_path})")  # pylint: disable=inconsistent-quotes
         print_config(cfg)
 
         if cfg["force_single_thread"]:
