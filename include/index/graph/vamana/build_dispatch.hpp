@@ -28,7 +28,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
+#include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
 #include <limits>
 #include <random>
@@ -128,8 +128,7 @@ static_assert(kDefaultVamanaBuildParams.seed == kFrozenDefaults.seed,
 static_assert(kDefaultVamanaBuildParams.build_dram_budget_gb ==
                   kFrozenDefaults.build_dram_budget_gb,
               "Vamana default dram_budget drifted — update CLI / binding / fixtures together");
-static_assert(kDefaultVamanaBuildParams.sampling_rate ==
-                  kFrozenDefaults.sampling_rate,
+static_assert(kDefaultVamanaBuildParams.sampling_rate == kFrozenDefaults.sampling_rate,
               "Vamana default sampling_rate drifted — update CLI / binding / fixtures together");
 
 // read_fbin_header — read the 8-byte (num, dim) header of a .fbin without
@@ -216,8 +215,7 @@ inline void gen_random_slice(const std::string &path,
 // wrapper guarantees top-level dispatch and the inner budget loop use the
 // same bytes-per-shard estimate.
 inline double estimate_single_shard_gb(uint32_t num, uint32_t dim, uint32_t R) {
-  return alaya::vamana::estimate_ram_usage_gib(
-      static_cast<size_t>(num), dim, sizeof(float), R);
+  return alaya::vamana::estimate_ram_usage_gib(static_cast<size_t>(num), dim, sizeof(float), R);
 }
 
 // run_single_shard — Phase 1 path. Loads full .fbin, builds Vamana, saves.
@@ -239,19 +237,13 @@ inline void run_single_shard(const BuildVamanaParams &args) {
   params.num_threads = args.num_threads;
   params.seed = args.seed;
 
-  alaya::vamana::VamanaBuilder builder(data.data(),
-                                       static_cast<size_t>(num),
-                                       dim,
-                                       params);
+  alaya::vamana::VamanaBuilder builder(data.data(), static_cast<size_t>(num), dim, params);
   alaya::Timer build_timer;
   builder.build();
   LOG_INFO("total build time: {}s", build_timer.elapsed_s());
 
   alaya::Timer save_timer;
-  alaya::vamana::save_graph(builder.graph(),
-                            out_path,
-                            args.R,
-                            builder.medoid());
+  alaya::vamana::save_graph(builder.graph(), out_path, args.R, builder.medoid());
   LOG_INFO("wrote {} in {}s", out_path, save_timer.elapsed_s());
 }
 
@@ -266,9 +258,9 @@ inline void run_partition_merge(const BuildVamanaParams &args, uint32_t num, uin
   // at matched seeds. A positive override forces the historic 0.01
   // path (or any user-supplied rate in (0, 1]) for callers who depend on it.
   constexpr double kMaxPqTrainingSetSize = 256000.0;
-  const double kSamplingRate = (args.sampling_rate > 0.0F)
-      ? static_cast<double>(args.sampling_rate)
-      : std::min(1.0, kMaxPqTrainingSetSize / static_cast<double>(num));
+  const double kSamplingRate =
+      (args.sampling_rate > 0.0F) ? static_cast<double>(args.sampling_rate)
+                                  : std::min(1.0, kMaxPqTrainingSetSize / static_cast<double>(num));
   const std::string data_path(args.data_path);
   const std::string out_path_str(args.output_path);
 
@@ -288,7 +280,10 @@ inline void run_partition_merge(const BuildVamanaParams &args, uint32_t num, uin
   size_t num_test = 0;
   gen_random_slice(data_path, kSamplingRate, sampling_rng, test_sample, num_test);
   LOG_INFO("sampled train={} test={} (rate {}) in {}s",
-           num_train, num_test, kSamplingRate, sample_timer.elapsed_s());
+           num_train,
+           num_test,
+           kSamplingRate,
+           sample_timer.elapsed_s());
   if (num_train < 3 || num_test < 3) {
     throw std::runtime_error(
         "partition path: sampled train/test too small (>=3 required). "
@@ -311,10 +306,13 @@ inline void run_partition_merge(const BuildVamanaParams &args, uint32_t num, uin
   bp.ram_budget_gib = static_cast<double>(args.build_dram_budget_gb);
   bp.base_kmeans.seed = args.seed;
   std::vector<float> pivots;
-  const size_t num_parts = alaya::vamana::determine_num_parts_with_ram_budget(
-      train_sample.data(), num_train,
-      test_sample.data(), num_test,
-      dim, bp, pivots);
+  const size_t num_parts = alaya::vamana::determine_num_parts_with_ram_budget(train_sample.data(),
+                                                                              num_train,
+                                                                              test_sample.data(),
+                                                                              num_test,
+                                                                              dim,
+                                                                              bp,
+                                                                              pivots);
   LOG_INFO("partition path: frozen num_parts={}", num_parts);
 
   // Write pivots alongside the merged output. DiskANN's
@@ -325,28 +323,24 @@ inline void run_partition_merge(const BuildVamanaParams &args, uint32_t num, uin
   // int32 dim, float32[num_parts * dim]. Downstream tools
   // (e.g. DiskANN's `search_memory_index` sharded init) rely on this file.
   const std::filesystem::path centroids_path =
-      out_path.parent_path() /
-      (out_path.filename().string() + "_centroids.bin");
+      out_path.parent_path() / (out_path.filename().string() + "_centroids.bin");
   {
     std::ofstream cf(centroids_path, std::ios::binary | std::ios::trunc);
     if (!cf.is_open()) {
-      throw std::runtime_error("cannot open centroids file: " +
-                               centroids_path.string());
+      throw std::runtime_error("cannot open centroids file: " + centroids_path.string());
     }
     const int32_t np = static_cast<int32_t>(num_parts);
     const int32_t dd = static_cast<int32_t>(dim);
     cf.write(reinterpret_cast<const char *>(&np), sizeof(int32_t));
     cf.write(reinterpret_cast<const char *>(&dd), sizeof(int32_t));
     cf.write(reinterpret_cast<const char *>(pivots.data()),
-             static_cast<std::streamsize>(num_parts) *
-                 static_cast<std::streamsize>(dim) * sizeof(float));
+             static_cast<std::streamsize>(num_parts) * static_cast<std::streamsize>(dim) *
+                 sizeof(float));
     if (!cf.good()) {
-      throw std::runtime_error("write error on centroids file: " +
-                               centroids_path.string());
+      throw std::runtime_error("write error on centroids file: " + centroids_path.string());
     }
   }
-  LOG_INFO("wrote centroids: {} ({} × {})",
-           centroids_path.string(), num_parts, dim);
+  LOG_INFO("wrote centroids: {} ({} × {})", centroids_path.string(), num_parts, dim);
 
   // Free sample memory before streaming assignment (which may allocate a
   // 512MB read buffer).
@@ -354,8 +348,11 @@ inline void run_partition_merge(const BuildVamanaParams &args, uint32_t num, uin
   test_sample = {};
 
   alaya::Timer assign_timer;
-  auto assign = alaya::vamana::shard_data_by_centroids(
-      data_path, pivots.data(), num_parts, bp.k_base, shard_prefix);
+  auto assign = alaya::vamana::shard_data_by_centroids(data_path,
+                                                       pivots.data(),
+                                                       num_parts,
+                                                       bp.k_base,
+                                                       shard_prefix);
   LOG_INFO("shard assignment done in {}s", assign_timer.elapsed_s());
 
   std::vector<std::filesystem::path> shard_graphs(num_parts);
@@ -385,19 +382,19 @@ inline void run_partition_merge(const BuildVamanaParams &args, uint32_t num, uin
     // `diff_vamana_index.py` consume these per-shard graphs without a
     // naming shim.
     const std::filesystem::path graph_path =
-        work_dir /
-        (std::string("s_subshard-") + std::to_string(s) + "_mem.index");
+        work_dir / (std::string("s_subshard-") + std::to_string(s) + "_mem.index");
     alaya::vamana::save_graph(b.graph(), graph_path, shard_R, b.medoid());
     shard_graphs[s] = graph_path;
     LOG_INFO("shard {}/{} built + saved in {}s -> {}",
-             s + 1, num_parts, shard_timer.elapsed_s(), graph_path.string());
+             s + 1,
+             num_parts,
+             shard_timer.elapsed_s(),
+             graph_path.string());
   }
 
   alaya::Timer medoid_timer;
-  const uint32_t global_medoid =
-      alaya::vamana::compute_medoid_streaming(data_path);
-  LOG_INFO("global medoid = {} (streaming pass {}s)",
-           global_medoid, medoid_timer.elapsed_s());
+  const uint32_t global_medoid = alaya::vamana::compute_medoid_streaming(data_path);
+  LOG_INFO("global medoid = {} (streaming pass {}s)", global_medoid, medoid_timer.elapsed_s());
 
   std::vector<std::filesystem::path> idmaps;
   idmaps.reserve(num_parts);
@@ -405,12 +402,9 @@ inline void run_partition_merge(const BuildVamanaParams &args, uint32_t num, uin
     idmaps.emplace_back(p);
   }
   alaya::Timer merge_timer;
-  alaya::vamana::merge_shards(shard_graphs, idmaps,
-                              out_path_str,
-                              args.R, global_medoid, args.seed);
+  alaya::vamana::merge_shards(shard_graphs, idmaps, out_path_str, args.R, global_medoid, args.seed);
   LOG_INFO("merge done in {}s", merge_timer.elapsed_s());
-  LOG_INFO("partition-merge complete: {} (N={}, num_parts={})",
-           out_path_str, num, num_parts);
+  LOG_INFO("partition-merge complete: {} (N={}, num_parts={})", out_path_str, num, num_parts);
 }
 
 }  // namespace detail
@@ -454,15 +448,14 @@ inline void build_vamana(const BuildVamanaParams &params_in) {
   const std::string data_path(params.data_path);
   const std::string out_path(params.output_path);
 
-  LOG_INFO(
-      "build_vamana_index: data={}, out={}, R={}, L={}, alpha={}, threads={}, seed={}",
-      data_path,
-      out_path,
-      params.R,
-      params.L,
-      params.alpha,
-      params.num_threads,
-      params.seed);
+  LOG_INFO("build_vamana_index: data={}, out={}, R={}, L={}, alpha={}, threads={}, seed={}",
+           data_path,
+           out_path,
+           params.R,
+           params.L,
+           params.alpha,
+           params.num_threads,
+           params.seed);
 
   uint32_t num = 0;
   uint32_t dim = 0;
@@ -471,7 +464,8 @@ inline void build_vamana(const BuildVamanaParams &params_in) {
 
   const double estimated_gb = detail::estimate_single_shard_gb(num, dim, params.R);
   LOG_INFO("estimated single-shard RAM: {:.3f} GiB (budget {:.3f} GiB)",
-           estimated_gb, params.build_dram_budget_gb);
+           estimated_gb,
+           params.build_dram_budget_gb);
 
   if (estimated_gb <= params.build_dram_budget_gb) {
     detail::run_single_shard(params);

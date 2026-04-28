@@ -20,7 +20,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
+#include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
 #include <limits>
 #include <random>
@@ -50,8 +50,7 @@ inline std::vector<uint32_t> read_idmap(const std::filesystem::path &path) {
   in.read(reinterpret_cast<char *>(&count), sizeof(uint32_t));
   in.read(reinterpret_cast<char *>(&stride), sizeof(uint32_t));
   if (!in.good() || stride != 1) {
-    throw std::runtime_error("read_idmap: corrupt header or stride != 1: " +
-                             path.string());
+    throw std::runtime_error("read_idmap: corrupt header or stride != 1: " + path.string());
   }
   std::vector<uint32_t> ids(count);
   if (count > 0) {
@@ -73,13 +72,11 @@ inline std::vector<uint32_t> read_idmap(const std::filesystem::path &path) {
 // file (for datasets too large to hold in memory).
 //
 // block_size bounds peak RAM to `block_size * dim * 4B`. At 1M × 128d = 512MB.
-inline uint32_t compute_medoid_streaming(
-    const std::filesystem::path &fbin_path,
-    size_t block_size = 1'000'000) {
+inline uint32_t compute_medoid_streaming(const std::filesystem::path &fbin_path,
+                                         size_t block_size = 1'000'000) {
   std::ifstream in(fbin_path, std::ios::binary);
   if (!in.is_open()) {
-    throw std::runtime_error("compute_medoid_streaming: cannot open " +
-                             fbin_path.string());
+    throw std::runtime_error("compute_medoid_streaming: cannot open " + fbin_path.string());
   }
   uint32_t num_points_u32 = 0;
   uint32_t dim_u32 = 0;
@@ -95,8 +92,7 @@ inline uint32_t compute_medoid_streaming(
   // Pass 1: streaming centroid.
   std::vector<double> centroid_accum(dim, 0.0);
   std::vector<float> buf(std::min(block_size, N) * dim);
-  const std::streamoff data_start =
-      static_cast<std::streamoff>(2 * sizeof(uint32_t));
+  const std::streamoff data_start = static_cast<std::streamoff>(2 * sizeof(uint32_t));
   in.seekg(data_start);
   size_t read_so_far = 0;
   while (read_so_far < N) {
@@ -139,8 +135,7 @@ inline uint32_t compute_medoid_streaming(
         const float *v = buf.data() + static_cast<size_t>(p) * dim;
         double acc = 0.0;
         for (uint32_t d = 0; d < dim; ++d) {
-          const double diff =
-              static_cast<double>(v[d]) - static_cast<double>(centroid[d]);
+          const double diff = static_cast<double>(v[d]) - static_cast<double>(centroid[d]);
           acc += diff * diff;
         }
         if (acc < th_best) {
@@ -193,18 +188,16 @@ inline uint32_t compute_medoid_streaming(
 // Determinism: same (seed, shard inputs, medoid) yields byte-identical
 // output. `std::shuffle` with `std::mt19937(seed)` is reproducible across
 // compilers and platforms (the algorithm is mandated by the C++ standard).
-inline uint64_t merge_shards(
-    const std::vector<std::filesystem::path> &shard_graph_paths,
-    const std::vector<std::filesystem::path> &shard_idmap_paths,
-    const std::filesystem::path &output_path,
-    uint32_t R,
-    uint32_t medoid,
-    uint64_t seed,
-    uint64_t frozen_pts = 0) {
+inline uint64_t merge_shards(const std::vector<std::filesystem::path> &shard_graph_paths,
+                             const std::vector<std::filesystem::path> &shard_idmap_paths,
+                             const std::filesystem::path &output_path,
+                             uint32_t R,
+                             uint32_t medoid,
+                             uint64_t seed,
+                             uint64_t frozen_pts = 0) {
   const size_t nshards = shard_graph_paths.size();
   if (nshards == 0 || shard_idmap_paths.size() != nshards) {
-    throw std::invalid_argument(
-        "merge_shards: require ≥ 1 shard and paired graph/idmap paths");
+    throw std::invalid_argument("merge_shards: require ≥ 1 shard and paired graph/idmap paths");
   }
 
   alaya::Timer merge_timer;
@@ -225,14 +218,15 @@ inline uint64_t merge_shards(
     }
     total_shard_entries += idmaps[s].size();
     if (!std::is_sorted(idmaps[s].begin(), idmaps[s].end())) {
-      throw std::runtime_error(
-          "merge_shards: idmap is not sorted ascending (shard " +
-          std::to_string(s) + "); shard_assigner invariant violated");
+      throw std::runtime_error("merge_shards: idmap is not sorted ascending (shard " +
+                               std::to_string(s) + "); shard_assigner invariant violated");
     }
   }
   const size_t N = max_global_id + 1;
   LOG_INFO("merge_shards: N={}, nshards={}, total_shard_entries={} (avg k_base={:.2f})",
-           N, nshards, total_shard_entries,
+           N,
+           nshards,
+           total_shard_entries,
            static_cast<double>(total_shard_entries) / static_cast<double>(N));
 
   // Open per-shard graph readers. Skip the 24-byte header; subsequent reads
@@ -255,18 +249,16 @@ inline uint64_t merge_shards(
     }
     readers[s].seekg(12, std::ios::beg);
     uint32_t shard_local_medoid = 0;
-    readers[s].read(reinterpret_cast<char *>(&shard_local_medoid),
-                    sizeof(uint32_t));
+    readers[s].read(reinterpret_cast<char *>(&shard_local_medoid), sizeof(uint32_t));
     if (!readers[s].good()) {
       throw std::runtime_error("merge_shards: cannot read shard medoid: " +
                                shard_graph_paths[s].string());
     }
     if (shard_local_medoid >= idmaps[s].size()) {
-      throw std::runtime_error(
-          "merge_shards: shard " + std::to_string(s) +
-          " medoid (local " + std::to_string(shard_local_medoid) +
-          ") is out of range for idmap size " +
-          std::to_string(idmaps[s].size()));
+      throw std::runtime_error("merge_shards: shard " + std::to_string(s) + " medoid (local " +
+                               std::to_string(shard_local_medoid) +
+                               ") is out of range for idmap size " +
+                               std::to_string(idmaps[s].size()));
     }
     shard_medoids_global[s] = idmaps[s][shard_local_medoid];
     readers[s].seekg(24, std::ios::beg);  // skip to per-node records
@@ -277,8 +269,7 @@ inline uint64_t merge_shards(
   std::filesystem::create_directories(output_path.parent_path());
   std::ofstream out(output_path, std::ios::binary | std::ios::trunc);
   if (!out.is_open()) {
-    throw std::runtime_error("merge_shards: cannot open output " +
-                             output_path.string());
+    throw std::runtime_error("merge_shards: cannot open output " + output_path.string());
   }
   uint64_t expected_file_size = 24;
   out.write(reinterpret_cast<const char *>(&expected_file_size), sizeof(uint64_t));
@@ -314,9 +305,8 @@ inline uint64_t merge_shards(
       uint32_t k = 0;
       readers[s].read(reinterpret_cast<char *>(&k), sizeof(uint32_t));
       if (!readers[s].good()) {
-        throw std::runtime_error(
-            "merge_shards: read error on shard " + std::to_string(s) +
-            " at shard-local id " + std::to_string(shard_cursor[s]));
+        throw std::runtime_error("merge_shards: read error on shard " + std::to_string(s) +
+                                 " at shard-local id " + std::to_string(shard_cursor[s]));
       }
       if (k > 0) {
         std::vector<uint32_t> local_nbrs(k);
@@ -324,9 +314,8 @@ inline uint64_t merge_shards(
                         static_cast<std::streamsize>(k) * sizeof(uint32_t));
         for (uint32_t lnb : local_nbrs) {
           if (lnb >= idmaps[s].size()) {
-            throw std::runtime_error(
-                "merge_shards: out-of-range shard-local neighbor " +
-                std::to_string(lnb) + " in shard " + std::to_string(s));
+            throw std::runtime_error("merge_shards: out-of-range shard-local neighbor " +
+                                     std::to_string(lnb) + " in shard " + std::to_string(s));
           }
           const uint32_t gnb = idmaps[s][lnb];
           if (gnb == gid) {
@@ -357,8 +346,7 @@ inline uint64_t merge_shards(
 
   // Patch the expected_file_size header.
   out.seekp(0, std::ios::beg);
-  out.write(reinterpret_cast<const char *>(&expected_file_size),
-            sizeof(uint64_t));
+  out.write(reinterpret_cast<const char *>(&expected_file_size), sizeof(uint64_t));
   if (!out.good()) {
     throw std::runtime_error("merge_shards: write error on output");
   }
@@ -368,13 +356,11 @@ inline uint64_t merge_shards(
   // nshards × uint32 global_medoid. Path = `<output>_medoids.bin`,
   // matching disk_utils.cpp:376's destination. Consumers (DiskANN SSD
   // search, PQ flash index) use this for multi-entry-point init.
-  const std::filesystem::path medoids_path(
-      output_path.string() + "_medoids.bin");
+  const std::filesystem::path medoids_path(output_path.string() + "_medoids.bin");
   {
     std::ofstream mf(medoids_path, std::ios::binary | std::ios::trunc);
     if (!mf.is_open()) {
-      throw std::runtime_error("merge_shards: cannot open medoids file: " +
-                               medoids_path.string());
+      throw std::runtime_error("merge_shards: cannot open medoids file: " + medoids_path.string());
     }
     const uint32_t nshards_u32 = static_cast<uint32_t>(nshards);
     const uint32_t one_stride = 1;
@@ -383,20 +369,20 @@ inline uint64_t merge_shards(
     mf.write(reinterpret_cast<const char *>(shard_medoids_global.data()),
              static_cast<std::streamsize>(nshards) * sizeof(uint32_t));
     if (!mf.good()) {
-      throw std::runtime_error("merge_shards: write error on " +
-                               medoids_path.string());
+      throw std::runtime_error("merge_shards: write error on " + medoids_path.string());
     }
   }
-  LOG_INFO("merge_shards: wrote medoids to {} ({} entries)",
-           medoids_path.string(), nshards);
+  LOG_INFO("merge_shards: wrote medoids to {} ({} entries)", medoids_path.string(), nshards);
 
   if (missing_nodes > 0) {
-    LOG_WARN("merge_shards: {} node id(s) absent from all shards (wrote k=0)",
-             missing_nodes);
+    LOG_WARN("merge_shards: {} node id(s) absent from all shards (wrote k=0)", missing_nodes);
   }
   LOG_INFO("merge_shards: wrote {} bytes to {} in {:.2f}s, medoid={}, R={}",
-           expected_file_size, output_path.string(), merge_timer.elapsed_s(),
-           medoid, R);
+           expected_file_size,
+           output_path.string(),
+           merge_timer.elapsed_s(),
+           medoid,
+           R);
   return expected_file_size;
 }
 

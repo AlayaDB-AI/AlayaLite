@@ -20,7 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <filesystem>
+#include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -107,10 +107,10 @@ struct ShardOutputStreams {
 // ShardAssignmentResult — returned by `shard_data_by_centroids` so the
 // caller can log stats and chain into per-shard Vamana builds.
 struct ShardAssignmentResult {
-  std::vector<uint32_t> counts;         // per-shard point count (replicated: sum = N * k_base)
-  std::vector<std::string> data_paths;  // per-shard data file
-  std::vector<std::string> idmap_paths; // per-shard idmap file
-  uint32_t dim = 0;                     // propagated from input for convenience
+  std::vector<uint32_t> counts;          // per-shard point count (replicated: sum = N * k_base)
+  std::vector<std::string> data_paths;   // per-shard data file
+  std::vector<std::string> idmap_paths;  // per-shard idmap file
+  uint32_t dim = 0;                      // propagated from input for convenience
 };
 
 // shard_data_by_centroids — stream a `.fbin` base file, compute the top
@@ -136,13 +136,12 @@ struct ShardAssignmentResult {
 // Throws on any I/O error or header mismatch. On throw, partially written
 // shard files are left on disk for post-mortem inspection (caller is
 // responsible for cleanup of the prefix directory).
-inline ShardAssignmentResult shard_data_by_centroids(
-    const std::filesystem::path &fbin_path,
-    const float *centroids,
-    size_t num_centers,
-    size_t k_base,
-    const std::filesystem::path &prefix,
-    size_t block_size = kShardAssignBlockSize) {
+inline ShardAssignmentResult shard_data_by_centroids(const std::filesystem::path &fbin_path,
+                                                     const float *centroids,
+                                                     size_t num_centers,
+                                                     size_t k_base,
+                                                     const std::filesystem::path &prefix,
+                                                     size_t block_size = kShardAssignBlockSize) {
   if (num_centers == 0 || k_base == 0 || k_base > num_centers) {
     throw std::invalid_argument("shard_data_by_centroids: invalid num_centers / k_base");
   }
@@ -163,9 +162,13 @@ inline ShardAssignmentResult shard_data_by_centroids(
   const size_t num_points = num_points_u32;
   const uint32_t dim = dim_u32;
 
-  LOG_INFO(
-      "shard_assigner: input={} N={} dim={} num_centers={} k_base={} block={}",
-      fbin_path.string(), num_points, dim, num_centers, k_base, block_size);
+  LOG_INFO("shard_assigner: input={} N={} dim={} num_centers={} k_base={} block={}",
+           fbin_path.string(),
+           num_points,
+           dim,
+           num_centers,
+           k_base,
+           block_size);
 
   // Open one (data, idmap) pair per shard upfront. std::ofstream is not
   // copyable/movable pre-C++11; use direct vector construction via emplace.
@@ -179,8 +182,9 @@ inline ShardAssignmentResult shard_data_by_centroids(
   for (size_t i = 0; i < num_centers; ++i) {
     result.data_paths[i] = shard_data_path(prefix, i);
     result.idmap_paths[i] = shard_idmap_path(prefix, i);
-    shards.emplace_back(std::make_unique<detail::ShardOutputStreams>(
-        result.data_paths[i], result.idmap_paths[i], dim));
+    shards.emplace_back(std::make_unique<detail::ShardOutputStreams>(result.data_paths[i],
+                                                                     result.idmap_paths[i],
+                                                                     dim));
   }
 
   const size_t effective_block = std::min(block_size, num_points);
@@ -196,12 +200,16 @@ inline ShardAssignmentResult shard_data_by_centroids(
     in.read(reinterpret_cast<char *>(block_buf.data()),
             static_cast<std::streamsize>(cur) * dim * sizeof(float));
     if (static_cast<size_t>(in.gcount()) != cur * dim * sizeof(float)) {
-      throw std::runtime_error(
-          "shard_data_by_centroids: short read on input .fbin");
+      throw std::runtime_error("shard_data_by_centroids: short read on input .fbin");
     }
 
-    compute_closest_centers(block_buf.data(), cur, dim, centroids, num_centers,
-                            k_base, closest.data());
+    compute_closest_centers(block_buf.data(),
+                            cur,
+                            dim,
+                            centroids,
+                            num_centers,
+                            k_base,
+                            closest.data());
 
     // Scatter to shards. The writes are sequential per shard (each shard's
     // `ofstream` appends in order), so no intra-shard locking is needed.
@@ -220,9 +228,9 @@ inline ShardAssignmentResult shard_data_by_centroids(
 
     processed += cur;
     LOG_INFO("shard_assigner: {}/{} points assigned ({:.1f}%)",
-             processed, num_points,
-             100.0 * static_cast<double>(processed) /
-                 static_cast<double>(num_points));
+             processed,
+             num_points,
+             100.0 * static_cast<double>(processed) / static_cast<double>(num_points));
   }
   in.close();
 
@@ -234,9 +242,11 @@ inline ShardAssignmentResult shard_data_by_centroids(
   for (size_t i = 0; i < num_centers; ++i) {
     total_written += result.counts[i];
   }
-  LOG_INFO(
-      "shard_assigner: done in {:.2f}s, {} × {} k-base → {} total shard entries",
-      assign_timer.elapsed_s(), num_points, k_base, total_written);
+  LOG_INFO("shard_assigner: done in {:.2f}s, {} × {} k-base → {} total shard entries",
+           assign_timer.elapsed_s(),
+           num_points,
+           k_base,
+           total_written);
   if (total_written != num_points * k_base) {
     throw std::runtime_error(
         "shard_data_by_centroids: total shard entries != N * k_base "
