@@ -71,9 +71,7 @@ PINNED_ALPHA = "1.2"
 PINNED_SEED = "1234"
 PINNED_THREADS = "1"
 
-DEFAULT_DISKANN_BIN = Path(
-    "/md1/huangliang/alaya-dev/Laser/DiskANN/build/apps/build_merged_vamana_standalone"
-)
+DEFAULT_DISKANN_BIN = Path("/md1/huangliang/alaya-dev/Laser/DiskANN/build/apps/build_merged_vamana_standalone")
 
 
 def _alaya_cli() -> Path | None:
@@ -147,14 +145,22 @@ def _run_alaya(cli: Path, data_path: Path, prefix: Path, budget_gib: str) -> Non
     subprocess.run(
         [
             str(cli),
-            "--data_path", str(data_path),
-            "--index_path_prefix", str(prefix),
-            "-R", PINNED_R,
-            "-L", PINNED_L,
-            "--alpha", PINNED_ALPHA,
-            "--seed", PINNED_SEED,
-            "-T", PINNED_THREADS,
-            "--build_dram_budget", budget_gib,
+            "--data_path",
+            str(data_path),
+            "--index_path_prefix",
+            str(prefix),
+            "-R",
+            PINNED_R,
+            "-L",
+            PINNED_L,
+            "--alpha",
+            PINNED_ALPHA,
+            "--seed",
+            PINNED_SEED,
+            "-T",
+            PINNED_THREADS,
+            "--build_dram_budget",
+            budget_gib,
         ],
         check=True,
         env={**os.environ, "OMP_NUM_THREADS": PINNED_THREADS},
@@ -171,18 +177,29 @@ def _run_diskann_aligned(
     subprocess.run(
         [
             str(cli),
-            "--data_type", "float",
-            "--dist_fn", "l2",
-            "--data_path", str(data_path),
-            "--index_path_prefix", str(prefix),
-            "-R", PINNED_R,
-            "-L", PINNED_L,
-            "-T", PINNED_THREADS,
-            "-M", budget_gib,
-            "--seed", PINNED_SEED,
-            "--shuffle_seed", PINNED_SEED,
+            "--data_type",
+            "float",
+            "--dist_fn",
+            "l2",
+            "--data_path",
+            str(data_path),
+            "--index_path_prefix",
+            str(prefix),
+            "-R",
+            PINNED_R,
+            "-L",
+            PINNED_L,
+            "-T",
+            PINNED_THREADS,
+            "-M",
+            budget_gib,
+            "--seed",
+            PINNED_SEED,
+            "--shuffle_seed",
+            PINNED_SEED,
             "--drop_self_loops",
-            "--forced_global_medoid", str(forced_medoid),
+            "--forced_global_medoid",
+            str(forced_medoid),
             "--keep_intermediates",
         ],
         check=True,
@@ -264,10 +281,7 @@ def _check_partition_alignment(alaya: dict, diskann: dict) -> tuple[bool, str]:
             f"at downstream artifacts."
         )
     if alaya["num_shards"] != diskann["num_shards"]:
-        return False, (
-            f"num_parts mismatch: alaya={alaya['num_shards']} "
-            f"diskann={diskann['num_shards']}"
-        )
+        return False, (f"num_parts mismatch: alaya={alaya['num_shards']} diskann={diskann['num_shards']}")
     if alaya["centroids_header"]["num_parts"] != diskann["centroids_header"]["num_parts"]:
         return False, "centroids.bin num_parts header divergence"
     if alaya["centroids_header"]["dim"] != diskann["centroids_header"]["dim"]:
@@ -375,8 +389,11 @@ def test_sharded_generates_baseline(alaya_cli: Path, diskann_aligned_cli: Path) 
             "dataset": "synth_100k_512d",
             "budget_gib": SYNTH_BUDGET_GIB,
             "params": {
-                "R": PINNED_R, "L": PINNED_L, "alpha": PINNED_ALPHA,
-                "seed": PINNED_SEED, "num_threads": PINNED_THREADS,
+                "R": PINNED_R,
+                "L": PINNED_L,
+                "alpha": PINNED_ALPHA,
+                "seed": PINNED_SEED,
+                "num_threads": PINNED_THREADS,
             },
             "alaya": alaya_metrics,
             "diskann": diskann_metrics,
@@ -388,10 +405,7 @@ def test_sharded_generates_baseline(alaya_cli: Path, diskann_aligned_cli: Path) 
 def test_sharded_byte_equality_synth(alaya_cli: Path, diskann_aligned_cli: Path) -> None:
     """Tier A primary gate. Compare AlayaLite vs patched DiskANN at matched seeds."""
     if not SYNTH_FIXTURE.exists():
-        pytest.skip(
-            f"baseline fixture missing at {SYNTH_FIXTURE}; "
-            f"run test_sharded_generates_baseline first"
-        )
+        pytest.skip(f"baseline fixture missing at {SYNTH_FIXTURE}; run test_sharded_generates_baseline first")
     fixture = json.loads(SYNTH_FIXTURE.read_text())
     with tempfile.TemporaryDirectory() as tmpdir:
         out_dir = Path(tmpdir)
@@ -435,9 +449,7 @@ def test_sharded_byte_equality_gist1m(alaya_cli: Path, diskann_aligned_cli: Path
 
 @pytest.mark.extended
 @pytest.mark.usefixtures("gist_dataset_ready")
-def test_sharded_generates_baseline_gist1m(
-    alaya_cli: Path, diskann_aligned_cli: Path
-) -> None:
+def test_sharded_generates_baseline_gist1m(alaya_cli: Path, diskann_aligned_cli: Path) -> None:
     """Manual GIST-1M fixture seeder (extended-marker, not part of CI)."""
     if GIST_FIXTURE.exists():
         pytest.skip(f"GIST fixture already present: {GIST_FIXTURE}")
@@ -454,8 +466,11 @@ def test_sharded_generates_baseline_gist1m(
             "dataset": "gist1m",
             "budget_gib": GIST_BUDGET_GIB,
             "params": {
-                "R": PINNED_R, "L": PINNED_L, "alpha": PINNED_ALPHA,
-                "seed": PINNED_SEED, "num_threads": PINNED_THREADS,
+                "R": PINNED_R,
+                "L": PINNED_L,
+                "alpha": PINNED_ALPHA,
+                "seed": PINNED_SEED,
+                "num_threads": PINNED_THREADS,
             },
             "alaya": alaya_metrics,
             "diskann": diskann_metrics,

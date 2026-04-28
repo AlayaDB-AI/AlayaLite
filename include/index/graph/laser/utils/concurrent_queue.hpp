@@ -19,108 +19,93 @@
 #include <type_traits>
 #include <unordered_set>
 
-
-template<typename T>
+template <typename T>
 class ConcurrentQueue {
-    using chrono_us_t = std::chrono::microseconds;
-    using mutex_locker = std::unique_lock<std::mutex>;
+  using chrono_us_t = std::chrono::microseconds;
+  using mutex_locker = std::unique_lock<std::mutex>;
 
-    std::queue<T>           queue_;
-    std::mutex              mutex_;
-    std::mutex              push_mut_;
-    std::mutex              pop_mut_;
-    std::condition_variable push_cv_;
-    std::condition_variable pop_cv_;
-    T                       null_T_;
+  std::queue<T> queue_;
+  std::mutex mutex_;
+  std::mutex push_mut_;
+  std::mutex pop_mut_;
+  std::condition_variable push_cv_;
+  std::condition_variable pop_cv_;
+  T null_T_;
 
-    public:
-    ConcurrentQueue() {
-    }
+ public:
+  ConcurrentQueue() {}
 
-    explicit ConcurrentQueue(T nullT) {
-        this->null_T_ = nullT;
-    }
+  explicit ConcurrentQueue(T nullT) { this->null_T_ = nullT; }
 
-    ~ConcurrentQueue() {
-        this->push_cv_.notify_all();
-        this->pop_cv_.notify_all();
-    }
+  ~ConcurrentQueue() {
+    this->push_cv_.notify_all();
+    this->pop_cv_.notify_all();
+  }
 
-    // queue stats
-    /**
-     * @brief Returns the current size of the concurrent queue
-     * @return The number of elements currently in the queue
-     * @thread-safe This method is thread-safe
-     */
-    uint64_t size() {
-        mutex_locker lk(this->mutex_);
-        uint64_t     ret = queue_.size();
-        lk.unlock();
-        return ret;
-    }
+  // queue stats
+  /**
+   * @brief Returns the current size of the concurrent queue
+   * @return The number of elements currently in the queue
+   * @thread-safe This method is thread-safe
+   */
+  uint64_t size() {
+    mutex_locker lk(this->mutex_);
+    uint64_t ret = queue_.size();
+    lk.unlock();
+    return ret;
+  }
 
-    bool empty() {
-        return (this->size() == 0);
-    }
+  bool empty() { return (this->size() == 0); }
 
-    // PUSH BACK
-    void push(T& new_val) {
-        mutex_locker lk(this->mutex_);
-        this->queue_.push(new_val);
-        lk.unlock();
-    }
+  // PUSH BACK
+  void push(T &new_val) {
+    mutex_locker lk(this->mutex_);
+    this->queue_.push(new_val);
+    lk.unlock();
+  }
 
-    template<class Iterator>
-    void insert(Iterator iter_begin, Iterator iter_end) {
-        mutex_locker lk(this->mutex_);
-        for (Iterator it = iter_begin; it != iter_end; it++) {
-        this->queue_.push(*it);
-        }
-        lk.unlock();
+  template <class Iterator>
+  void insert(Iterator iter_begin, Iterator iter_end) {
+    mutex_locker lk(this->mutex_);
+    for (Iterator it = iter_begin; it != iter_end; it++) {
+      this->queue_.push(*it);
     }
+    lk.unlock();
+  }
 
-    // POP FRONT
-    T pop() {
-        mutex_locker lk(this->mutex_);
-        if (this->queue_.empty()) {
-        lk.unlock();
-        return this->null_T_;
-        } else {
-        T ret = this->queue_.front();
-        this->queue_.pop();
-        // diskann::cout << "thread_id: " << std::this_thread::get_id() << ",
-        // ctx: "
-        // << ret.ctx << "\n";
-        lk.unlock();
-        return ret;
-        }
+  // POP FRONT
+  T pop() {
+    mutex_locker lk(this->mutex_);
+    if (this->queue_.empty()) {
+      lk.unlock();
+      return this->null_T_;
+    } else {
+      T ret = this->queue_.front();
+      this->queue_.pop();
+      // diskann::cout << "thread_id: " << std::this_thread::get_id() << ",
+      // ctx: "
+      // << ret.ctx << "\n";
+      lk.unlock();
+      return ret;
     }
+  }
 
-    // register for notifications
-    void wait_for_push_notify(chrono_us_t wait_time = chrono_us_t{10}) {
-        mutex_locker lk(this->push_mut_);
-        this->push_cv_.wait_for(lk, wait_time);
-        lk.unlock();
-    }
+  // register for notifications
+  void wait_for_push_notify(chrono_us_t wait_time = chrono_us_t{10}) {
+    mutex_locker lk(this->push_mut_);
+    this->push_cv_.wait_for(lk, wait_time);
+    lk.unlock();
+  }
 
-    void wait_for_pop_notify(chrono_us_t wait_time = chrono_us_t{10}) {
-        mutex_locker lk(this->pop_mut_);
-        this->pop_cv_.wait_for(lk, wait_time);
-        lk.unlock();
-    }
+  void wait_for_pop_notify(chrono_us_t wait_time = chrono_us_t{10}) {
+    mutex_locker lk(this->pop_mut_);
+    this->pop_cv_.wait_for(lk, wait_time);
+    lk.unlock();
+  }
 
-    // just notify functions
-    void push_notify_one() {
-        this->push_cv_.notify_one();
-    }
-    void push_notify_all() {
-        this->push_cv_.notify_all();
-    }
-    void pop_notify_one() {
-        this->pop_cv_.notify_one();
-    }
-    void pop_notify_all() {
-        this->pop_cv_.notify_all();
-    }
+  // just notify functions
+  void push_notify_one() { this->push_cv_.notify_one(); }
+  void push_notify_all() { this->push_cv_.notify_all(); }
+  void pop_notify_one() { this->pop_cv_.notify_one(); }
+  void pop_notify_all() { this->pop_cv_.notify_all(); }
 };
-

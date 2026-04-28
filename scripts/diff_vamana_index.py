@@ -24,6 +24,7 @@ Output sections:
 
 All integers in the .index format are little-endian on x86_64.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,8 +66,7 @@ def load_index(path: Path) -> VamanaIndex:
     file_size, max_deg, start, frozen = struct.unpack_from("<QIIQ", data, 0)
     if file_size != len(data):
         print(
-            f"warn: {path} expected_file_size header={file_size} "
-            f"but actual size is {len(data)} (header may be stale)",
+            f"warn: {path} expected_file_size header={file_size} but actual size is {len(data)} (header may be stale)",
             file=sys.stderr,
         )
     adjacency: List[List[int]] = []
@@ -179,14 +179,8 @@ def _print_degree_stats(idx: VamanaIndex, label: str) -> None:
     out_degs = [len(nb) for nb in idx.adjacency]
     in_degs = compute_in_degrees(idx)
     print(f"## Degree stats ({label})\n")
-    print(
-        f"  out-degree   avg={sum(out_degs) / max(1, len(out_degs)):.2f}  "
-        f"min={min(out_degs)}  max={max(out_degs)}"
-    )
-    print(
-        f"  in-degree    avg={sum(in_degs) / max(1, len(in_degs)):.2f}  "
-        f"min={min(in_degs)}  max={max(in_degs)}"
-    )
+    print(f"  out-degree   avg={sum(out_degs) / max(1, len(out_degs)):.2f}  min={min(out_degs)}  max={max(out_degs)}")
+    print(f"  in-degree    avg={sum(in_degs) / max(1, len(in_degs)):.2f}  min={min(in_degs)}  max={max(in_degs)}")
     print("  out-degree histogram (10 bins):")
     for lo, hi, cnt in _histogram(out_degs, 10):
         print(f"    [{lo:>4}, {hi:>4}]  {cnt}")
@@ -209,8 +203,7 @@ def _print_bfs_stats(idx: VamanaIndex, label: str, bfs_samples: int, seed: int) 
     print(f"  unreachable from medoid   {unreachable}")
     print(f"  max BFS depth from medoid {max_depth}")
     print(
-        f"  sampled eccentricity (n={bfs_samples}): "
-        f"max_radius={max_ecc}  total_unreachable_events={extra_unreachable}"
+        f"  sampled eccentricity (n={bfs_samples}): max_radius={max_ecc}  total_unreachable_events={extra_unreachable}"
     )
     print()
 

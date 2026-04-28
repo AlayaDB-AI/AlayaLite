@@ -40,91 +40,90 @@ namespace alaya::laser::data {
  */
 template <typename T, typename Dims = std::vector<size_t>, typename Alloc = memory::Allocator<T>>
 class Array {
-    static_assert(std::is_trivial_v<T>, "alaya::laser::data::Array requires a trivial element type");
+  static_assert(std::is_trivial_v<T>, "alaya::laser::data::Array requires a trivial element type");
 
-    using traits = std::allocator_traits<Alloc>;
+  using traits = std::allocator_traits<Alloc>;
 
-   public:
-    using allocator_type = Alloc;
-    using value_type = T;
-    using pointer = typename traits::pointer;
-    using const_pointer = typename traits::const_pointer;
-    using reference = T&;
-    using const_reference = const T&;
+ public:
+  using allocator_type = Alloc;
+  using value_type = T;
+  using pointer = typename traits::pointer;
+  using const_pointer = typename traits::const_pointer;
+  using reference = T &;
+  using const_reference = const T &;
 
-    Array() = default;
+  Array() = default;
 
-    explicit Array(Dims dims, const Alloc& allocator)
-        : dims_{std::move(dims)}, allocator_{allocator} {
-        const size_t n = element_count();
-        pointer_ = (n == 0) ? nullptr : traits::allocate(allocator_, n);
+  explicit Array(Dims dims, const Alloc &allocator)
+      : dims_{std::move(dims)}, allocator_{allocator} {
+    const size_t n = element_count();
+    pointer_ = (n == 0) ? nullptr : traits::allocate(allocator_, n);
+  }
+
+  explicit Array(Dims dims) : Array(std::move(dims), Alloc{}) {}
+
+  Array(const Array &) = delete;
+  Array &operator=(const Array &) = delete;
+
+  Array(Array &&other) noexcept
+      : pointer_{std::exchange(other.pointer_, nullptr)},
+        dims_{std::move(other.dims_)},
+        allocator_{std::move(other.allocator_)} {}
+
+  Array &operator=(Array &&other) noexcept {
+    if (this != &other) {
+      destroy();
+      pointer_ = std::exchange(other.pointer_, nullptr);
+      dims_ = std::move(other.dims_);
+      allocator_ = std::move(other.allocator_);
     }
+    return *this;
+  }
 
-    explicit Array(Dims dims) : Array(std::move(dims), Alloc{}) {}
+  ~Array() noexcept { destroy(); }
 
-    Array(const Array&) = delete;
-    Array& operator=(const Array&) = delete;
+  [[nodiscard]] pointer data() noexcept { return pointer_; }
+  [[nodiscard]] const_pointer data() const noexcept { return pointer_; }
 
-    Array(Array&& other) noexcept
-        : pointer_{std::exchange(other.pointer_, nullptr)},
-          dims_{std::move(other.dims_)},
-          allocator_{std::move(other.allocator_)} {}
+  [[nodiscard]] reference at(size_t idx) noexcept { return pointer_[idx]; }
+  [[nodiscard]] const_reference at(size_t idx) const noexcept { return pointer_[idx]; }
 
-    Array& operator=(Array&& other) noexcept {
-        if (this != &other) {
-            destroy();
-            pointer_ = std::exchange(other.pointer_, nullptr);
-            dims_ = std::move(other.dims_);
-            allocator_ = std::move(other.allocator_);
-        }
-        return *this;
+  reference operator[](size_t idx) noexcept { return pointer_[idx]; }
+
+  void save(std::ofstream &output) const {
+    if (output.good() && pointer_ != nullptr) {
+      output.write(reinterpret_cast<const char *>(pointer_),
+                   static_cast<std::streamsize>(byte_count()));
     }
+  }
 
-    ~Array() noexcept { destroy(); }
-
-    [[nodiscard]] pointer data() noexcept { return pointer_; }
-    [[nodiscard]] const_pointer data() const noexcept { return pointer_; }
-
-    [[nodiscard]] reference at(size_t idx) noexcept { return pointer_[idx]; }
-    [[nodiscard]] const_reference at(size_t idx) const noexcept { return pointer_[idx]; }
-
-    reference operator[](size_t idx) noexcept { return pointer_[idx]; }
-
-    void save(std::ofstream& output) const {
-        if (output.good() && pointer_ != nullptr) {
-            output.write(reinterpret_cast<const char*>(pointer_),
-                         static_cast<std::streamsize>(byte_count()));
-        }
+  void load(std::ifstream &input) {
+    if (pointer_ != nullptr) {
+      input.read(reinterpret_cast<char *>(pointer_), static_cast<std::streamsize>(byte_count()));
     }
+  }
 
-    void load(std::ifstream& input) {
-        if (pointer_ != nullptr) {
-            input.read(reinterpret_cast<char*>(pointer_),
-                       static_cast<std::streamsize>(byte_count()));
-        }
+ private:
+  [[nodiscard]] size_t element_count() const noexcept {
+    size_t n = 1;
+    for (auto d : dims_) {
+      n *= d;
     }
+    return n;
+  }
 
-   private:
-    [[nodiscard]] size_t element_count() const noexcept {
-        size_t n = 1;
-        for (auto d : dims_) {
-            n *= d;
-        }
-        return n;
+  [[nodiscard]] size_t byte_count() const noexcept { return sizeof(T) * element_count(); }
+
+  void destroy() noexcept {
+    if (pointer_ != nullptr) {
+      traits::deallocate(allocator_, pointer_, element_count());
+      pointer_ = nullptr;
     }
+  }
 
-    [[nodiscard]] size_t byte_count() const noexcept { return sizeof(T) * element_count(); }
-
-    void destroy() noexcept {
-        if (pointer_ != nullptr) {
-            traits::deallocate(allocator_, pointer_, element_count());
-            pointer_ = nullptr;
-        }
-    }
-
-    pointer pointer_ = nullptr;
-    [[no_unique_address]] Dims dims_{};
-    [[no_unique_address]] Alloc allocator_{};
+  pointer pointer_ = nullptr;
+  [[no_unique_address]] Dims dims_{};
+  [[no_unique_address]] Alloc allocator_{};
 };
 
 }  // namespace alaya::laser::data

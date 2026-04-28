@@ -50,8 +50,7 @@ struct Neighbor {
 class NeighborPriorityQueue {
  public:
   NeighborPriorityQueue() = default;
-  explicit NeighborPriorityQueue(size_t capacity)
-      : capacity_(capacity), data_(capacity + 1) {}
+  explicit NeighborPriorityQueue(size_t capacity) : capacity_(capacity), data_(capacity + 1) {}
 
   void reserve(size_t capacity) {
     if (capacity + 1 > data_.size()) {
@@ -168,9 +167,8 @@ inline void occlude_list(uint32_t location,
           continue;
         }
         float djk = dist_fn(iter2->id, iter->id);
-        occlude_factor[j] =
-            (djk == 0.0f) ? std::numeric_limits<float>::max()
-                          : std::max(occlude_factor[j], iter2->distance / djk);
+        occlude_factor[j] = (djk == 0.0f) ? std::numeric_limits<float>::max()
+                                          : std::max(occlude_factor[j], iter2->distance / djk);
       }
     }
     cur_alpha *= 1.2f;

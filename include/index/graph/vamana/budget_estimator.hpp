@@ -37,9 +37,7 @@ inline constexpr float kBudgetGraphSlackFactor = 1.3f;
 // Round `x` up to the nearest multiple of 8. Equivalent to DiskANN's
 // `ROUND_UP(X, 8)` macro. Captures the 8-float / 32-byte cache-line pad
 // of the in-memory data store.
-inline constexpr uint32_t round_up_8(uint32_t x) noexcept {
-  return ((x + 7U) / 8U) * 8U;
-}
+inline constexpr uint32_t round_up_8(uint32_t x) noexcept { return ((x + 7U) / 8U) * 8U; }
 
 // estimate_ram_usage_bytes — DiskANN's `estimate_ram_usage` formula,
 // returning bytes. Inputs:
@@ -66,16 +64,12 @@ inline double estimate_ram_usage_bytes(size_t num_points,
   const double n = static_cast<double>(num_points);
   const double size_of_data =
       n * static_cast<double>(round_up_8(dim)) * static_cast<double>(dtype_size);
-  const double size_of_graph =
-      n * static_cast<double>(graph_degree) *
-      static_cast<double>(sizeof(uint32_t)) *
-      static_cast<double>(kBudgetGraphSlackFactor);
-  const double size_of_locks =
-      n * static_cast<double>(sizeof(std::mutex));
-  const double size_of_outer =
-      n * static_cast<double>(sizeof(std::ptrdiff_t));
-  return kOverheadFactor *
-         (size_of_data + size_of_graph + size_of_locks + size_of_outer);
+  const double size_of_graph = n * static_cast<double>(graph_degree) *
+                               static_cast<double>(sizeof(uint32_t)) *
+                               static_cast<double>(kBudgetGraphSlackFactor);
+  const double size_of_locks = n * static_cast<double>(sizeof(std::mutex));
+  const double size_of_outer = n * static_cast<double>(sizeof(std::ptrdiff_t));
+  return kOverheadFactor * (size_of_data + size_of_graph + size_of_locks + size_of_outer);
 }
 
 // Convenience wrapper: budget expressed in gibibytes.
@@ -91,12 +85,12 @@ inline double estimate_ram_usage_gib(size_t num_points,
 // aggregate so the driver signature stays readable (design heuristic:
 // more than 4 positional args → options struct).
 struct BudgetLoopParams {
-  uint32_t graph_degree = 64;      // Vamana R
+  uint32_t graph_degree = 64;  // Vamana R
   uint32_t dtype_size = sizeof(float);
-  size_t k_base = 2;               // overlap factor for shard assignment
-  double sampling_rate = 0.01;     // fraction of base data used for train/test
-  double ram_budget_gib = 32.0;    // per-shard build budget (GiB)
-  KMeansParams base_kmeans{};      // .seed, .max_reps carry through; .num_centers is overridden
+  size_t k_base = 2;             // overlap factor for shard assignment
+  double sampling_rate = 0.01;   // fraction of base data used for train/test
+  double ram_budget_gib = 32.0;  // per-shard build budget (GiB)
+  KMeansParams base_kmeans{};    // .seed, .max_reps carry through; .num_centers is overridden
   // Safety cap on the growth loop. 1024 is enough for GIST 1M at 0.1 GiB
   // budget (which lands near ~250 shards) plus comfortable headroom for
   // BIGANN-100M-class experiments. Raise further only if a real workload
@@ -137,20 +131,16 @@ inline size_t determine_num_parts_with_ram_budget(const float *train_data,
                                                   const BudgetLoopParams &p,
                                                   std::vector<float> &pivots_out) {
   if (p.ram_budget_gib <= 0.0) {
-    throw std::invalid_argument(
-        "determine_num_parts_with_ram_budget: ram_budget_gib must be > 0");
+    throw std::invalid_argument("determine_num_parts_with_ram_budget: ram_budget_gib must be > 0");
   }
   if (num_train == 0 || num_test == 0) {
-    throw std::invalid_argument(
-        "determine_num_parts_with_ram_budget: empty train/test sample");
+    throw std::invalid_argument("determine_num_parts_with_ram_budget: empty train/test sample");
   }
   if (p.sampling_rate <= 0.0 || p.sampling_rate > 1.0) {
-    throw std::invalid_argument(
-        "determine_num_parts_with_ram_budget: sampling_rate out of range");
+    throw std::invalid_argument("determine_num_parts_with_ram_budget: sampling_rate out of range");
   }
 
-  const double ram_budget_bytes =
-      p.ram_budget_gib * 1024.0 * 1024.0 * 1024.0;
+  const double ram_budget_bytes = p.ram_budget_gib * 1024.0 * 1024.0 * 1024.0;
 
   size_t num_parts = 3;
   while (num_parts <= p.max_num_parts) {
@@ -165,24 +155,29 @@ inline size_t determine_num_parts_with_ram_budget(const float *train_data,
     pivots_out.assign(num_parts * dim, 0.0f);
     kmeans_train(train_data, num_train, dim, params, pivots_out.data());
 
-    const std::vector<size_t> extrapolated = estimate_cluster_sizes(
-        test_data, num_test, dim, pivots_out.data(), num_parts,
-        p.k_base, p.sampling_rate);
+    const std::vector<size_t> extrapolated = estimate_cluster_sizes(test_data,
+                                                                    num_test,
+                                                                    dim,
+                                                                    pivots_out.data(),
+                                                                    num_parts,
+                                                                    p.k_base,
+                                                                    p.sampling_rate);
 
     double max_shard_ram = 0.0;
     for (size_t c = 0; c < num_parts; ++c) {
-      const double ram = estimate_ram_usage_bytes(
-          extrapolated[c],
-          static_cast<uint32_t>(dim),
-          p.dtype_size,
-          p.graph_degree);
+      const double ram = estimate_ram_usage_bytes(extrapolated[c],
+                                                  static_cast<uint32_t>(dim),
+                                                  p.dtype_size,
+                                                  p.graph_degree);
       if (ram > max_shard_ram) {
         max_shard_ram = ram;
       }
     }
     const double max_shard_gib = max_shard_ram / (1024.0 * 1024.0 * 1024.0);
     LOG_INFO("budget: num_parts={} max_shard_ram={:.3f}GiB budget={:.3f}GiB",
-             num_parts, max_shard_gib, p.ram_budget_gib);
+             num_parts,
+             max_shard_gib,
+             p.ram_budget_gib);
     if (max_shard_ram <= ram_budget_bytes) {
       LOG_INFO("budget: freezing num_parts={}", num_parts);
       return num_parts;

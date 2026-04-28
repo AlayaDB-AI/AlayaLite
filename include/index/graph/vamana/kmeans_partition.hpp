@@ -16,8 +16,8 @@
 
 #pragma once
 
-#include <Eigen/Dense>
 #include <omp.h>
+#include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -36,8 +36,7 @@ namespace alaya::vamana {
 // Row-major float matrix view type. Row-major is required so that
 // `Eigen::Map<RowMajorMat>` can wrap DiskANN-style row-major data buffers
 // (`float[num_points * dim]`) with zero copy; Eigen's default is column-major.
-using KMeansRowMajorMat =
-    Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+using KMeansRowMajorMat = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
 // k-means driver parameters. Defaults mirror DiskANN's pins (`max_k_means_reps
 // = 10`, `residual_rel_tol = 1e-5`, see `math_utils.cpp:340`). Seed is
@@ -64,17 +63,14 @@ constexpr size_t kClosestCentersBlockSize = 65536;
 // `l2sq_out`. Uses Eigen's `rowwise().squaredNorm()`, which vectorizes via
 // SSE/AVX when `-march=native` is set. Caller owns `l2sq_out` (size
 // num_points floats).
-inline void compute_vecs_l2sq(const float *data,
-                              size_t num_points,
-                              size_t dim,
-                              float *l2sq_out) {
+inline void compute_vecs_l2sq(const float *data, size_t num_points, size_t dim, float *l2sq_out) {
   if (num_points == 0 || dim == 0) {
     return;
   }
-  Eigen::Map<const KMeansRowMajorMat> d_view(
-      data, static_cast<Eigen::Index>(num_points), static_cast<Eigen::Index>(dim));
-  Eigen::Map<Eigen::VectorXf> out_view(
-      l2sq_out, static_cast<Eigen::Index>(num_points));
+  Eigen::Map<const KMeansRowMajorMat> d_view(data,
+                                             static_cast<Eigen::Index>(num_points),
+                                             static_cast<Eigen::Index>(dim));
+  Eigen::Map<Eigen::VectorXf> out_view(l2sq_out, static_cast<Eigen::Index>(num_points));
   out_view = d_view.rowwise().squaredNorm();
 }
 
@@ -102,8 +98,7 @@ inline void compute_closest_centers(const float *data,
     throw std::invalid_argument("compute_closest_centers: k must be ≥ 1");
   }
   if (k > num_centers) {
-    throw std::invalid_argument(
-        "compute_closest_centers: k > num_centers not supported");
+    throw std::invalid_argument("compute_closest_centers: k > num_centers not supported");
   }
   if (num_points == 0) {
     return;
@@ -112,15 +107,12 @@ inline void compute_closest_centers(const float *data,
   std::vector<float> centers_l2sq(num_centers);
   compute_vecs_l2sq(centers, num_centers, dim, centers_l2sq.data());
 
-  Eigen::Map<const KMeansRowMajorMat> c_view(
-      centers,
-      static_cast<Eigen::Index>(num_centers),
-      static_cast<Eigen::Index>(dim));
+  Eigen::Map<const KMeansRowMajorMat> c_view(centers,
+                                             static_cast<Eigen::Index>(num_centers),
+                                             static_cast<Eigen::Index>(dim));
 
-  const size_t block_size =
-      std::min(num_points, detail::kClosestCentersBlockSize);
-  const size_t num_blocks =
-      (num_points + block_size - 1) / block_size;
+  const size_t block_size = std::min(num_points, detail::kClosestCentersBlockSize);
+  const size_t num_blocks = (num_points + block_size - 1) / block_size;
 
   // Per-block: ||d||² vector (block_size), dist matrix (block_size × num_centers).
   // Allocate outside the loop to amortize malloc across blocks.
@@ -132,10 +124,9 @@ inline void compute_closest_centers(const float *data,
     const size_t start = b * block_size;
     const size_t cur = std::min(block_size, num_points - start);
 
-    Eigen::Map<const KMeansRowMajorMat> d_block(
-        data + start * dim,
-        static_cast<Eigen::Index>(cur),
-        static_cast<Eigen::Index>(dim));
+    Eigen::Map<const KMeansRowMajorMat> d_block(data + start * dim,
+                                                static_cast<Eigen::Index>(cur),
+                                                static_cast<Eigen::Index>(dim));
 
     compute_vecs_l2sq(data + start * dim, cur, dim, block_d_l2sq.data());
 
@@ -148,8 +139,8 @@ inline void compute_closest_centers(const float *data,
       dist_block.row(static_cast<Eigen::Index>(i)).array() += norm_i;
     }
     // column j += ||c_j||²  (broadcast over rows)
-    Eigen::Map<const Eigen::VectorXf> c_norm_view(
-        centers_l2sq.data(), static_cast<Eigen::Index>(num_centers));
+    Eigen::Map<const Eigen::VectorXf> c_norm_view(centers_l2sq.data(),
+                                                  static_cast<Eigen::Index>(num_centers));
     dist_block.rowwise() += c_norm_view.transpose();
 
     // Top-k extraction per row. For k ≤ 4 a linear scan with a sorted small
@@ -174,8 +165,7 @@ inline void compute_closest_centers(const float *data,
       for (int64_t i = 0; i < static_cast<int64_t>(cur); ++i) {
         const float *row = dist.data() + i * static_cast<int64_t>(num_centers);
         // Sorted ascending top-k by insertion; k is small (≤ a handful).
-        std::vector<std::pair<float, uint32_t>> top(k,
-            {std::numeric_limits<float>::max(), 0});
+        std::vector<std::pair<float, uint32_t>> top(k, {std::numeric_limits<float>::max(), 0});
         for (size_t j = 0; j < num_centers; ++j) {
           float dj = row[j];
           if (dj >= top.back().first) {
@@ -183,9 +173,7 @@ inline void compute_closest_centers(const float *data,
           }
           // Replace worst and bubble down.
           top.back() = {dj, static_cast<uint32_t>(j)};
-          for (size_t t = top.size() - 1;
-               t > 0 && top[t].first < top[t - 1].first;
-               --t) {
+          for (size_t t = top.size() - 1; t > 0 && top[t].first < top[t - 1].first; --t) {
             std::swap(top[t], top[t - 1]);
           }
         }
@@ -221,8 +209,7 @@ inline void kmeanspp_init(const float *data,
     throw std::invalid_argument("kmeanspp_init: empty inputs");
   }
   if (num_centers > num_points) {
-    throw std::invalid_argument(
-        "kmeanspp_init: num_centers > num_points is not allowed");
+    throw std::invalid_argument("kmeanspp_init: num_centers > num_points is not allowed");
   }
   if (num_points > (1ULL << 23)) {
     // DiskANN's upstream guard: kmeans++ over > 8.4M points becomes
@@ -230,8 +217,7 @@ inline void kmeanspp_init(const float *data,
     // keeps us on sampled training data (typically ~1M), so this bound
     // is not expected to trip in practice; surface a clear failure if it
     // does rather than silently degrading to random pivots.
-    throw std::runtime_error(
-        "kmeanspp_init: num_points exceeds 2^23 bound; caller should sample");
+    throw std::runtime_error("kmeanspp_init: num_points exceeds 2^23 bound; caller should sample");
   }
 
   std::uniform_int_distribution<size_t> int_dist(0, num_points - 1);
@@ -292,9 +278,7 @@ inline void kmeanspp_init(const float *data,
     }
 
     picked.push_back(chosen);
-    std::memcpy(pivots_out + num_picked * dim,
-                data + chosen * dim,
-                dim * sizeof(float));
+    std::memcpy(pivots_out + num_picked * dim, data + chosen * dim, dim * sizeof(float));
 
     // dist[i] ← min(dist[i], ||x_i − c_new||²)
     const float *p_new = data + chosen * dim;
@@ -330,8 +314,13 @@ inline float lloyds_iter(const float *data,
                          float *centers,
                          size_t num_centers) {
   std::vector<uint32_t> closest(num_points);
-  compute_closest_centers(data, num_points, dim, centers, num_centers,
-                          /*k=*/1, closest.data());
+  compute_closest_centers(data,
+                          num_points,
+                          dim,
+                          centers,
+                          num_centers,
+                          /*k=*/1,
+                          closest.data());
 
   std::vector<std::vector<size_t>> inverted(num_centers);
   for (size_t i = 0; i < num_points; ++i) {
@@ -400,10 +389,11 @@ inline float run_lloyds(const float *data,
   for (size_t r = 0; r < max_reps; ++r) {
     const float old_residual = residual;
     residual = lloyds_iter(data, num_points, dim, centers, num_centers);
-    if (r > 0 && residual > 0.0f &&
-        ((old_residual - residual) / residual) < rel_tol) {
+    if (r > 0 && residual > 0.0f && ((old_residual - residual) / residual) < rel_tol) {
       LOG_INFO("kmeans: Lloyd converged after {} iter(s), residual {} → {}",
-               r + 1, old_residual, residual);
+               r + 1,
+               old_residual,
+               residual);
       break;
     }
     if (residual < std::numeric_limits<float>::epsilon()) {
@@ -435,16 +425,20 @@ inline std::vector<size_t> estimate_cluster_sizes(const float *test_data,
                                                   size_t k_base,
                                                   double sampling_rate) {
   if (sampling_rate <= 0.0 || sampling_rate > 1.0) {
-    throw std::invalid_argument(
-        "estimate_cluster_sizes: sampling_rate must be in (0, 1]");
+    throw std::invalid_argument("estimate_cluster_sizes: sampling_rate must be in (0, 1]");
   }
   std::vector<size_t> counts(num_centers, 0);
   if (num_test == 0 || num_centers == 0) {
     return counts;
   }
   std::vector<uint32_t> assignments(num_test * k_base);
-  compute_closest_centers(test_data, num_test, dim, pivots, num_centers,
-                          k_base, assignments.data());
+  compute_closest_centers(test_data,
+                          num_test,
+                          dim,
+                          pivots,
+                          num_centers,
+                          k_base,
+                          assignments.data());
   for (size_t i = 0; i < num_test * k_base; ++i) {
     ++counts[assignments[i]];
   }
@@ -475,9 +469,16 @@ inline void kmeans_train(const float *data,
   std::mt19937_64 rng(params.seed);
   kmeanspp_init(data, num_points, dim, params.num_centers, rng, centroids_out);
   LOG_INFO("kmeans_train: N={}, dim={}, K={}, seed={}",
-           num_points, dim, params.num_centers, params.seed);
-  const float residual = run_lloyds(data, num_points, dim, centroids_out,
-                                    params.num_centers, params.max_reps,
+           num_points,
+           dim,
+           params.num_centers,
+           params.seed);
+  const float residual = run_lloyds(data,
+                                    num_points,
+                                    dim,
+                                    centroids_out,
+                                    params.num_centers,
+                                    params.max_reps,
                                     params.residual_rel_tol);
   LOG_INFO("kmeans_train: final residual = {}", residual);
 }

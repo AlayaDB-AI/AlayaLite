@@ -65,14 +65,22 @@ def _run_cli(binary: Path, output_path: Path) -> None:
     subprocess.run(
         [
             str(binary),
-            "--data_path", str(SYNTH_BASE_FBIN),
-            "--index_path_prefix", str(output_path),
-            "-R", CANONICAL_ARGS["R"],
-            "-L", CANONICAL_ARGS["L"],
-            "--alpha", CANONICAL_ARGS["alpha"],
-            "--seed", CANONICAL_ARGS["seed"],
-            "-T", CANONICAL_ARGS["num_threads"],
-            "--build_dram_budget", CANONICAL_ARGS["build_dram_budget"],
+            "--data_path",
+            str(SYNTH_BASE_FBIN),
+            "--index_path_prefix",
+            str(output_path),
+            "-R",
+            CANONICAL_ARGS["R"],
+            "-L",
+            CANONICAL_ARGS["L"],
+            "--alpha",
+            CANONICAL_ARGS["alpha"],
+            "--seed",
+            CANONICAL_ARGS["seed"],
+            "-T",
+            CANONICAL_ARGS["num_threads"],
+            "--build_dram_budget",
+            CANONICAL_ARGS["build_dram_budget"],
         ],
         check=True,
     )
@@ -119,10 +127,7 @@ def test_cli_generates_baseline(cli_binary: Path) -> None:
 def test_cli_matches_baseline(cli_binary: Path) -> None:
     """Gate G1 first half — byte-compare CLI output against pinned baseline."""
     if not BASELINE_FIXTURE.exists():
-        pytest.skip(
-            f"baseline fixture missing at {BASELINE_FIXTURE}; "
-            f"run test_cli_generates_baseline first to seed it"
-        )
+        pytest.skip(f"baseline fixture missing at {BASELINE_FIXTURE}; run test_cli_generates_baseline first to seed it")
     with tempfile.TemporaryDirectory() as tmpdir:
         cli_output = Path(tmpdir) / "cli_output.index"
         _run_cli(cli_binary, cli_output)

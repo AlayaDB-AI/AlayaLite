@@ -30,9 +30,7 @@ def compute_groundtruth(base, query, k=1000, metric="l2"):
     return np.array(gt)
 
 
-def compute_and_save_groundtruth(
-    base_path, query_path, output_path, k=1000, metric="l2"
-):
+def compute_and_save_groundtruth(base_path, query_path, output_path, k=1000, metric="l2"):
     """
     Compute ground truth from fvecs files and save as ivecs.
 

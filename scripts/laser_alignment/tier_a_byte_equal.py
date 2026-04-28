@@ -69,6 +69,7 @@ EXIT_HARNESS_ERR = 20
 
 # ── Low-level helpers ─────────────────────────────────────────────────────
 
+
 def sha256_of(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -97,16 +98,11 @@ def parse_pca_bin(path: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
         remaining = size - 8
         if remaining % (4 * (1 + dim)) != 0:
             raise ValueError(
-                f"{path}: size/dim inconsistent: size={size} dim={dim} "
-                f"remainder={remaining % (4 * (1 + dim))}"
+                f"{path}: size/dim inconsistent: size={size} dim={dim} remainder={remaining % (4 * (1 + dim))}"
             )
         raw_dim = remaining // (4 * (1 + dim))
         mean = np.frombuffer(f.read(4 * raw_dim), dtype=np.float32).copy()
-        components = (
-            np.frombuffer(f.read(4 * dim * raw_dim), dtype=np.float32)
-            .copy()
-            .reshape(dim, raw_dim)
-        )
+        components = np.frombuffer(f.read(4 * dim * raw_dim), dtype=np.float32).copy().reshape(dim, raw_dim)
     return int(dim), int(raw_dim), mean, components
 
 
@@ -131,11 +127,7 @@ def rewrite_output(src_toml: Path, dst_toml: Path, new_output: str) -> None:
         if stripped.startswith("[") and stripped.endswith("]"):
             in_paths = stripped == "[paths]"
         # Skip comment lines; match only well-formed `output = ...`.
-        if (
-            in_paths
-            and not stripped.startswith("#")
-            and _OUTPUT_KEY_RE.match(stripped)
-        ):
+        if in_paths and not stripped.startswith("#") and _OUTPUT_KEY_RE.match(stripped):
             new_lines.append(f'output = "{new_output}"')
             match_count += 1
         else:
@@ -157,6 +149,7 @@ def load_toml(toml_path: Path) -> dict:
 
 # ── Pipeline invocation ───────────────────────────────────────────────────
 
+
 def run_pipeline(repo: Path, rel_entrypoint: str, toml_path: Path, steps: list[str]) -> None:
     """Invoke a Laser pipeline (port or upstream) via `uv run`.
 
@@ -175,6 +168,7 @@ def run_pipeline(repo: Path, rel_entrypoint: str, toml_path: Path, steps: list[s
 
 
 # ── Top-down bisection ────────────────────────────────────────────────────
+
 
 def _both_exist(port_dir: Path, upstream_dir: Path, name: str) -> tuple[Path, Path] | None:
     p = port_dir / name
@@ -242,8 +236,7 @@ def bisection_compare(
         if (p_dim, p_raw) != (u_dim, u_raw):
             pca_rec["status"] = "FAIL"
             pca_rec["detail"] = (
-                f"shape mismatch: port=(dim={p_dim}, raw_dim={p_raw}), "
-                f"upstream=(dim={u_dim}, raw_dim={u_raw})"
+                f"shape mismatch: port=(dim={p_dim}, raw_dim={p_raw}), upstream=(dim={u_dim}, raw_dim={u_raw})"
             )
             result["status"] = "FAIL"
             result["stage"] = "pca"
@@ -279,10 +272,7 @@ def bisection_compare(
             result["status"] = "FAIL"
             result["stage"] = "medoid"
             result["exit_code"] = EXIT_MEDOID_FAIL
-            result["detail"] = (
-                f"{mf} missing: port={(port_dir / mf).exists()}, "
-                f"upstream={(upstream_dir / mf).exists()}"
-            )
+            result["detail"] = f"{mf} missing: port={(port_dir / mf).exists()}, upstream={(upstream_dir / mf).exists()}"
             return result
         rec = _sha_record("medoid", mf, *paths)
         if rec["port_sha"] != rec["upstream_sha"]:
@@ -362,6 +352,7 @@ def bisection_compare(
 
 # ── Report rendering ──────────────────────────────────────────────────────
 
+
 def print_report(result: dict) -> None:
     print("\n========== Tier A Report ==========")
     print(f"Dataset:  {result.get('name', '?')}")
@@ -378,10 +369,7 @@ def print_report(result: dict) -> None:
         if status == "PASS_DEMOTED":
             mean_d = art.get("mean_delta", float("nan"))
             comp_d = art.get("comp_delta", float("nan"))
-            extra = (
-                f" (demoted: {art.get('pca_demotion_reason')}; "
-                f"mean_Δ={mean_d:.3e}, comp_Δ={comp_d:.3e})"
-            )
+            extra = f" (demoted: {art.get('pca_demotion_reason')}; mean_Δ={mean_d:.3e}, comp_Δ={comp_d:.3e})"
         elif status == "FAIL" and art.get("detail"):
             extra = f" ({art['detail']})"
         print(f"  [{status:>12}] {stage:>8}  {file_}{extra}")
@@ -390,22 +378,42 @@ def print_report(result: dict) -> None:
 
 # ── Entry point ───────────────────────────────────────────────────────────
 
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--port-config", type=Path, required=True,
-                   help="AlayaLite alignment-mode TOML (examples/laser/configs/*_alayaP.toml)")
-    p.add_argument("--upstream-config", type=Path, required=True,
-                   help="Laser alignment-mode TOML (Laser/reproduce/configs/*_origP.toml)")
-    p.add_argument("--out-root", type=Path, required=True,
-                   help="Root dir for per-side outputs + JSON diff report")
-    p.add_argument("--report", type=Path, default=None,
-                   help="JSON report path (default: <out-root>/tier_a_report.json)")
-    p.add_argument("--skip-run", action="store_true",
-                   help="Compare existing <out-root>/{port,upstream} artifacts; skip pipeline invocation.")
-    p.add_argument("--port-repo", type=Path, default=ALAYA_REPO_DEFAULT,
-                   help=f"AlayaLite repo root (default: {ALAYA_REPO_DEFAULT})")
-    p.add_argument("--upstream-repo", type=Path, default=LASER_REPO_DEFAULT,
-                   help=f"Upstream Laser repo root (default: {LASER_REPO_DEFAULT})")
+    p.add_argument(
+        "--port-config",
+        type=Path,
+        required=True,
+        help="AlayaLite alignment-mode TOML (examples/laser/configs/*_alayaP.toml)",
+    )
+    p.add_argument(
+        "--upstream-config",
+        type=Path,
+        required=True,
+        help="Laser alignment-mode TOML (Laser/reproduce/configs/*_origP.toml)",
+    )
+    p.add_argument("--out-root", type=Path, required=True, help="Root dir for per-side outputs + JSON diff report")
+    p.add_argument(
+        "--report", type=Path, default=None, help="JSON report path (default: <out-root>/tier_a_report.json)"
+    )
+    p.add_argument(
+        "--skip-run",
+        action="store_true",
+        help="Compare existing <out-root>/{port,upstream} artifacts; skip pipeline invocation.",
+    )
+    p.add_argument(
+        "--port-repo",
+        type=Path,
+        default=ALAYA_REPO_DEFAULT,
+        help=f"AlayaLite repo root (default: {ALAYA_REPO_DEFAULT})",
+    )
+    p.add_argument(
+        "--upstream-repo",
+        type=Path,
+        default=LASER_REPO_DEFAULT,
+        help=f"Upstream Laser repo root (default: {LASER_REPO_DEFAULT})",
+    )
     args = p.parse_args(argv)
 
     if not args.port_config.exists():
@@ -433,8 +441,7 @@ def main(argv: list[str] | None = None) -> int:
         up_v = up_cfg["dataset"].get(field)
         if port_v != up_v:
             print(
-                f"[tier-a][err] dataset.{field} mismatch: "
-                f"port={port_v!r}, upstream={up_v!r}",
+                f"[tier-a][err] dataset.{field} mismatch: port={port_v!r}, upstream={up_v!r}",
                 file=sys.stderr,
             )
             return EXIT_HARNESS_ERR
@@ -452,12 +459,16 @@ def main(argv: list[str] | None = None) -> int:
         try:
             # Port: vamana (shared graph) + pca + medoid + index.
             run_pipeline(
-                args.port_repo, "examples/laser/main.py", port_toml,
+                args.port_repo,
+                "examples/laser/main.py",
+                port_toml,
                 ["vamana", "pca", "medoid", "index"],
             )
             # Upstream: pca + medoid + index (no vamana step upstream).
             run_pipeline(
-                args.upstream_repo, "reproduce/main.py", upstream_toml,
+                args.upstream_repo,
+                "reproduce/main.py",
+                upstream_toml,
                 ["pca", "medoid", "index"],
             )
         except subprocess.CalledProcessError as e:

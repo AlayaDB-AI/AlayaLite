@@ -115,7 +115,7 @@ inline auto l2_sqr_avx2(const float *__restrict x, const float *__restrict y, si
   return result;
 }
 
-#ifdef ALAYA_ARCH_X86
+  #ifdef ALAYA_ARCH_X86
 // l2_sqr_avx2_diskann_compat — byte-compatible with DiskANN v0.7.0
 // `DistanceL2Float::compare` (include/simd_utils.h + src/distance.cpp:177).
 // Uses a single accumulator and DiskANN's `_mm256_reduce_add_ps` reduction
@@ -148,7 +148,7 @@ inline auto l2_sqr_avx2_diskann_compat(const float *__restrict x,
   }
   return result;
 }
-#endif
+  #endif
 
 // AVX-512 Implementation (Optimized with 4 accumulators + loop unrolling)
 ALAYA_NOINLINE

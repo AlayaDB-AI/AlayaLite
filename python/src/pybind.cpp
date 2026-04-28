@@ -27,7 +27,7 @@
 // pre-existing `include/index/graph/qg/qg_builder.hpp` uses OMP calls
 // without explicitly including <omp.h>.
 #ifdef ALAYA_ENABLE_LASER
-#include "alayalite/laser/_bindings.hpp"
+  #include "alayalite/laser/_bindings.hpp"
 #endif
 
 // Vamana builder bindings. Not gated on ALAYA_ENABLE_LASER because the

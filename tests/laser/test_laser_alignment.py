@@ -31,11 +31,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import shutil
 import struct
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -71,11 +69,12 @@ BG_ROOT = Path("/md1/huangliang/alaya-dev/build_graph")
 
 # ── Combo → input paths ────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class ComboSpec:
-    combo_key: str                   # used in baseline/validation subdir names
-    dataset: str                     # logical dataset name used in cfg
-    toml_name: str                   # actual dataset name used for dsqg_<name>.*
+    combo_key: str  # used in baseline/validation subdir names
+    dataset: str  # logical dataset name used in cfg
+    toml_name: str  # actual dataset name used for dsqg_<name>.*
     base_fbin: Path
     query_fbin: Path
     gt_ibin: Path
@@ -194,6 +193,7 @@ efs = [80, 90, 100, 110, 130, 150, 200, 250, 300, 400, 500]
 
 # ── Tier A: byte-equal index, element-wise PCA ─────────────────────────────
 
+
 def _sha256(path: Path) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
@@ -267,9 +267,11 @@ def run_tier_a(
 
 # ── Tier B: recall / QPS parity ────────────────────────────────────────────
 
+
 def _read_search_csv(path: Path) -> dict[int, tuple[float, float]]:
     """Returns {EF: (QPS, Recall)} from the reproduce-pipeline CSV."""
     import pandas as pd
+
     df = pd.read_csv(path)
     return {int(row["EFS"]): (float(row["QPS"]), float(row["Recall"])) for _, row in df.iterrows()}
 
@@ -329,16 +331,18 @@ def run_tier_b(
 
     # Build monotonic envelope axes from the baseline (EF ascending).
     ba_efs = sorted(ba)
-    ba_qps_arr = [ba[e][0] for e in ba_efs]     # decreasing with EF
-    ba_rec_arr = [ba[e][1] for e in ba_efs]     # increasing with EF
+    ba_qps_arr = [ba[e][0] for e in ba_efs]  # decreasing with EF
+    ba_rec_arr = [ba[e][1] for e in ba_efs]  # increasing with EF
 
     efs = sorted(set(ba) & set(po))
     if len(efs) != len(ba) or len(efs) != len(po):
         print(f"  [WARN] EF set mismatch  ba={sorted(ba)}  po={sorted(po)}  using intersection")
 
-    print(f"  {'EF':>5}  {'QPS(po)':>8}  {'Rec(po)':>8}  "
-          f"{'rec@sameQPS':>11}  {'qps@sameRec':>11}  "
-          f"{'Δrec':>7}  {'ΔQPS%':>7}  slice  verdict")
+    print(
+        f"  {'EF':>5}  {'QPS(po)':>8}  {'Rec(po)':>8}  "
+        f"{'rec@sameQPS':>11}  {'qps@sameRec':>11}  "
+        f"{'Δrec':>7}  {'ΔQPS%':>7}  slice  verdict"
+    )
     ok = True
     for ef in efs:
         qps_po, rec_po = po[ef]
@@ -361,23 +365,26 @@ def run_tier_b(
         if same_qps_ok and same_rec_ok:
             slice_label, verdict = "both", "OK"
         elif same_qps_ok:
-            slice_label, verdict = "QPS",  "OK"
+            slice_label, verdict = "QPS", "OK"
         elif same_rec_ok:
-            slice_label, verdict = "rec",  "OK"
+            slice_label, verdict = "rec", "OK"
         else:
             slice_label, verdict = "none", "FAIL"
             ok = False
 
         r_str = f"{rec_at_qps:>10.2f}%" if rec_at_qps is not None else f"{'n/a':>11}"
         q_str = f"{qps_at_rec:>11.1f}" if qps_at_rec is not None else f"{'n/a':>11}"
-        d_rec = f"{drec:>+6.3f}"       if drec is not None else f"{'n/a':>7}"
-        d_qps = f"{dqps_rel*100:>+6.2f}%" if dqps_rel is not None else f"{'n/a':>7}"
-        print(f"  {ef:>5d}  {qps_po:>8.1f}  {rec_po:>7.2f}%  "
-              f"{r_str}  {q_str}  {d_rec}  {d_qps}  {slice_label:>5}  {verdict}")
+        d_rec = f"{drec:>+6.3f}" if drec is not None else f"{'n/a':>7}"
+        d_qps = f"{dqps_rel * 100:>+6.2f}%" if dqps_rel is not None else f"{'n/a':>7}"
+        print(
+            f"  {ef:>5d}  {qps_po:>8.1f}  {rec_po:>7.2f}%  "
+            f"{r_str}  {q_str}  {d_rec}  {d_qps}  {slice_label:>5}  {verdict}"
+        )
     return ok
 
 
 # ── Pipeline runner ────────────────────────────────────────────────────────
+
 
 def run_port_pipeline(
     spec: ComboSpec,
@@ -404,21 +411,22 @@ def run_port_pipeline(
 
 # ── Entry point ────────────────────────────────────────────────────────────
 
+
 def main(argv: Iterable[str] | None = None) -> int:
     p = argparse.ArgumentParser()
-    p.add_argument("--dataset",
-                   choices=["gist1m", "synth_100k_512d", "bigcode", "cohere"],
-                   required=True)
+    p.add_argument("--dataset", choices=["gist1m", "synth_100k_512d", "bigcode", "cohere"], required=True)
     p.add_argument("--vamana", choices=["alayaV", "diskV"], required=True)
     p.add_argument("--baseline-dir", type=Path, required=True)
     p.add_argument("--port-out-dir", type=Path, required=True)
     p.add_argument(
-        "--skip-run", action="store_true",
-        help="Skip the ported pipeline invocation — compare using existing port-out artefacts."
+        "--skip-run",
+        action="store_true",
+        help="Skip the ported pipeline invocation — compare using existing port-out artefacts.",
     )
     p.add_argument(
-        "--skip-tier-a", action="store_true",
-        help="Skip Tier A (byte-equality). Useful when the upstream bug renders .index paths divergent."
+        "--skip-tier-a",
+        action="store_true",
+        help="Skip Tier A (byte-equality). Useful when the upstream bug renders .index paths divergent.",
     )
     args = p.parse_args(argv)
 

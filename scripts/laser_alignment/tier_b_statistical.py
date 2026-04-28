@@ -39,9 +39,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
-
 
 RECALL_THRESHOLD_PP: float = 0.3
 QPS_REL_THRESHOLD: float = 0.05
@@ -69,6 +67,7 @@ COMBO_NAMES = {
 
 # ── CSV ingestion ─────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class ComboRun:
     label: str
@@ -84,9 +83,7 @@ def load_combo(label: str, csv_path: Path) -> ComboRun:
     required = {"QPS", "Recall", "EFS"}
     missing = required - set(df.columns)
     if missing:
-        raise ValueError(
-            f"[tier-b] combo {label} CSV at {csv_path} missing columns: {missing}"
-        )
+        raise ValueError(f"[tier-b] combo {label} CSV at {csv_path} missing columns: {missing}")
     pts: dict[int, tuple[float, float]] = {}
     for _, row in df.iterrows():
         ef = int(row["EFS"])
@@ -94,13 +91,11 @@ def load_combo(label: str, csv_path: Path) -> ComboRun:
         rec = float(row["Recall"])
         if ef in pts:
             raise ValueError(
-                f"[tier-b] combo {label} CSV at {csv_path} has duplicate EF={ef}; "
-                f"refusing to silently overwrite"
+                f"[tier-b] combo {label} CSV at {csv_path} has duplicate EF={ef}; refusing to silently overwrite"
             )
         if qps <= 0 or rec < 0:
             raise ValueError(
-                f"[tier-b] combo {label} CSV at {csv_path} row EF={ef}: "
-                f"non-positive metric QPS={qps}, Recall={rec}"
+                f"[tier-b] combo {label} CSV at {csv_path} row EF={ef}: non-positive metric QPS={qps}, Recall={rec}"
             )
         pts[ef] = (qps, rec)
     return ComboRun(label=label, csv_path=csv_path, points=pts)
@@ -108,19 +103,18 @@ def load_combo(label: str, csv_path: Path) -> ComboRun:
 
 # ── Gate checks ───────────────────────────────────────────────────────────
 
+
 @dataclass
 class PairViolation:
     ef: int
     pair: tuple[str, str]
-    metric: str        # "recall_pp", "qps_rel", or "pareto"
+    metric: str  # "recall_pp", "qps_rel", or "pareto"
     value: float
     threshold: float
     detail: str
 
 
-def check_thresholds(
-    combos: dict[str, ComboRun], efs: list[int]
-) -> list[PairViolation]:
+def check_thresholds(combos: dict[str, ComboRun], efs: list[int]) -> list[PairViolation]:
     """Per-EF, per-pair |ΔR| ≤ 0.3 pp and |ΔQPS|/min(QPS) ≤ 5 %."""
     violations: list[PairViolation] = []
     for ef in efs:
@@ -131,10 +125,12 @@ def check_thresholds(
             if d_rec > RECALL_THRESHOLD_PP:
                 violations.append(
                     PairViolation(
-                        ef=ef, pair=(ci, cj), metric="recall_pp",
-                        value=d_rec, threshold=RECALL_THRESHOLD_PP,
-                        detail=f"|Recall_{ci} - Recall_{cj}| = {d_rec:.3f} pp "
-                               f"({ri:.3f} vs {rj:.3f})",
+                        ef=ef,
+                        pair=(ci, cj),
+                        metric="recall_pp",
+                        value=d_rec,
+                        threshold=RECALL_THRESHOLD_PP,
+                        detail=f"|Recall_{ci} - Recall_{cj}| = {d_rec:.3f} pp ({ri:.3f} vs {rj:.3f})",
                     )
                 )
             q_min = min(qi, qj)
@@ -142,18 +138,18 @@ def check_thresholds(
             if d_qps_rel > QPS_REL_THRESHOLD:
                 violations.append(
                     PairViolation(
-                        ef=ef, pair=(ci, cj), metric="qps_rel",
-                        value=d_qps_rel, threshold=QPS_REL_THRESHOLD,
-                        detail=f"|QPS_{ci} - QPS_{cj}| / min = {d_qps_rel*100:.2f} % "
-                               f"({qi:.1f} vs {qj:.1f})",
+                        ef=ef,
+                        pair=(ci, cj),
+                        metric="qps_rel",
+                        value=d_qps_rel,
+                        threshold=QPS_REL_THRESHOLD,
+                        detail=f"|QPS_{ci} - QPS_{cj}| / min = {d_qps_rel * 100:.2f} % ({qi:.1f} vs {qj:.1f})",
                     )
                 )
     return violations
 
 
-def check_pareto_dominance(
-    combos: dict[str, ComboRun], efs: list[int]
-) -> list[PairViolation]:
+def check_pareto_dominance(combos: dict[str, ComboRun], efs: list[int]) -> list[PairViolation]:
     """For each EF, no combo SHALL dominate another by >(+0.1 pp, +2 %).
 
     Dominance here means strictly higher recall AND strictly higher QPS,
@@ -172,27 +168,32 @@ def check_pareto_dominance(
             if (ri - rj > PARETO_RECALL_EPS_PP) and (qi - qj) / qj > PARETO_QPS_EPS_REL:
                 violations.append(
                     PairViolation(
-                        ef=ef, pair=(ci, cj), metric="pareto",
+                        ef=ef,
+                        pair=(ci, cj),
+                        metric="pareto",
                         value=max(ri - rj, (qi - qj) / qj),
                         threshold=max(PARETO_RECALL_EPS_PP, PARETO_QPS_EPS_REL),
                         detail=f"{ci} dominates {cj} at EF={ef}: "
-                               f"ΔR={ri-rj:+.3f}pp, ΔQPS={((qi-qj)/qj)*100:+.2f}%",
+                        f"ΔR={ri - rj:+.3f}pp, ΔQPS={((qi - qj) / qj) * 100:+.2f}%",
                     )
                 )
             elif (rj - ri > PARETO_RECALL_EPS_PP) and (qj - qi) / qi > PARETO_QPS_EPS_REL:
                 violations.append(
                     PairViolation(
-                        ef=ef, pair=(ci, cj), metric="pareto",
+                        ef=ef,
+                        pair=(ci, cj),
+                        metric="pareto",
                         value=max(rj - ri, (qj - qi) / qi),
                         threshold=max(PARETO_RECALL_EPS_PP, PARETO_QPS_EPS_REL),
                         detail=f"{cj} dominates {ci} at EF={ef}: "
-                               f"ΔR={rj-ri:+.3f}pp, ΔQPS={((qj-qi)/qi)*100:+.2f}%",
+                        f"ΔR={rj - ri:+.3f}pp, ΔQPS={((qj - qi) / qi) * 100:+.2f}%",
                     )
                 )
     return violations
 
 
 # ── Output renderers (PNG + markdown) ────────────────────────────────────
+
 
 def render_markdown(
     combos: dict[str, ComboRun],
@@ -207,8 +208,8 @@ def render_markdown(
     lines.append("")
     lines.append(
         f"Thresholds: |ΔRecall| ≤ {RECALL_THRESHOLD_PP} pp, "
-        f"|ΔQPS|/min ≤ {QPS_REL_THRESHOLD*100:.0f} %, "
-        f"Pareto ε = (±{PARETO_RECALL_EPS_PP} pp, ±{PARETO_QPS_EPS_REL*100:.0f} %)."
+        f"|ΔQPS|/min ≤ {QPS_REL_THRESHOLD * 100:.0f} %, "
+        f"Pareto ε = (±{PARETO_RECALL_EPS_PP} pp, ±{PARETO_QPS_EPS_REL * 100:.0f} %)."
     )
     lines.append("")
     lines.append("## Combos")
@@ -220,9 +221,7 @@ def render_markdown(
     lines.append("")
     # One cell per combo, format "Recall % / QPS" — matches the reference
     # SUMMARY.md Pareto table layout.
-    header = "| EFS | " + " | ".join(
-        f"{lbl} {COMBO_NAMES[lbl]}" for lbl in COMBO_LABELS
-    ) + " |"
+    header = "| EFS | " + " | ".join(f"{lbl} {COMBO_NAMES[lbl]}" for lbl in COMBO_LABELS) + " |"
     sep = "|-----|" + "|".join(["-" * 20] * len(COMBO_LABELS)) + "|"
     lines.append(header)
     lines.append(sep)
@@ -246,10 +245,7 @@ def render_markdown(
             lines.append("| EF | pair | metric | value | detail |")
             lines.append("|----|------|--------|-------|--------|")
             for v in thr_violations:
-                lines.append(
-                    f"| {v.ef} | {v.pair[0]}–{v.pair[1]} | {v.metric} "
-                    f"| {v.value:.4g} | {v.detail} |"
-                )
+                lines.append(f"| {v.ef} | {v.pair[0]}–{v.pair[1]} | {v.metric} | {v.value:.4g} | {v.detail} |")
         if pareto_violations:
             lines.append("")
             lines.append(f"### Pareto violations ({len(pareto_violations)})")
@@ -266,6 +262,7 @@ def render_plot(combos: dict[str, ComboRun], efs: list[int], out_path: Path) -> 
     # Import matplotlib lazily — the laser extras group pins it but keep
     # the harness import light when only generating markdown.
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -291,18 +288,24 @@ def render_plot(combos: dict[str, ComboRun], efs: list[int], out_path: Path) -> 
 
 # ── Entry point ───────────────────────────────────────────────────────────
 
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--csv-a", type=Path, required=True, help="alayaV × alayaP run CSV")
     p.add_argument("--csv-b", type=Path, required=True, help="alayaV × origP run CSV")
     p.add_argument("--csv-c", type=Path, required=True, help="diskV × alayaP run CSV")
     p.add_argument("--csv-d", type=Path, required=True, help="diskV × origP run CSV")
-    p.add_argument("--out-dir", type=Path, required=True,
-                   help="Report dir (writes report.md, summary.json, curve.png)")
-    p.add_argument("--expected-efs", type=int, nargs="+", default=list(CANONICAL_EFS),
-                   help=f"Fixed EF sweep to validate against (default: {list(CANONICAL_EFS)})")
+    p.add_argument("--out-dir", type=Path, required=True, help="Report dir (writes report.md, summary.json, curve.png)")
+    p.add_argument(
+        "--expected-efs",
+        type=int,
+        nargs="+",
+        default=list(CANONICAL_EFS),
+        help=f"Fixed EF sweep to validate against (default: {list(CANONICAL_EFS)})",
+    )
     args = p.parse_args(argv)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -361,28 +364,36 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 "violations": {
                     "threshold": [
-                        {"ef": v.ef, "pair": list(v.pair), "metric": v.metric,
-                         "value": v.value, "threshold": v.threshold, "detail": v.detail}
+                        {
+                            "ef": v.ef,
+                            "pair": list(v.pair),
+                            "metric": v.metric,
+                            "value": v.value,
+                            "threshold": v.threshold,
+                            "detail": v.detail,
+                        }
                         for v in thr_violations
                     ],
                     "pareto": [
-                        {"ef": v.ef, "pair": list(v.pair), "metric": v.metric,
-                         "value": v.value, "threshold": v.threshold, "detail": v.detail}
+                        {
+                            "ef": v.ef,
+                            "pair": list(v.pair),
+                            "metric": v.metric,
+                            "value": v.value,
+                            "threshold": v.threshold,
+                            "detail": v.detail,
+                        }
                         for v in pareto_violations
                     ],
                 },
-                "status": (
-                    "PASS"
-                    if not thr_violations and not pareto_violations
-                    else "FAIL"
-                ),
+                "status": ("PASS" if not thr_violations and not pareto_violations else "FAIL"),
             },
             indent=2,
         )
     )
 
     # Console summary.
-    print(f"\n========== Tier B Report ==========")
+    print("\n========== Tier B Report ==========")
     print(f"EF sweep: {efs}")
     print(f"Combos:   {COMBO_NAMES}")
     print(f"Threshold violations: {len(thr_violations)}")

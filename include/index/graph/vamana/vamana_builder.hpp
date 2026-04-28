@@ -41,12 +41,12 @@ namespace alaya::vamana {
 inline constexpr float GRAPH_SLACK_FACTOR = 1.3f;
 
 struct VamanaBuildParams {
-  uint32_t R = 64;                // graph degree bound
-  uint32_t L = 100;               // build-time beam width
-  float alpha = 1.2f;             // α-RNG pruning parameter
-  uint32_t num_threads = 0;       // 0 → omp_get_num_procs()
-  uint32_t maxc = 750;            // occlude_list pool cap
-  uint64_t seed = 1234;           // reserved for optional shuffles; medoid is deterministic by data
+  uint32_t R = 64;           // graph degree bound
+  uint32_t L = 100;          // build-time beam width
+  float alpha = 1.2f;        // α-RNG pruning parameter
+  uint32_t num_threads = 0;  // 0 → omp_get_num_procs()
+  uint32_t maxc = 750;       // occlude_list pool cap
+  uint64_t seed = 1234;      // reserved for optional shuffles; medoid is deterministic by data
 };
 
 // VamanaBuilder — single-shard in-memory Vamana graph construction on
@@ -64,10 +64,7 @@ struct VamanaBuildParams {
 // `max_observed_degree` to R on output.
 class VamanaBuilder {
  public:
-  VamanaBuilder(const float *data,
-                size_t num_points,
-                uint32_t dim,
-                VamanaBuildParams params)
+  VamanaBuilder(const float *data, size_t num_points, uint32_t dim, VamanaBuildParams params)
       : data_(data),
         num_points_(num_points),
         dim_(dim),
@@ -119,9 +116,7 @@ class VamanaBuilder {
 
  private:
   inline float l2_dist(uint32_t a, uint32_t b) const {
-    return l2_(data_ + static_cast<size_t>(a) * dim_,
-               data_ + static_cast<size_t>(b) * dim_,
-               dim_);
+    return l2_(data_ + static_cast<size_t>(a) * dim_, data_ + static_cast<size_t>(b) * dim_, dim_);
   }
   inline float l2_dist_to(uint32_t a, const float *q) const {
     return l2_(data_ + static_cast<size_t>(a) * dim_, q, dim_);
@@ -135,7 +130,7 @@ class VamanaBuilder {
     NeighborPriorityQueue best_l_nodes;
     std::vector<uint32_t> id_scratch;
     std::vector<float> dist_scratch;
-    std::vector<uint8_t> visited_bitset;  // sized num_points, 0/1 flags
+    std::vector<uint8_t> visited_bitset;    // sized num_points, 0/1 flags
     std::vector<uint32_t> visited_touched;  // ids to reset at clear
     std::vector<float> occlude_factor;
   };
@@ -213,10 +208,7 @@ class VamanaBuilder {
   // Fills `scratch.pool` with expanded nodes (the candidate pool for
   // subsequent pruning) and `scratch.best_l_nodes` with the final top-L.
   // Mirrors DiskANN's `Index::iterate_to_fixed_point` (src/index.cpp:807).
-  void iterate_to_fixed_point(uint32_t query_id,
-                              uint32_t Lindex,
-                              uint32_t start_id,
-                              Scratch &s) {
+  void iterate_to_fixed_point(uint32_t query_id, uint32_t Lindex, uint32_t start_id, Scratch &s) {
     s.pool.clear();
     s.best_l_nodes.clear();
     s.best_l_nodes.reserve(Lindex);
@@ -280,8 +272,9 @@ class VamanaBuilder {
                                   float alpha) {
     iterate_to_fixed_point(node, Lindex, medoid_, s);
     // Strip self-id from pool before pruning (see DiskANN index.cpp:1051).
-    auto self_it = std::remove_if(
-        s.pool.begin(), s.pool.end(), [node](const Neighbor &nn) { return nn.id == node; });
+    auto self_it = std::remove_if(s.pool.begin(), s.pool.end(), [node](const Neighbor &nn) {
+      return nn.id == node;
+    });
     s.pool.erase(self_it, s.pool.end());
     prune_neighbors(node,
                     s.pool,
@@ -290,7 +283,9 @@ class VamanaBuilder {
                     params_.maxc,
                     pruned_list,
                     s.occlude_factor,
-                    [this](uint32_t a, uint32_t b) { return l2_dist(a, b); });
+                    [this](uint32_t a, uint32_t b) {
+                      return l2_dist(a, b);
+                    });
   }
 
   // For each newly minted forward edge n → des, attempt the reverse edge
@@ -348,7 +343,9 @@ class VamanaBuilder {
                         params_.maxc,
                         new_neighbors,
                         s.occlude_factor,
-                        [this](uint32_t a, uint32_t b) { return l2_dist(a, b); });
+                        [this](uint32_t a, uint32_t b) {
+                          return l2_dist(a, b);
+                        });
         {
           std::lock_guard<std::mutex> guard(locks_[des]);
           graph_[des] = std::move(new_neighbors);
@@ -418,7 +415,9 @@ class VamanaBuilder {
                       params_.maxc,
                       new_neighbors,
                       s.occlude_factor,
-                      [this](uint32_t a, uint32_t b) { return l2_dist(a, b); });
+                      [this](uint32_t a, uint32_t b) {
+                        return l2_dist(a, b);
+                      });
       {
         std::lock_guard<std::mutex> guard(locks_[node]);
         graph_[node] = std::move(new_neighbors);

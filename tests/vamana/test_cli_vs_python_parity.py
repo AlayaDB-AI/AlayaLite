@@ -59,10 +59,7 @@ def _find_cli_binary() -> Path | None:
 def cli_binary() -> Path:
     binary = _find_cli_binary()
     if binary is None:
-        pytest.skip(
-            "build_vamana_index binary not found; run "
-            "`cmake --build build --target build_vamana_index` first"
-        )
+        pytest.skip("build_vamana_index binary not found; run `cmake --build build --target build_vamana_index` first")
     return binary
 
 
@@ -86,9 +83,7 @@ def dataset_ready() -> None:
 
 
 @pytest.mark.usefixtures("dataset_ready")
-def test_cli_vs_python_binding_byte_equality(
-    cli_binary: Path, vamana_module
-) -> None:
+def test_cli_vs_python_binding_byte_equality(cli_binary: Path, vamana_module) -> None:
     """Run CLI and Python binding with identical args, then `filecmp.cmp`.
 
     Runtime on gpu04: ~6 min per build (2 builds → ~12 min total). Marked
@@ -104,14 +99,22 @@ def test_cli_vs_python_binding_byte_equality(
         subprocess.run(
             [
                 str(cli_binary),
-                "--data_path", str(SYNTH_BASE_FBIN),
-                "--index_path_prefix", str(cli_out),
-                "-R", str(CANONICAL["R"]),
-                "-L", str(CANONICAL["L"]),
-                "--alpha", str(CANONICAL["alpha"]),
-                "--seed", str(CANONICAL["seed"]),
-                "-T", str(CANONICAL["num_threads"]),
-                "--build_dram_budget", str(CANONICAL["dram_budget_gb"]),
+                "--data_path",
+                str(SYNTH_BASE_FBIN),
+                "--index_path_prefix",
+                str(cli_out),
+                "-R",
+                str(CANONICAL["R"]),
+                "-L",
+                str(CANONICAL["L"]),
+                "--alpha",
+                str(CANONICAL["alpha"]),
+                "--seed",
+                str(CANONICAL["seed"]),
+                "-T",
+                str(CANONICAL["num_threads"]),
+                "--build_dram_budget",
+                str(CANONICAL["dram_budget_gb"]),
             ],
             check=True,
         )
