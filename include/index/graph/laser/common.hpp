@@ -14,7 +14,6 @@
 #include <cstdint>
 #include <functional>
 
-#include <Eigen/src/Core/util/Constants.h>
 #include <Eigen/Dense>
 
 namespace alaya::laser {
