@@ -45,6 +45,7 @@
 #include "utils/metric_type.hpp"
 
 #include "client.hpp"
+#include "disk_collection.hpp"
 #include "index.hpp"
 
 namespace py = pybind11;
@@ -314,4 +315,7 @@ PYBIND11_MODULE(_alayalitepy, m) {
           py::arg("bf") = false,
           py::arg("filter_execution_hint") = std::string())
       .def("close_db", &alaya::PyIndexInterface::close_db, "Close and release RocksDB resources");
+
+  // alayalite.DiskCollection — disk-resident segmented collection (v1: Flat).
+  alaya::disk::pybindings::register_disk_collection(m);
 }

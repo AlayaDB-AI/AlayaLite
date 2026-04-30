@@ -21,6 +21,7 @@ to all key components like the Client, Collection, and utility functions.
 
 import warnings
 
+from ._alayalitepy import DiskCollection, MetricType  # noqa: E402
 from .client import Client  # noqa: E402
 from .collection import Collection  # noqa: E402
 from .index import Index  # noqa: E402
@@ -40,6 +41,8 @@ __all__ = [
     "Client",
     "Index",
     "Collection",
+    "DiskCollection",
+    "MetricType",
     # utils
     "load_fvecs",
     "load_ivecs",
