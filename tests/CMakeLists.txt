@@ -1,3 +1,4 @@
+add_subdirectory(disk)
 add_subdirectory(executor)
 add_subdirectory(index)
 add_subdirectory(recovery)
