@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `disk-segment-searcher-dispatch`: refactored `DiskCollection` to dispatch
+  segment construction through a new `disk-segment-factory` layer
+  (`include/index/disk/segment_factory.hpp`). Five sites that previously
+  hard-coded `DiskFlatBuilder` / `DiskFlatSegmentSearcher` now route through
+  the factory's `engine_supported_v1` / `create_segment_from_pending` /
+  `load_segment_from_manifest` entry points. Cross-segment label
+  uniqueness is now engine-agnostic (mmap'd `manifest.ids_file` reads
+  instead of `dynamic_cast<DiskFlatSegmentSearcher *>`). Flat behaviour,
+  byte format, and Python API are unchanged. Laser remains rejected at the
+  v1 capability gate with the same dual-substring error contract (engine
+  name + "not implemented in v1").
+
 ### Added
+- DiskCollection now supports the Vamana engine end-to-end (L2 only):
+  `index_type="disk_vamana"` at the C++ level, segment builder + searcher
+  under `include/index/disk/`, and a SegmentFactory registration. Python
+  `disk_vamana` exposure remains deferred to a follow-up.
 - Disk-resident segmented collection (`disk-collection` + `disk-flat-builder`
   + `disk-flat-searcher` + `disk-types` + `mmap-file` + `segment-manifest`
   capabilities). New `alayalite.DiskCollection` Python surface (constructor

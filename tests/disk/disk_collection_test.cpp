@@ -386,15 +386,11 @@ TEST_F(DiskCollectionTest, SizeExcludesPending) {
   EXPECT_EQ(col.size(), 5u);
 }
 
-TEST_F(DiskCollectionTest, NonFlatIndexTypeV1Rejected) {
+TEST_F(DiskCollectionTest, VamanaIndexTypeAcceptedInCxx) {
   auto coll_path = tmp_root_ / "coll_v";
-  try {
-    (void)DiskCollection(coll_path, 8, MetricType::L2, DiskIndexType::Vamana);
-    FAIL() << "expected throw on Vamana";
-  } catch (const std::runtime_error &e) {
-    EXPECT_NE(std::string(e.what()).find("not implemented in v1"), std::string::npos)
-        << e.what();
-  }
+  EXPECT_NO_THROW(DiskCollection(coll_path, 8, MetricType::L2, DiskIndexType::Vamana));
+  auto manifest = CollectionManifest::load(coll_path / "collection_manifest.txt");
+  EXPECT_EQ(manifest.index_type, DiskIndexType::Vamana);
 }
 
 TEST_F(DiskCollectionTest, OpenRejectsNonFlatManifest) {

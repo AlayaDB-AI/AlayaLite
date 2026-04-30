@@ -16,7 +16,11 @@
 
 #pragma once
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -24,16 +28,17 @@
 #include <cstring>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include "index/disk/disk_flat_builder.hpp"
-#include "index/disk/disk_flat_searcher.hpp"
+#include "index/disk/segment_factory.hpp"
 #include "index/disk/segment_manifest.hpp"
 #include "index/disk/types.hpp"
+#include "storage/mmap_file.hpp"
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
 
@@ -76,6 +81,46 @@ inline auto publish_collection_manifest_atomic_only(
   rename_atomic_replace(tmp_path, collection_dir / "collection_manifest.txt");
 }
 
+// Engine-agnostic ids-file handle for cross-segment label inventory. Resolves
+// `seg_dir / sm.ids_file`, mmap's it under O_NOFOLLOW (inherited from
+// MMapFile), and validates the file size is exactly `count * sizeof(uint64_t)`
+// — a missing or differently-sized file is treated as corruption, with the
+// segment directory and reason named in the message.
+struct SegmentIdsView {
+  alaya::storage::MMapFile mmap;
+  uint64_t count = 0;
+
+  auto data() const -> const uint64_t * {
+    return static_cast<const uint64_t *>(mmap.data());
+  }
+};
+
+inline auto load_segment_ids_view(const std::filesystem::path &seg_dir) -> SegmentIdsView {
+  const auto manifest_path = seg_dir / "manifest.txt";
+  std::error_code ec;
+  if (!std::filesystem::exists(manifest_path, ec) || ec) {
+    throw std::runtime_error("DiskCollection: segment manifest missing for inventory: " +
+                             manifest_path.string());
+  }
+  const auto sm = SegmentManifest::load(manifest_path);
+  const auto ids_path = seg_dir / sm.ids_file;
+  if (!std::filesystem::exists(ids_path, ec) || ec) {
+    throw std::runtime_error("DiskCollection: segment ids_file missing for inventory: " +
+                             ids_path.string());
+  }
+  const uint64_t expected_bytes = sm.count * sizeof(uint64_t);
+  // MMapFile's O_NOFOLLOW + non-regular-file rejection covers symlink and
+  // device-node attacks, with the path embedded in the resulting message.
+  alaya::storage::MMapFile mmap(ids_path);
+  if (mmap.size() != expected_bytes) {
+    throw std::runtime_error("DiskCollection: segment ids_file size mismatch for inventory at " +
+                             seg_dir.string() + " (expected " + std::to_string(expected_bytes) +
+                             " bytes for count=" + std::to_string(sm.count) + ", got " +
+                             std::to_string(mmap.size()) + ")");
+  }
+  return SegmentIdsView{std::move(mmap), sm.count};
+}
+
 }  // namespace detail
 
 class DiskCollection {
@@ -93,11 +138,11 @@ class DiskCollection {
       throw std::invalid_argument(
           "DiskCollection: metric must be one of L2, IP, COS (got NONE or unknown)");
     }
-    if (index_type != DiskIndexType::Flat) {
-      throw std::runtime_error("DiskCollection: index type " +
-                               std::string(index_type_to_string(index_type)) +
-                               " not implemented in v1");
-    }
+    // v1 capability gate is owned by the factory: this throws with the dual
+    // substring contract ("disk_<engine>" + "not implemented in v1") so the
+    // existing scenarios on DiskCollection's error message stay green and the
+    // single source of truth lives in segment_factory.
+    assert_engine_supported_v1(index_type);
     {
       std::error_code ec;
       if (std::filesystem::exists(path, ec) || ec) {
@@ -137,11 +182,9 @@ class DiskCollection {
     DiskCollection col;
     col.path_ = path;
     col.manifest_ = CollectionManifest::load(path / "collection_manifest.txt");
-    if (col.manifest_.index_type != DiskIndexType::Flat) {
-      throw std::runtime_error("DiskCollection::open: index type " +
-                               std::string(index_type_to_string(col.manifest_.index_type)) +
-                               " not implemented in v1");
-    }
+    // Same v1 capability gate as the constructor; delegated to the factory so
+    // the dual-substring message contract has a single source of truth.
+    assert_engine_supported_v1(col.manifest_.index_type);
     col.open_listed_segments();
     col.scan_orphans();
     return col;
@@ -226,14 +269,14 @@ class DiskCollection {
                                     std::to_string(label));
       }
     }
-    // Cross-segment uniqueness — stream each segment's mmap'd ids and probe.
-    for (const auto &seg : segments_) {
-      auto *flat = dynamic_cast<DiskFlatSegmentSearcher *>(seg.get());
-      if (flat == nullptr) {
-        continue;
-      }
-      const uint64_t *labels = flat->labels();
-      const uint64_t cnt = flat->size();
+    // Cross-segment uniqueness via engine-agnostic manifest.ids_file mmap —
+    // no dynamic_cast against any concrete SegmentSearcher subclass. Each
+    // existing segment is identified by its directory in segment_dirs_, kept
+    // in lockstep with segments_.
+    for (const auto &seg_dir : segment_dirs_) {
+      auto ids_view = detail::load_segment_ids_view(seg_dir);
+      const uint64_t *labels = ids_view.data();
+      const uint64_t cnt = ids_view.count;
       for (uint64_t i = 0; i < cnt; ++i) {
         if (pending_set.contains(labels[i])) {
           throw std::invalid_argument(
@@ -246,23 +289,19 @@ class DiskCollection {
     const std::string seg_basename = detail::format_segment_id(seg_id);
     const auto seg_dir = path_ / "segments" / seg_basename;
 
-    DiskFlatBuilder builder(manifest_.dim, manifest_.metric);
-    builder.add_batch(pending_vectors_.data(), pending_labels_.data(), pending_labels_.size());
-    auto seg_manifest = builder.finish(seg_dir);
-    (void)seg_manifest;
+    // Drive segment construction through the factory. v1 routes Flat to the
+    // existing builder; this preserves byte-level behaviour while consolidating
+    // the dispatch decision in one place. The factory call also constructs
+    // the searcher, so a builder-side or open-side failure is reported from
+    // a single throw site.
+    auto searcher = create_segment_from_pending(
+        seg_dir, manifest_, pending_vectors_.data(), pending_labels_.data(),
+        pending_labels_.size());
     // Segment is now on disk. Any subsequent failure in this function leaves
     // an orphan segment that will be classified as kind=complete on next open.
     // Eagerly advance in-memory next_segment_id so a retried flush() uses a
     // fresh id rather than colliding with the orphan (Codex section-7 high #1).
     manifest_.next_segment_id = seg_id + 1;
-
-    // Construct the searcher BEFORE updating any other in-memory state.
-    // If this throws (e.g., MMapFile open under O_NOFOLLOW fails), the segment
-    // is on disk but `segments_` and pending are unchanged; caller can decide
-    // whether to retry (after addressing the underlying open failure) — and
-    // next_segment_id is already advanced so retry won't collide
-    // (Codex section-7 high #2).
-    auto searcher = std::make_shared<DiskFlatSegmentSearcher>(seg_dir);
 
     // Atomic rename of the collection manifest. Once this returns, the segment
     // is officially listed on disk. If this throws, segment is still orphan.
@@ -276,6 +315,7 @@ class DiskCollection {
     // intact for the caller (Codex section-7 high #3 — fsync below is soft).
     manifest_ = std::move(new_manifest);
     segments_.push_back(std::move(searcher));
+    segment_dirs_.push_back(seg_dir);
     pending_vectors_.clear();
     pending_labels_.clear();
     pending_vectors_.shrink_to_fit();
@@ -299,6 +339,20 @@ class DiskCollection {
     }
     if (segments_.empty()) {
       return {};
+    }
+
+    if (segments_.size() == 1) {
+      auto hits = segments_[0]->search(query, opts);
+      std::sort(hits.begin(), hits.end(), [](const DiskSearchHit &a, const DiskSearchHit &b) {
+        if (a.distance != b.distance) {
+          return a.distance < b.distance;
+        }
+        return a.label < b.label;
+      });
+      if (hits.size() > opts.top_k) {
+        hits.resize(opts.top_k);
+      }
+      return hits;
     }
 
     struct Tagged {
@@ -356,6 +410,7 @@ class DiskCollection {
 
   void open_listed_segments() {
     segments_.reserve(manifest_.segment_ids.size());
+    segment_dirs_.reserve(manifest_.segment_ids.size());
     for (const auto &id : manifest_.segment_ids) {
       const auto seg_dir = path_ / "segments" / id;
       // Reject segment directories that are themselves symlinks (D4: a
@@ -366,8 +421,9 @@ class DiskCollection {
         throw std::runtime_error("DiskCollection: segment directory is a symlink: " +
                                  seg_dir.string());
       }
-      auto searcher = std::make_shared<DiskFlatSegmentSearcher>(seg_dir);
+      auto searcher = load_segment_from_manifest(seg_dir);
       segments_.push_back(std::move(searcher));
+      segment_dirs_.push_back(seg_dir);
     }
   }
 
@@ -408,6 +464,40 @@ class DiskCollection {
     }
   }
 
+  // For a disk_vamana orphan, peek at graph.index's header to read the
+  // declared `expected_file_size` (bytes 0..7) without constructing a full
+  // VamanaReader. The orphan path's "do not load" contract precludes the
+  // reader's full structural validation; reading the 8-byte field is the
+  // cheapest way to spot a truncated graph file. Returns the declared size,
+  // or `std::nullopt` if the file is missing / unreadable / too short.
+  static auto peek_graph_expected_size(const std::filesystem::path &graph_path)
+      -> std::optional<uint64_t> {
+    int fd = ::open(graph_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) {
+      return std::nullopt;
+    }
+    uint64_t expected = 0;
+    ssize_t total = 0;
+    while (total < static_cast<ssize_t>(sizeof(expected))) {
+      ssize_t n =
+          ::read(fd, reinterpret_cast<char *>(&expected) + total, sizeof(expected) - total);
+      if (n < 0) {
+        if (errno == EINTR) {
+          continue;
+        }
+        ::close(fd);
+        return std::nullopt;
+      }
+      if (n == 0) {
+        ::close(fd);
+        return std::nullopt;
+      }
+      total += n;
+    }
+    ::close(fd);
+    return expected;
+  }
+
   static void classify_and_log_orphan(const std::filesystem::path &orphan_dir) {
     const auto manifest_path = orphan_dir / "manifest.txt";
     std::error_code ec;
@@ -444,12 +534,47 @@ class DiskCollection {
       LOG_WARN("DiskCollection: orphan segment at {} kind=truncated", orphan_dir.string());
       return;
     }
+    // Engine-specific extension: Vamana requires graph.index to be present and
+    // its declared expected_file_size to match the on-disk size. We read the
+    // 8-byte header field rather than constructing a VamanaReader because the
+    // orphan path is a "do not load" inspection — full validation is reserved
+    // for load_segment_from_manifest at open time.
+    if (sm.index_type == DiskIndexType::Vamana) {
+      auto graph_it = sm.x_extras.find("x_graph_file");
+      if (graph_it == sm.x_extras.end() || graph_it->second.empty()) {
+        LOG_WARN("DiskCollection: orphan segment at {} kind=truncated (x_graph_file missing)",
+                 orphan_dir.string());
+        return;
+      }
+      const auto graph_path = orphan_dir / graph_it->second;
+      const auto graph_size_actual = std::filesystem::file_size(graph_path, ec);
+      if (ec) {
+        LOG_WARN("DiskCollection: orphan segment at {} kind=truncated (graph.index stat failed)",
+                 orphan_dir.string());
+        return;
+      }
+      auto declared = peek_graph_expected_size(graph_path);
+      if (!declared.has_value()) {
+        LOG_WARN("DiskCollection: orphan segment at {} kind=truncated (graph header unreadable)",
+                 orphan_dir.string());
+        return;
+      }
+      if (*declared != static_cast<uint64_t>(graph_size_actual)) {
+        LOG_WARN("DiskCollection: orphan segment at {} kind=truncated (graph size mismatch)",
+                 orphan_dir.string());
+        return;
+      }
+    }
     LOG_WARN("DiskCollection: orphan segment at {} kind=complete", orphan_dir.string());
   }
 
   std::filesystem::path path_;
   CollectionManifest manifest_;
   std::vector<std::shared_ptr<SegmentSearcher>> segments_;
+  // Kept in lockstep with segments_ (same push order, same lifetime). Stored
+  // explicitly so cross-segment label inventory can resolve each segment's
+  // manifest.ids_file without depending on the runtime type of the searcher.
+  std::vector<std::filesystem::path> segment_dirs_;
   std::vector<float> pending_vectors_;
   std::vector<uint64_t> pending_labels_;
   size_t max_pending_bytes_ = kDefaultMaxPendingBytes;

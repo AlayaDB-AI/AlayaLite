@@ -20,6 +20,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <cstdint>
+#include <filesystem>  // NOLINT(build/c++17)
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -37,12 +38,16 @@ namespace py = pybind11;
 inline auto index_type_from_string_strict(const std::string &s) -> DiskIndexType {
   // v1 only accepts "disk_flat" at the Python boundary. The C++ format-level
   // round-trip helpers in disk-types accept disk_vamana / disk_laser too, but
-  // those are reserved future names and this binding rejects them.
+  // those are reserved future names and this binding rejects them. The error
+  // message embeds the dual literal contract shared with the C++
+  // `DiskSegmentFactory` ("disk_<engine>" + "not implemented in v1") so the
+  // Python and C++ rejection messages can be matched against the same regex.
   if (s == "disk_flat") {
     return DiskIndexType::Flat;
   }
-  throw py::value_error("DiskCollection: index_type must be \"disk_flat\" in v1 (got \"" + s +
-                        "\"); disk_vamana and disk_laser are reserved future names");
+  throw py::value_error("DiskCollection: index_type \"" + s +
+                        "\" not implemented in v1 (must be \"disk_flat\"); " +
+                        "disk_vamana and disk_laser are reserved future names");
 }
 
 class PyDiskCollection {
@@ -53,6 +58,14 @@ class PyDiskCollection {
                                                index_type_from_string_strict(index_type))) {}
 
   static auto open(const std::string &path) -> std::shared_ptr<PyDiskCollection> {
+    const auto manifest = CollectionManifest::load(std::filesystem::path(path) /
+                                                   "collection_manifest.txt");
+    if (manifest.index_type != DiskIndexType::Flat) {
+      const std::string engine(index_type_to_string(manifest.index_type));
+      throw py::value_error("DiskCollection.open: index_type \"" + engine +
+                            "\" not implemented in v1 (must be \"disk_flat\"); " +
+                            "disk_vamana exposure is reserved for a follow-up change");
+    }
     auto inner = DiskCollection::open(path);
     return std::shared_ptr<PyDiskCollection>(new PyDiskCollection(std::move(inner)));
   }
