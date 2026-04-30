@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Disk-resident segmented collection (`disk-collection` + `disk-flat-builder`
+  + `disk-flat-searcher` + `disk-types` + `mmap-file` + `segment-manifest`
+  capabilities). New `alayalite.DiskCollection` Python surface (constructor
+  + static `open(path)` factory + `add` / `flush` / `search` / `dim` /
+  `size`), wrapping `alaya::disk::DiskCollection` in C++. v1 supports the
+  Flat (brute-force) segment type with L2, IP, and COS metrics; Vamana and
+  Laser segment types are reserved enum values rejected at the v1
+  capability gate. On-disk layout: `<collection>/segments/seg_NNNNNNNN/`
+  containing `manifest.txt`, `ids.u64.bin`, and `vectors.f32.bin`, plus a
+  top-level `collection_manifest.txt`. POSIX-only (Linux + macOS); Windows
+  builds compile but throw at runtime. See
+  `openspec/changes/archive/2026-04-30-add-disk-collection-flat/` and
+  `examples/disk_collection_basic.py`.
 - Disk-based vector index (DiskANN) for billion-scale datasets
 - Real-time update support for dynamic vector insertion and deletion
 - Scalar-vector fusion search for hybrid queries
