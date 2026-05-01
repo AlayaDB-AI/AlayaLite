@@ -250,6 +250,19 @@ inline auto load_max_pending_bytes_from_manifest(const CollectionManifest &manif
   return static_cast<size_t>(value);
 }
 
+inline auto disk_search_distance_less(float a, float b) -> bool {
+  const bool a_nan = std::isnan(a);
+  const bool b_nan = std::isnan(b);
+  if (a_nan || b_nan) {
+    return !a_nan && b_nan;
+  }
+  return a < b;
+}
+
+inline auto disk_search_distance_equal_for_order(float a, float b) -> bool {
+  return (std::isnan(a) && std::isnan(b)) || a == b;
+}
+
 }  // namespace detail
 
 class DiskCollection {
@@ -347,6 +360,11 @@ class DiskCollection {
   ~DiskCollection() = default;
 
   void add_batch(const float *vectors, const uint64_t *labels, uint64_t n) {
+    if (manifest_.index_type == DiskIndexType::Laser) {
+      throw std::runtime_error(
+          "DiskCollection: disk_laser add_batch not implemented in v1; use "
+          "import_laser_segment");
+    }
     if (n == 0) {
       return;
     }
@@ -488,6 +506,74 @@ class DiskCollection {
     }
   }
 
+  void import_laser_segment(const std::filesystem::path &src_dir,
+                            const uint64_t *labels,
+                            uint64_t n) {
+    if (manifest_.index_type != DiskIndexType::Laser) {
+      throw std::runtime_error(
+          "DiskCollection: import_laser_segment requires a disk_laser collection");
+    }
+    if (n == 0) {
+      throw std::invalid_argument("DiskCollection: import_laser_segment requires n >= 1");
+    }
+    if (labels == nullptr) {
+      throw std::invalid_argument(
+          "DiskCollection: import_laser_segment with n>0 requires non-null labels");
+    }
+
+    std::unordered_set<uint64_t> import_set;
+    if (n <= static_cast<uint64_t>(std::numeric_limits<size_t>::max() / 2)) {
+      import_set.reserve(static_cast<size_t>(n * 2));
+    }
+    for (uint64_t i = 0; i < n; ++i) {
+      auto [it, inserted] = import_set.insert(labels[i]);
+      if (!inserted) {
+        throw std::invalid_argument(
+            "DiskCollection: duplicate label within import_laser_segment batch: " +
+            std::to_string(labels[i]));
+      }
+    }
+
+    for (const auto &seg_dir : segment_dirs_) {
+      auto ids_view = detail::load_segment_ids_view(seg_dir);
+      const uint64_t *existing = ids_view.data();
+      const uint64_t cnt = ids_view.count;
+      for (uint64_t i = 0; i < cnt; ++i) {
+        if (import_set.contains(existing[i])) {
+          throw std::invalid_argument("DiskCollection: duplicate label across segments: " +
+                                      std::to_string(existing[i]));
+        }
+      }
+    }
+
+    const uint64_t seg_id = manifest_.next_segment_id;
+    const std::string seg_basename = detail::format_segment_id(seg_id);
+    const auto seg_dir = path_ / "segments" / seg_basename;
+
+    auto searcher = import_segment_from_artifacts(seg_dir, manifest_, src_dir, labels, n);
+
+    // Segment is now on disk. Match flush(): advance next_segment_id before
+    // manifest publication so a retry after manifest-publish failure uses a
+    // fresh id and leaves the published segment for orphan classification.
+    manifest_.next_segment_id = seg_id + 1;
+
+    auto new_manifest = manifest_;
+    new_manifest.segment_ids.push_back(seg_basename);
+    new_manifest.next_segment_id = seg_id + 1;
+    detail::publish_collection_manifest_atomic_only(path_, new_manifest);
+
+    manifest_ = std::move(new_manifest);
+    segments_.push_back(std::move(searcher));
+    segment_dirs_.push_back(seg_dir);
+
+    try {
+      detail::fsync_dir(path_);
+    } catch (const std::exception &e) {
+      LOG_WARN("DiskCollection: collection_manifest fsync_dir failed (durability only): {}",
+               e.what());
+    }
+  }
+
   auto search(const float *query, const DiskSearchOptions &opts) const
       -> std::vector<DiskSearchHit> {
     if (opts.top_k == 0) {
@@ -500,8 +586,8 @@ class DiskCollection {
     if (segments_.size() == 1) {
       auto hits = segments_[0]->search(query, opts);
       std::sort(hits.begin(), hits.end(), [](const DiskSearchHit &a, const DiskSearchHit &b) {
-        if (a.distance != b.distance) {
-          return a.distance < b.distance;
+        if (!detail::disk_search_distance_equal_for_order(a.distance, b.distance)) {
+          return detail::disk_search_distance_less(a.distance, b.distance);
         }
         return a.label < b.label;
       });
@@ -525,8 +611,8 @@ class DiskCollection {
       }
     }
     std::sort(all.begin(), all.end(), [](const Tagged &a, const Tagged &b) {
-      if (a.hit.distance != b.hit.distance) {
-        return a.hit.distance < b.hit.distance;
+      if (!detail::disk_search_distance_equal_for_order(a.hit.distance, b.hit.distance)) {
+        return detail::disk_search_distance_less(a.hit.distance, b.hit.distance);
       }
       if (a.hit.label != b.hit.label) {
         return a.hit.label < b.hit.label;
@@ -653,6 +739,14 @@ class DiskCollection {
     return expected;
   }
 
+  static auto stat_nonempty_regular_file(const std::filesystem::path &path) -> bool {
+    struct ::stat st{};
+    if (::stat(path.c_str(), &st) != 0) {
+      return false;
+    }
+    return S_ISREG(st.st_mode) && st.st_size > 0;
+  }
+
   static void classify_and_log_orphan(const std::filesystem::path &orphan_dir) {
     const auto manifest_path = orphan_dir / "manifest.txt";
     std::error_code ec;
@@ -671,22 +765,26 @@ class DiskCollection {
       return;
     }
     const auto ids_path = orphan_dir / sm.ids_file;
-    const auto vec_path = orphan_dir / sm.vectors_file;
     const auto ids_size_actual = std::filesystem::file_size(ids_path, ec);
     if (ec) {
       LOG_WARN("DiskCollection: orphan segment at {} kind=truncated (ids stat failed)",
                orphan_dir.string());
       return;
     }
-    const auto vec_size_actual = std::filesystem::file_size(vec_path, ec);
-    if (ec) {
-      LOG_WARN("DiskCollection: orphan segment at {} kind=truncated (vectors stat failed)",
-               orphan_dir.string());
-      return;
+    std::optional<uint64_t> vec_size_actual;
+    if (!sm.vectors_file.empty()) {
+      const auto vec_path = orphan_dir / sm.vectors_file;
+      vec_size_actual = std::filesystem::file_size(vec_path, ec);
+      if (ec) {
+        LOG_WARN("DiskCollection: orphan segment at {} kind=truncated (vectors stat failed)",
+                 orphan_dir.string());
+        return;
+      }
     }
     const uint64_t expected_ids = sm.count * sizeof(uint64_t);
     const uint64_t expected_vec = sm.count * sm.dim * sizeof(float);
-    if (ids_size_actual != expected_ids || vec_size_actual != expected_vec) {
+    if (ids_size_actual != expected_ids ||
+        (vec_size_actual.has_value() && *vec_size_actual != expected_vec)) {
       LOG_WARN("DiskCollection: orphan segment at {} kind=truncated", orphan_dir.string());
       return;
     }
@@ -719,6 +817,41 @@ class DiskCollection {
         LOG_WARN("DiskCollection: orphan segment at {} kind=truncated (graph size mismatch)",
                  orphan_dir.string());
         return;
+      }
+    }
+    if (sm.index_type == DiskIndexType::Laser) {
+      static constexpr const char *kRequiredLaserFiles[] = {
+          "x_laser_index_file",
+          "x_laser_rotator_file",
+          "x_laser_cache_ids_file",
+          "x_laser_cache_nodes_file",
+      };
+      static constexpr const char *kOptionalLaserFiles[] = {
+          "x_laser_medoids_file",
+          "x_laser_medoids_indices_file",
+          "x_laser_pca_file",
+      };
+      for (const char *key : kRequiredLaserFiles) {
+        const auto it = sm.x_extras.find(key);
+        if (it == sm.x_extras.end() || it->second.empty() ||
+            !stat_nonempty_regular_file(orphan_dir / it->second)) {
+          LOG_WARN("DiskCollection: orphan segment at {} kind=truncated ({} missing or empty)",
+                   orphan_dir.string(),
+                   key);
+          return;
+        }
+      }
+      for (const char *key : kOptionalLaserFiles) {
+        const auto it = sm.x_extras.find(key);
+        if (it == sm.x_extras.end()) {
+          continue;
+        }
+        if (it->second.empty() || !stat_nonempty_regular_file(orphan_dir / it->second)) {
+          LOG_WARN("DiskCollection: orphan segment at {} kind=truncated ({} missing or empty)",
+                   orphan_dir.string(),
+                   key);
+          return;
+        }
       }
     }
     LOG_WARN("DiskCollection: orphan segment at {} kind=complete", orphan_dir.string());

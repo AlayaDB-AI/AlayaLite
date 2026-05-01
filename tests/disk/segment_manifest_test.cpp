@@ -21,9 +21,12 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include "index/disk/laser_segment_importer.hpp"
+#include "index/disk/laser_segment_searcher.hpp"
 
 namespace alaya::disk {
 
@@ -300,6 +303,29 @@ TEST_F(ManifestTest, SegmentManifestPathTraversalInVectorsFileRejected) {
   m.replace(pos, 28, "vectors_file=../../etc/shadow");
   auto path = write_text("vectors_traversal.txt", m);
   EXPECT_THROW((void)SegmentManifest::load(path), std::invalid_argument);
+}
+
+TEST_F(ManifestTest, SegmentManifestAllowsEmptyVectorsFileForLaserSegments) {
+  SegmentManifest m;
+  m.version = 1;
+  m.segment_id = "seg_00000007";
+  m.index_type = DiskIndexType::Laser;
+  m.metric = MetricType::L2;
+  m.dim = 128;
+  m.count = 1000;
+  m.ids_file = "ids.u64.bin";
+  m.vectors_file = "";
+  auto path = tmp_dir_ / "laser_empty_vectors_file.txt";
+  m.save(path);
+
+  std::ifstream saved(path, std::ios::binary);
+  const std::string text((std::istreambuf_iterator<char>(saved)), std::istreambuf_iterator<char>());
+  EXPECT_NE(text.find("\nvectors_file=\n"), std::string::npos);
+
+  auto loaded = SegmentManifest::load(path);
+  EXPECT_EQ(loaded.index_type, DiskIndexType::Laser);
+  EXPECT_EQ(loaded.ids_file, "ids.u64.bin");
+  EXPECT_TRUE(loaded.vectors_file.empty());
 }
 
 TEST_F(ManifestTest, SegmentManifestNegativeFormat) {

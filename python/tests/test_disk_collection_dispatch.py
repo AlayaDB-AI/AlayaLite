@@ -93,3 +93,28 @@ def test_open_empty_disk_vamana_manifest_allowed(tmp_path):
     opened = DiskCollection.open(str(coll))
     assert opened.dim() == 4
     assert opened.size() == 0
+
+
+def test_open_disk_laser_manifest_still_rejected(tmp_path):
+    """Python open keeps disk_laser behind the binding-level v1 allowlist."""
+    coll = tmp_path / "coll_laser"
+    (coll / "segments").mkdir(parents=True)
+    (coll / "collection_manifest.txt").write_text(
+        "\n".join(
+            [
+                "version=1",
+                "dim=4",
+                "metric=L2",
+                "index_type=disk_laser",
+                "next_segment_id=1",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        DiskCollection.open(str(coll))
+    msg = str(exc_info.value)
+    assert "disk_laser" in msg
+    assert "not implemented in v1" in msg

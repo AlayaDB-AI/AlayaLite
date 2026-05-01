@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name + "not implemented in v1").
 
 ### Added
+- DiskCollection now supports the LASER engine end-to-end at the C++ level for
+  load+search+import (L2 only; Linux + libaio +
+  `ALAYA_ENABLE_LASER=ON` only): `index_type=disk_laser` reachable through
+  `DiskCollection`, segment importer + searcher under `include/index/disk/`,
+  and a SegmentFactory registration. Native LASER files and sidecars are
+  co-located inside `seg_<id>/` under their native filenames and recorded in
+  `manifest.x_extras`. v1 has no in-C++ build pipeline; segments enter via
+  `DiskCollection::import_laser_segment` from precomputed artifacts produced by
+  the upstream Python module + `QGBuilder::build`. Python `disk_laser` exposure
+  remains deferred to a follow-up.
 - DiskCollection now supports the Vamana engine end-to-end (L2 only):
   `index_type="disk_vamana"` at the C++ level, segment builder + searcher
   under `include/index/disk/`, and a SegmentFactory registration. Python

@@ -343,7 +343,12 @@ struct SegmentManifest {
         throw std::invalid_argument("manifest missing required key '" + std::string(k) +
                                     "' (missing key)");
       }
-      if (it->second.empty()) {
+      // v1 Laser contract: a Laser segment publishes no engine-agnostic
+      // `vectors.f32.bin`, so its manifest serialises `vectors_file=` with an
+      // empty value. The presence check above still fires for missing keys;
+      // only the empty-value gate is skipped for vectors_file. Other engines
+      // continue to require a non-empty basename.
+      if (it->second.empty() && k != "vectors_file") {
         throw std::invalid_argument("manifest required key '" + std::string(k) +
                                     "' has empty value (empty value)");
       }
@@ -387,7 +392,9 @@ struct SegmentManifest {
       throw std::invalid_argument("manifest ids_file must be a basename (no '/', '..', NUL): '" +
                                   m.ids_file + "'");
     }
-    if (!detail::is_valid_basename(m.vectors_file)) {
+    // v1 Laser segments intentionally publish no engine-agnostic vectors file.
+    // Non-empty values still must be safe basenames.
+    if (!m.vectors_file.empty() && !detail::is_valid_basename(m.vectors_file)) {
       throw std::invalid_argument(
           "manifest vectors_file must be a basename (no '/', '..', NUL): '" + m.vectors_file + "'");
     }
