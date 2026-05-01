@@ -16,11 +16,11 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>  // NOLINT(build/c++17)
-#include <algorithm>
 #include <cstring>
+#include <filesystem>  // NOLINT(build/c++17)
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -116,9 +116,9 @@ class VamanaSegmentSearcher : public SegmentSearcher {
     vectors_mmap_ = alaya::storage::MMapFile(seg_dir / manifest_.vectors_file);
     if (vectors_mmap_.size() != expected_vec_bytes) {
       throw std::runtime_error("VamanaSegmentSearcher: vectors file size mismatch — expected " +
-                               std::to_string(expected_vec_bytes) +
-                               " (count×dim×4) but got " + std::to_string(vectors_mmap_.size()) +
-                               " for " + (seg_dir / manifest_.vectors_file).string());
+                               std::to_string(expected_vec_bytes) + " (count×dim×4) but got " +
+                               std::to_string(vectors_mmap_.size()) + " for " +
+                               (seg_dir / manifest_.vectors_file).string());
     }
 
     // Step 4 — ids mmap.
@@ -139,9 +139,10 @@ class VamanaSegmentSearcher : public SegmentSearcher {
                                seg_dir.string());
     }
     if (graph_it->second.empty()) {
-      throw std::runtime_error("VamanaSegmentSearcher: x_graph_file value is empty in manifest "
-                               "for " +
-                               seg_dir.string());
+      throw std::runtime_error(
+          "VamanaSegmentSearcher: x_graph_file value is empty in manifest "
+          "for " +
+          seg_dir.string());
     }
     if (!detail::is_valid_basename(graph_it->second)) {
       throw std::runtime_error(
@@ -167,19 +168,20 @@ class VamanaSegmentSearcher : public SegmentSearcher {
     // means a corrupt segment (e.g. ids/vectors written from one batch but a
     // graph from a different one) — bail with both numbers in the message.
     if (manifest_.count != reader_->num_nodes()) {
-      throw std::runtime_error("VamanaSegmentSearcher: manifest count (" +
-                               std::to_string(manifest_.count) +
-                               ") disagrees with graph num_nodes (" +
-                               std::to_string(reader_->num_nodes()) + ") in segment " +
-                               seg_dir.string());
+      throw std::runtime_error(
+          "VamanaSegmentSearcher: manifest count (" + std::to_string(manifest_.count) +
+          ") disagrees with graph num_nodes (" + std::to_string(reader_->num_nodes()) +
+          ") in segment " + seg_dir.string());
     }
 
     // Step 7 — greedy search wiring. Borrows `reader_` and the vectors mmap
     // pointer — both must outlive `greedy_search_`, enforced by member
     // declaration order (greedy_search_ declared LAST, destructed FIRST).
-    greedy_search_ = std::make_unique<alaya::vamana::VamanaGreedySearch>(
-        *reader_, static_cast<const float *>(vectors_mmap_.data()),
-        static_cast<uint32_t>(manifest_.dim));
+    greedy_search_ =
+        std::make_unique<alaya::vamana::VamanaGreedySearch>(*reader_,
+                                                            static_cast<const float *>(
+                                                                vectors_mmap_.data()),
+                                                            static_cast<uint32_t>(manifest_.dim));
   }
 
   VamanaSegmentSearcher(const VamanaSegmentSearcher &) = delete;
@@ -205,9 +207,10 @@ class VamanaSegmentSearcher : public SegmentSearcher {
       if (!detail::is_finite_query_f32(v)) {
         const std::string kind =
             detail::is_nan_query_f32(v) ? "NaN" : (detail::is_neg_query_f32(v) ? "-Inf" : "+Inf");
-        throw std::invalid_argument("VamanaSegmentSearcher: non-finite query component at "
-                                    "position " +
-                                    std::to_string(c) + " (" + kind + ")");
+        throw std::invalid_argument(
+            "VamanaSegmentSearcher: non-finite query component at "
+            "position " +
+            std::to_string(c) + " (" + kind + ")");
       }
     }
     const auto count = static_cast<uint32_t>(reader_->num_nodes());

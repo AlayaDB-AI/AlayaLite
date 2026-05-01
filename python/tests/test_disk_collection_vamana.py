@@ -14,6 +14,7 @@
 
 """Tests for the alayalite.DiskCollection disk_vamana Python binding."""
 
+import concurrent.futures
 import os
 import shutil
 import subprocess
@@ -377,75 +378,35 @@ def test_disk_vamana_singleton_flush_throws_before_publish(tmp_path):
     "body, token",
     [
         (
-            "version=1\n"
-            "dim=4\n"
-            "metric=IP\n"
-            "index_type=disk_vamana\n"
-            "next_segment_id=1\n",
+            "version=1\ndim=4\nmetric=IP\nindex_type=disk_vamana\nnext_segment_id=1\n",
             "metric",
         ),
         (
-            "version=1\n"
-            "dim=4\n"
-            "metric=L2\n"
-            "index_type=disk_vamana\n"
-            "next_segment_id=1\n"
-            "x_vamana_R=0\n",
+            "version=1\ndim=4\nmetric=L2\nindex_type=disk_vamana\nnext_segment_id=1\nx_vamana_R=0\n",
             "x_vamana_R",
         ),
         (
-            "version=1\n"
-            "dim=4\n"
-            "metric=L2\n"
-            "index_type=disk_vamana\n"
-            "next_segment_id=1\n"
-            "x_vamana_L=0\n",
+            "version=1\ndim=4\nmetric=L2\nindex_type=disk_vamana\nnext_segment_id=1\nx_vamana_L=0\n",
             "x_vamana_L",
         ),
         (
-            "version=1\n"
-            "dim=4\n"
-            "metric=L2\n"
-            "index_type=disk_vamana\n"
-            "next_segment_id=1\n"
-            "x_vamana_R=64\n"
-            "x_vamana_L=32\n",
+            "version=1\ndim=4\nmetric=L2\nindex_type=disk_vamana\nnext_segment_id=1\nx_vamana_R=64\nx_vamana_L=32\n",
             "x_vamana_L",
         ),
         (
-            "version=1\n"
-            "dim=4\n"
-            "metric=L2\n"
-            "index_type=disk_vamana\n"
-            "next_segment_id=1\n"
-            "x_vamana_alpha=inf\n",
+            "version=1\ndim=4\nmetric=L2\nindex_type=disk_vamana\nnext_segment_id=1\nx_vamana_alpha=inf\n",
             "x_vamana_alpha",
         ),
         (
-            "version=1\n"
-            "dim=4\n"
-            "metric=L2\n"
-            "index_type=disk_vamana\n"
-            "next_segment_id=1\n"
-            "x_vamana_alpha=1.2junk\n",
+            "version=1\ndim=4\nmetric=L2\nindex_type=disk_vamana\nnext_segment_id=1\nx_vamana_alpha=1.2junk\n",
             "x_vamana_alpha",
         ),
         (
-            "version=1\n"
-            "dim=4\n"
-            "metric=L2\n"
-            "index_type=disk_vamana\n"
-            "next_segment_id=1\n"
-            "x_vamana_seed=4294967296\n",
+            "version=1\ndim=4\nmetric=L2\nindex_type=disk_vamana\nnext_segment_id=1\nx_vamana_seed=4294967296\n",
             "x_vamana_seed",
         ),
         (
-            "version=1\n"
-            "dim=4\n"
-            "metric=L2\n"
-            "index_type=disk_vamana\n"
-            "next_segment_id=1\n"
-            "x_vamana_num_threads=4294967296\n",
+            "version=1\ndim=4\nmetric=L2\nindex_type=disk_vamana\nnext_segment_id=1\nx_vamana_num_threads=4294967296\n",
             "x_vamana_num_threads",
         ),
     ],
@@ -606,8 +567,6 @@ def test_concurrent_size_dim_during_flush_are_safe(tmp_path):
 
 
 def test_concurrent_disk_vamana_search_results_are_stable(tmp_path):
-    import concurrent.futures
-
     dim = 16
     vectors = _rand_vectors(256, dim, seed=10)
     ids = _ids(256)

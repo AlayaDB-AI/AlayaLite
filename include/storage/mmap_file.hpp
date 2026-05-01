@@ -27,10 +27,10 @@
 #include <utility>
 
 #ifndef _WIN32
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
+  #include <fcntl.h>
+  #include <sys/mman.h>
+  #include <sys/stat.h>
+  #include <unistd.h>
 #endif
 
 namespace alaya::storage {
@@ -122,7 +122,7 @@ class MMapFile {
       throw std::runtime_error("MMapFile open failed: " + path.string() + ": " +
                                detail::errno_to_string(saved));
     }
-    struct ::stat st {};
+    struct ::stat st{};
     if (::fstat(fd, &st) != 0) {
       int saved = errno;
       ::close(fd);

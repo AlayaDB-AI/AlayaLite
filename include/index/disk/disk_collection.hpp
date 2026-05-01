@@ -22,12 +22,13 @@
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
+#include <cinttypes>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>  // NOLINT(build/c++17)
-#include <cmath>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -50,7 +51,7 @@ namespace detail {
 
 inline auto format_segment_id(uint64_t id) -> std::string {
   char buf[16];  // "seg_" + 8 digits + NUL = 13
-  std::snprintf(buf, sizeof(buf), "seg_%08llu", static_cast<unsigned long long>(id));
+  std::snprintf(buf, sizeof(buf), "seg_%08" PRIu64, id);
   return std::string(buf);
 }
 
@@ -74,7 +75,7 @@ inline auto rename_atomic_replace(const std::filesystem::path &from,
 // as a soft step allows the in-memory state to commit on rename success.
 inline auto publish_collection_manifest_atomic_only(const std::filesystem::path &collection_dir,
                                                     const CollectionManifest &m) -> void {
-  const auto pid = static_cast<long long>(::getpid());
+  const auto pid = static_cast<int64_t>(::getpid());
   const auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
   const std::string tmp_name =
       ".tmp_collection_manifest_" + std::to_string(pid) + "_" + std::to_string(ts);
@@ -131,7 +132,7 @@ inline auto parse_u32_extra(const CollectionManifest &manifest,
   try {
     size_t pos = 0;
     const auto value = std::stoull(it->second, &pos);
-    if (pos != it->second.size() || value > static_cast<unsigned long long>(UINT32_MAX)) {
+    if (pos != it->second.size() || value > std::numeric_limits<uint32_t>::max()) {
       throw std::out_of_range("not uint32");
     }
     return static_cast<uint32_t>(value);
@@ -235,8 +236,7 @@ inline auto store_vamana_params_in_manifest(CollectionManifest &manifest,
 
 inline auto store_max_pending_bytes_in_manifest(CollectionManifest &manifest,
                                                 size_t max_pending_bytes) -> void {
-  manifest.x_extras["x_max_pending_bytes"] =
-      std::to_string(static_cast<unsigned long long>(max_pending_bytes));
+  manifest.x_extras["x_max_pending_bytes"] = std::to_string(max_pending_bytes);
 }
 
 inline auto load_max_pending_bytes_from_manifest(const CollectionManifest &manifest,
@@ -331,8 +331,9 @@ class DiskCollection {
         detail::load_max_pending_bytes_from_manifest(col.manifest_, kDefaultMaxPendingBytes);
     if (col.manifest_.index_type == DiskIndexType::Vamana) {
       col.vamana_params_ = detail::load_vamana_params_from_manifest(col.manifest_);
-      detail::validate_vamana_manifest_config(
-          col.manifest_, col.vamana_params_, "DiskCollection::open");
+      detail::validate_vamana_manifest_config(col.manifest_,
+                                              col.vamana_params_,
+                                              "DiskCollection::open");
     }
     col.open_listed_segments();
     col.scan_orphans();
@@ -664,7 +665,7 @@ class DiskCollection {
     try {
       sm = SegmentManifest::load(manifest_path);
     } catch (const std::exception &e) {
-      LOG_WARN("DiskCollection: orphan segment at {} kind=partial (manifest unparseable: {})",
+      LOG_WARN("DiskCollection: orphan segment at {} kind=partial (manifest unparsable: {})",
                orphan_dir.string(),
                e.what());
       return;

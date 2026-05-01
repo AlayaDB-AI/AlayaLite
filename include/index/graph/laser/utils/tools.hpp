@@ -17,8 +17,10 @@ inline T rand_integer(T min, T max) {
   // Brace-init avoids the most-vexing-parse: with parens, gcc tries to parse
   // the initializer as a function declarator and reads `std::random_device()()`
   // as "function returning function".
+  // NOLINTNEXTLINE(whitespace/braces)
   static thread_local std::mt19937 generator{
-      std::random_device{}() + std::hash<std::thread::id>{}(std::this_thread::get_id())};
+      std::random_device{}() +  // NOLINT(whitespace/braces)
+      std::hash<std::thread::id>{}(std::this_thread::get_id())};
   std::uniform_int_distribution<T> distribution(min, max);
   return distribution(generator);
 }

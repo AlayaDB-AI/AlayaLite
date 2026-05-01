@@ -65,10 +65,7 @@ class VamanaGreedySearch {
   // outlive every `search()` call. `vectors` must point to at least
   // `reader.num_nodes() * dim` consecutive float32 values, row-major.
   VamanaGreedySearch(const VamanaReader &reader, const float *vectors, uint32_t dim)
-      : reader_(reader),
-        vectors_(vectors),
-        dim_(dim),
-        kernel_(alaya::simd::get_l2_sqr_func()) {}
+      : reader_(reader), vectors_(vectors), dim_(dim), kernel_(alaya::simd::get_l2_sqr_func()) {}
 
   // Non-copyable, non-movable — keeps scratch state local-only and
   // matches the reader's ownership contract.
@@ -91,9 +88,7 @@ class VamanaGreedySearch {
   //
   // Throws `std::runtime_error` if any of: `top_k == 0`,
   // `search_list_size == 0`, `search_list_size < top_k`.
-  std::vector<GreedyHit> search(const float *query,
-                                uint32_t top_k,
-                                uint32_t search_list_size) {
+  std::vector<GreedyHit> search(const float *query, uint32_t top_k, uint32_t search_list_size) {
     if (top_k == 0) {
       throw std::runtime_error("VamanaGreedySearch: top_k = 0 is not supported");
     }
@@ -134,8 +129,8 @@ class VamanaGreedySearch {
 
     scratch.visited[start_id] = 1;
     scratch.visited_touched.push_back(start_id);
-    const float start_dist = kernel_(query, vectors_ + static_cast<size_t>(start_id) * dim_sz,
-                                     dim_sz);
+    const float start_dist =
+        kernel_(query, vectors_ + static_cast<size_t>(start_id) * dim_sz, dim_sz);
     scratch.pool.insert(Neighbor(start_id, start_dist));
 
     while (scratch.pool.has_unexpanded_node()) {

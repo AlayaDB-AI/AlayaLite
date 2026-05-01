@@ -87,9 +87,9 @@ class VamanaReader {
     // Reject undersized files up-front so the error names the actual size
     // rather than surfacing as a generic stream-EOF later.
     if (actual_size < kHeaderSize) {
-      throw std::runtime_error(
-          "VamanaReader: header truncated; actual size " + std::to_string(actual_size) +
-          " < " + std::to_string(kHeaderSize) + " bytes (path: " + path.string() + ")");
+      throw std::runtime_error("VamanaReader: header truncated; actual size " +
+                               std::to_string(actual_size) + " < " + std::to_string(kHeaderSize) +
+                               " bytes (path: " + path.string() + ")");
     }
 
     in.read(reinterpret_cast<char *>(&expected_file_size_), sizeof(uint64_t));
@@ -107,10 +107,9 @@ class VamanaReader {
             std::to_string(expected_file_size_) + ", actual_size=" + std::to_string(actual_size) +
             " (path: " + path.string() + ")");
       }
-      throw std::runtime_error(
-          "VamanaReader: file truncated; expected_file_size=" +
-          std::to_string(expected_file_size_) + ", actual_size=" + std::to_string(actual_size) +
-          " (path: " + path.string() + ")");
+      throw std::runtime_error("VamanaReader: file truncated; expected_file_size=" +
+                               std::to_string(expected_file_size_) + ", actual_size=" +
+                               std::to_string(actual_size) + " (path: " + path.string() + ")");
     }
 
     // Header-field invariants. `start_` is validated below, after the
@@ -121,9 +120,8 @@ class VamanaReader {
           path.string() + ")");
     }
     if (frozen_pts_ != 0) {
-      throw std::runtime_error(
-          "VamanaReader: frozen_pts=" + std::to_string(frozen_pts_) +
-          " but v1 only supports frozen_pts=0 (path: " + path.string() + ")");
+      throw std::runtime_error("VamanaReader: frozen_pts=" + std::to_string(frozen_pts_) +
+                               " but v1 only supports frozen_pts=0 (path: " + path.string() + ")");
     }
 
     // Per-node loop: every read is bounds-checked against the records-region
@@ -140,51 +138,47 @@ class VamanaReader {
     uint64_t consumed = 0;
     while (consumed < records_total_bytes) {
       if (consumed + sizeof(uint32_t) > records_total_bytes) {
-        throw std::runtime_error(
-            "VamanaReader: mid-record truncation reading k at byte offset " +
-            std::to_string(kHeaderSize + consumed) + " (path: " + path.string() + ")");
+        throw std::runtime_error("VamanaReader: mid-record truncation reading k at byte offset " +
+                                 std::to_string(kHeaderSize + consumed) +
+                                 " (path: " + path.string() + ")");
       }
 
       uint32_t k = 0;
       in.read(reinterpret_cast<char *>(&k), sizeof(uint32_t));
       if (!in.good()) {
-        throw std::runtime_error(
-            "VamanaReader: stream error reading k at byte offset " +
-            std::to_string(kHeaderSize + consumed) + " (path: " + path.string() + ")");
+        throw std::runtime_error("VamanaReader: stream error reading k at byte offset " +
+                                 std::to_string(kHeaderSize + consumed) +
+                                 " (path: " + path.string() + ")");
       }
       consumed += sizeof(uint32_t);
 
       const uint32_t node_id = static_cast<uint32_t>(graph_.size());
 
       if (k == 0) {
-        throw std::runtime_error(
-            "VamanaReader: node " + std::to_string(node_id) +
-            " has zero out-degree (k=0); v1 rejects zero-degree nodes");
+        throw std::runtime_error("VamanaReader: node " + std::to_string(node_id) +
+                                 " has zero out-degree (k=0); v1 rejects zero-degree nodes");
       }
       if (k > max_degree_) {
-        throw std::runtime_error(
-            "VamanaReader: node " + std::to_string(node_id) +
-            " has k=" + std::to_string(k) +
-            " exceeding max_observed_degree=" + std::to_string(max_degree_));
+        throw std::runtime_error("VamanaReader: node " + std::to_string(node_id) +
+                                 " has k=" + std::to_string(k) +
+                                 " exceeding max_observed_degree=" + std::to_string(max_degree_));
       }
 
       const uint64_t neighbor_bytes = static_cast<uint64_t>(k) * sizeof(uint32_t);
       if (consumed + neighbor_bytes > records_total_bytes) {
         throw std::runtime_error(
             "VamanaReader: mid-record truncation; node " + std::to_string(node_id) +
-            " claims k=" + std::to_string(k) + " neighbors (" +
-            std::to_string(neighbor_bytes) + " bytes) but only " +
-            std::to_string(records_total_bytes - consumed) + " bytes remain at offset " +
-            std::to_string(kHeaderSize + consumed) + " (path: " + path.string() + ")");
+            " claims k=" + std::to_string(k) + " neighbors (" + std::to_string(neighbor_bytes) +
+            " bytes) but only " + std::to_string(records_total_bytes - consumed) +
+            " bytes remain at offset " + std::to_string(kHeaderSize + consumed) +
+            " (path: " + path.string() + ")");
       }
 
       std::vector<uint32_t> adj(k);
-      in.read(reinterpret_cast<char *>(adj.data()),
-              static_cast<std::streamsize>(neighbor_bytes));
+      in.read(reinterpret_cast<char *>(adj.data()), static_cast<std::streamsize>(neighbor_bytes));
       if (!in.good()) {
-        throw std::runtime_error(
-            "VamanaReader: stream error reading neighbors for node " +
-            std::to_string(node_id) + " (path: " + path.string() + ")");
+        throw std::runtime_error("VamanaReader: stream error reading neighbors for node " +
+                                 std::to_string(node_id) + " (path: " + path.string() + ")");
       }
       consumed += neighbor_bytes;
 
@@ -195,10 +189,10 @@ class VamanaReader {
     // overruns, but keeping this assertion makes a future refactor that
     // breaks the byte-budget logic fail here rather than silently.
     if (consumed != records_total_bytes) {
-      throw std::runtime_error(
-          "VamanaReader: size mismatch; consumed " + std::to_string(consumed) +
-          " bytes but expected_file_size - " + std::to_string(kHeaderSize) + " = " +
-          std::to_string(records_total_bytes) + " (path: " + path.string() + ")");
+      throw std::runtime_error("VamanaReader: size mismatch; consumed " + std::to_string(consumed) +
+                               " bytes but expected_file_size - " + std::to_string(kHeaderSize) +
+                               " = " + std::to_string(records_total_bytes) +
+                               " (path: " + path.string() + ")");
     }
 
     num_nodes_ = graph_.size();
@@ -215,10 +209,9 @@ class VamanaReader {
     for (size_t i = 0; i < graph_.size(); ++i) {
       for (uint32_t n : graph_[i]) {
         if (n >= num_nodes_) {
-          throw std::runtime_error(
-              "VamanaReader: node " + std::to_string(i) +
-              " has out-of-range neighbor id " + std::to_string(n) +
-              " (num_nodes=" + std::to_string(num_nodes_) + ")");
+          throw std::runtime_error("VamanaReader: node " + std::to_string(i) +
+                                   " has out-of-range neighbor id " + std::to_string(n) +
+                                   " (num_nodes=" + std::to_string(num_nodes_) + ")");
         }
         if (n == static_cast<uint32_t>(i)) {
           throw std::runtime_error(
@@ -229,10 +222,9 @@ class VamanaReader {
     }
 
     if (static_cast<size_t>(start_) >= num_nodes_) {
-      throw std::runtime_error(
-          "VamanaReader: start=" + std::to_string(start_) +
-          " is out of range; num_nodes=" + std::to_string(num_nodes_) +
-          " (path: " + path.string() + ")");
+      throw std::runtime_error("VamanaReader: start=" + std::to_string(start_) +
+                               " is out of range; num_nodes=" + std::to_string(num_nodes_) +
+                               " (path: " + path.string() + ")");
     }
   }
 

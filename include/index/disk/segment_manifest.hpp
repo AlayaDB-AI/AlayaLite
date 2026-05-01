@@ -139,7 +139,7 @@ inline auto read_manifest_file(const std::filesystem::path &path) -> std::string
     throw std::runtime_error("manifest open failed: " + path.string() + ": " +
                              std::strerror(errno));
   }
-  struct ::stat st {};
+  struct ::stat st{};
   if (::fstat(fd, &st) != 0) {
     int saved = errno;
     ::close(fd);

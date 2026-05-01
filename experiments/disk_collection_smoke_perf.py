@@ -60,9 +60,7 @@ def hw_provenance() -> dict:
             for line in f:
                 if line.startswith("flags"):
                     flags = line.split(":", 1)[1].split()
-                    info["simd_flags"] = sorted(
-                        f for f in flags if f.startswith(("sse4", "avx"))
-                    )
+                    info["simd_flags"] = sorted(f for f in flags if f.startswith(("sse4", "avx")))
                     break
     except OSError:
         pass
@@ -97,9 +95,7 @@ def main() -> None:
     ids = np.arange(args.n, dtype=np.uint64)
     queries = rng.standard_normal((args.queries + args.warmup, args.dim)).astype(np.float32)
 
-    dataset_sha = hashlib.sha256(
-        b"".join([vectors.tobytes(), ids.tobytes(), queries.tobytes()])
-    ).hexdigest()[:16]
+    dataset_sha = hashlib.sha256(b"".join([vectors.tobytes(), ids.tobytes(), queries.tobytes()])).hexdigest()[:16]
 
     rss_before_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
 
@@ -244,10 +240,11 @@ def main() -> None:
     )
 
     print(f"\n=== smoke perf summary ({args.metric}) ===")
-    print(f"DiskCollection: build={build_s * 1000:.1f}ms, QPS={coll_qps:.0f}, "
-          f"p50={coll_p[50]:.1f}us, p95={coll_p[95]:.1f}us, p99={coll_p[99]:.1f}us")
-    print(f"numpy bf:       QPS={np_qps:.0f}, p50={np_p[50]:.1f}us, "
-          f"p95={np_p[95]:.1f}us, p99={np_p[99]:.1f}us")
+    print(
+        f"DiskCollection: build={build_s * 1000:.1f}ms, QPS={coll_qps:.0f}, "
+        f"p50={coll_p[50]:.1f}us, p95={coll_p[95]:.1f}us, p99={coll_p[99]:.1f}us"
+    )
+    print(f"numpy bf:       QPS={np_qps:.0f}, p50={np_p[50]:.1f}us, p95={np_p[95]:.1f}us, p99={np_p[99]:.1f}us")
     print(f"ratio (DC/np):  QPS={coll_qps / np_qps:.2f}x, p50={coll_p[50] / np_p[50]:.2f}x")
     print(f"\nreport: {md_path}")
     print(f"raw:    {json_path}")

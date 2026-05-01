@@ -109,8 +109,7 @@ class DiskFlatSegmentSearcher : public SegmentSearcher {
     if (ids_mmap_.size() != expected_ids_bytes) {
       throw std::runtime_error("DiskFlatSegmentSearcher: ids file size mismatch — expected " +
                                std::to_string(expected_ids_bytes) + " (count×8) but got " +
-                               std::to_string(ids_mmap_.size()) + " for " +
-                               manifest_.ids_file);
+                               std::to_string(ids_mmap_.size()) + " for " + manifest_.ids_file);
     }
     if (vectors_mmap_.size() != expected_vec_bytes) {
       throw std::runtime_error("DiskFlatSegmentSearcher: vectors file size mismatch — expected " +
@@ -169,8 +168,7 @@ class DiskFlatSegmentSearcher : public SegmentSearcher {
       }
       normalized_query = detail::allocate_aligned_floats(d);
       for (uint32_t c = 0; c < d; ++c) {
-        normalized_query.get()[c] =
-            static_cast<float>(static_cast<double>(query[c]) * inv_norm);
+        normalized_query.get()[c] = static_cast<float>(static_cast<double>(query[c]) * inv_norm);
       }
       effective_query = normalized_query.get();
     }

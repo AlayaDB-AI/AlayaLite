@@ -21,8 +21,8 @@
 #include <unistd.h>
 
 #if defined(__linux__)
-#include <linux/fs.h>      // RENAME_NOREPLACE
-#include <sys/syscall.h>   // SYS_renameat2
+  #include <linux/fs.h>     // RENAME_NOREPLACE
+  #include <sys/syscall.h>  // SYS_renameat2
 #endif
 
 #include <bit>
@@ -70,9 +70,7 @@ inline auto is_inf_f32(float v) -> bool {
   return (b & 0x7F800000U) == 0x7F800000U && (b & 0x007FFFFFU) == 0U;
 }
 
-inline auto is_finite_f32(float v) -> bool {
-  return (float_bits(v) & 0x7F800000U) != 0x7F800000U;
-}
+inline auto is_finite_f32(float v) -> bool { return (float_bits(v) & 0x7F800000U) != 0x7F800000U; }
 
 inline auto is_neg_f32(float v) -> bool { return (float_bits(v) & 0x80000000U) != 0U; }
 
@@ -139,10 +137,14 @@ inline auto fsync_dir(const std::filesystem::path &dir) -> void {
   }
 }
 
-inline auto rename_no_replace(const std::filesystem::path &from,
-                              const std::filesystem::path &to) -> void {
+inline auto rename_no_replace(const std::filesystem::path &from, const std::filesystem::path &to)
+    -> void {
 #if defined(__linux__) && defined(SYS_renameat2) && defined(RENAME_NOREPLACE)
-  long rc = ::syscall(SYS_renameat2, AT_FDCWD, from.c_str(), AT_FDCWD, to.c_str(),
+  auto rc = ::syscall(SYS_renameat2,
+                      AT_FDCWD,
+                      from.c_str(),
+                      AT_FDCWD,
+                      to.c_str(),
                       static_cast<unsigned int>(RENAME_NOREPLACE));
   if (rc != 0) {
     int saved = errno;
@@ -153,7 +155,7 @@ inline auto rename_no_replace(const std::filesystem::path &from,
                              to.string() + ": " + std::strerror(saved));
   }
 #else
-  struct ::stat st {};
+  struct ::stat st{};
   if (::lstat(to.c_str(), &st) == 0) {
     throw std::runtime_error("disk_flat_builder target segment already exists: " + to.string());
   }
@@ -222,8 +224,9 @@ class DiskFlatBuilder {
     // archive blocker — without the check, a hostile n could wrap and
     // produce a small product that bypasses cap checks downstream.)
     size_t vec_components = 0;
-    if (__builtin_mul_overflow(static_cast<size_t>(n), static_cast<size_t>(dim_),
-                                &vec_components)) {
+    if (__builtin_mul_overflow(static_cast<size_t>(n),
+                               static_cast<size_t>(dim_),
+                               &vec_components)) {
       throw std::invalid_argument("DiskFlatBuilder: n * dim overflows size_t (n=" +
                                   std::to_string(n) + ", dim=" + std::to_string(dim_) + ")");
     }
@@ -233,14 +236,14 @@ class DiskFlatBuilder {
         if (!detail::is_finite_f32(v)) {
           const uint64_t global_row = row_offset + r;
           if (detail::is_nan_f32(v)) {
-            throw std::invalid_argument(
-                "DiskFlatBuilder: NaN component at row " + std::to_string(global_row) +
-                " position " + std::to_string(c));
+            throw std::invalid_argument("DiskFlatBuilder: NaN component at row " +
+                                        std::to_string(global_row) + " position " +
+                                        std::to_string(c));
           }
           const std::string sign = detail::is_neg_f32(v) ? "-Inf" : "+Inf";
-          throw std::invalid_argument(
-              "DiskFlatBuilder: Inf component at row " + std::to_string(global_row) +
-              " position " + std::to_string(c) + " (" + sign + ")");
+          throw std::invalid_argument("DiskFlatBuilder: Inf component at row " +
+                                      std::to_string(global_row) + " position " +
+                                      std::to_string(c) + " (" + sign + ")");
         }
       }
     }
@@ -277,10 +280,10 @@ class DiskFlatBuilder {
       }
     }
 
-    const auto pid = static_cast<long long>(::getpid());
+    const auto pid = static_cast<int64_t>(::getpid());
     const auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
-    const std::string tmp_name = ".tmp_" + seg_basename + "_" + std::to_string(pid) + "_" +
-                                 std::to_string(ts);
+    const std::string tmp_name =
+        ".tmp_" + seg_basename + "_" + std::to_string(pid) + "_" + std::to_string(ts);
     const auto tmp_dir = parent / tmp_name;
 
     {
@@ -293,7 +296,8 @@ class DiskFlatBuilder {
     }
     detail::TmpDirGuard guard(tmp_dir);
 
-    detail::write_all_fsync(tmp_dir / "ids.u64.bin", labels_.data(),
+    detail::write_all_fsync(tmp_dir / "ids.u64.bin",
+                            labels_.data(),
                             labels_.size() * sizeof(uint64_t));
 
     if (metric_ == MetricType::COS) {
@@ -321,10 +325,12 @@ class DiskFlatBuilder {
           dst[c] = static_cast<float>(static_cast<double>(src[c]) * inv_norm);
         }
       }
-      detail::write_all_fsync(tmp_dir / "vectors.f32.bin", normalized.data(),
+      detail::write_all_fsync(tmp_dir / "vectors.f32.bin",
+                              normalized.data(),
                               normalized.size() * sizeof(float));
     } else {
-      detail::write_all_fsync(tmp_dir / "vectors.f32.bin", vectors_.data(),
+      detail::write_all_fsync(tmp_dir / "vectors.f32.bin",
+                              vectors_.data(),
                               vectors_.size() * sizeof(float));
     }
 
@@ -358,8 +364,7 @@ class DiskFlatBuilder {
     try {
       detail::fsync_dir(parent);
     } catch (const std::exception &e) {
-      LOG_WARN("DiskFlatBuilder: post-rename parent fsync failed (durability only): {}",
-               e.what());
+      LOG_WARN("DiskFlatBuilder: post-rename parent fsync failed (durability only): {}", e.what());
     }
     return manifest;
   }

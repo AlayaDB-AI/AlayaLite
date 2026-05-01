@@ -5,21 +5,16 @@ add_executable(disk_flat_builder_test ${CMAKE_CURRENT_SOURCE_DIR}/disk_flat_buil
 add_executable(disk_flat_searcher_test ${CMAKE_CURRENT_SOURCE_DIR}/disk_flat_searcher_test.cpp)
 add_executable(disk_collection_test ${CMAKE_CURRENT_SOURCE_DIR}/disk_collection_test.cpp)
 add_executable(segment_factory_test ${CMAKE_CURRENT_SOURCE_DIR}/segment_factory_test.cpp)
-add_executable(disk_collection_factory_dispatch_test
-               ${CMAKE_CURRENT_SOURCE_DIR}/disk_collection_factory_dispatch_test.cpp)
+add_executable(
+  disk_collection_factory_dispatch_test ${CMAKE_CURRENT_SOURCE_DIR}/disk_collection_factory_dispatch_test.cpp
+)
 add_executable(test_vamana_reader ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_reader.cpp)
-add_executable(test_vamana_greedy_search
-               ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_greedy_search.cpp)
-add_executable(test_vamana_segment_builder
-               ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_segment_builder.cpp)
-add_executable(test_vamana_segment_searcher
-               ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_segment_searcher.cpp)
-add_executable(test_segment_factory_vamana
-               ${CMAKE_CURRENT_SOURCE_DIR}/test_segment_factory_vamana.cpp)
-add_executable(test_disk_collection_vamana
-               ${CMAKE_CURRENT_SOURCE_DIR}/test_disk_collection_vamana.cpp)
-add_executable(test_vamana_adapter_overhead
-               ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_adapter_overhead.cpp)
+add_executable(test_vamana_greedy_search ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_greedy_search.cpp)
+add_executable(test_vamana_segment_builder ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_segment_builder.cpp)
+add_executable(test_vamana_segment_searcher ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_segment_searcher.cpp)
+add_executable(test_segment_factory_vamana ${CMAKE_CURRENT_SOURCE_DIR}/test_segment_factory_vamana.cpp)
+add_executable(test_disk_collection_vamana ${CMAKE_CURRENT_SOURCE_DIR}/test_disk_collection_vamana.cpp)
+add_executable(test_vamana_adapter_overhead ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_adapter_overhead.cpp)
 
 target_link_libraries(disk_types_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 target_link_libraries(segment_manifest_test PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
@@ -59,8 +54,7 @@ add_test(NAME disk_test_flat_builder COMMAND $<TARGET_FILE:disk_flat_builder_tes
 add_test(NAME disk_test_flat_searcher COMMAND $<TARGET_FILE:disk_flat_searcher_test>)
 add_test(NAME disk_test_collection COMMAND $<TARGET_FILE:disk_collection_test>)
 add_test(NAME disk_test_segment_factory COMMAND $<TARGET_FILE:segment_factory_test>)
-add_test(NAME disk_test_collection_factory_dispatch
-         COMMAND $<TARGET_FILE:disk_collection_factory_dispatch_test>)
+add_test(NAME disk_test_collection_factory_dispatch COMMAND $<TARGET_FILE:disk_collection_factory_dispatch_test>)
 add_test(NAME test_vamana_reader COMMAND $<TARGET_FILE:test_vamana_reader>)
 add_test(NAME test_vamana_greedy_search COMMAND $<TARGET_FILE:test_vamana_greedy_search>)
 add_test(NAME test_vamana_segment_builder COMMAND $<TARGET_FILE:test_vamana_segment_builder>)

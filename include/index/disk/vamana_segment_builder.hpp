@@ -86,7 +86,8 @@ class VamanaSegmentBuilder {
           "VamanaSegmentBuilder: add_batch with n>0 requires non-null buffers");
     }
     size_t vec_components = 0;
-    if (__builtin_mul_overflow(static_cast<size_t>(n), static_cast<size_t>(dim_),
+    if (__builtin_mul_overflow(static_cast<size_t>(n),
+                               static_cast<size_t>(dim_),
                                &vec_components)) {
       throw std::invalid_argument("VamanaSegmentBuilder: n * dim overflows size_t (n=" +
                                   std::to_string(n) + ", dim=" + std::to_string(dim_) + ")");
@@ -155,7 +156,7 @@ class VamanaSegmentBuilder {
 
     // Step 2 — tmp directory. The pid+steady_clock suffix avoids collisions
     // when the same caller retries `finish` after a transient error.
-    const auto pid = static_cast<long long>(::getpid());
+    const auto pid = static_cast<int64_t>(::getpid());
     const auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::string tmp_name =
         ".tmp_" + seg_basename + "_" + std::to_string(pid) + "_" + std::to_string(ts);
@@ -178,9 +179,11 @@ class VamanaSegmentBuilder {
     // Step 3 — data files. Both files written + fsync'd before graph build
     // so a build failure leaves them recoverable under the tmp dir for
     // post-mortem inspection (the guard's destructor will still clean up).
-    detail::write_all_fsync(tmp_dir / "ids.u64.bin", pending_labels_.data(),
+    detail::write_all_fsync(tmp_dir / "ids.u64.bin",
+                            pending_labels_.data(),
                             pending_labels_.size() * sizeof(uint64_t));
-    detail::write_all_fsync(tmp_dir / "vectors.f32.bin", pending_vectors_.data(),
+    detail::write_all_fsync(tmp_dir / "vectors.f32.bin",
+                            pending_vectors_.data(),
                             pending_vectors_.size() * sizeof(float));
 
     // Step 4 — graph build. VamanaBuilder borrows `pending_vectors_.data()`

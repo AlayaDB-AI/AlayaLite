@@ -40,6 +40,7 @@ from alayalite import DiskCollection, MetricType
 
 # ---- Format helpers -------------------------------------------------------
 
+
 def load_fbin(path: str) -> np.ndarray:
     """Load an .fbin file as a (N, D) float32 array. Memory-mapped for the
     full base set so we don't double the working set."""
@@ -60,6 +61,7 @@ def load_ibin(path: str) -> np.ndarray:
 
 # ---- Recall ---------------------------------------------------------------
 
+
 def recall_at_k(predicted_ids: list[int], ground_truth: np.ndarray, k: int) -> float:
     gt_topk = {int(x) for x in ground_truth[:k]}
     pred_topk = {int(x) for x in predicted_ids[:k]}
@@ -67,6 +69,7 @@ def recall_at_k(predicted_ids: list[int], ground_truth: np.ndarray, k: int) -> f
 
 
 # ---- Timing helpers -------------------------------------------------------
+
 
 def percentiles(values: list[float], qs=(50, 95, 99)) -> dict[int, float]:
     s = sorted(values)
@@ -78,6 +81,7 @@ def percentiles(values: list[float], qs=(50, 95, 99)) -> dict[int, float]:
 
 
 # ---- Hardware / software provenance ---------------------------------------
+
 
 def hw_provenance() -> dict:
     info: dict = {
@@ -92,9 +96,7 @@ def hw_provenance() -> dict:
                     break
                 if line.startswith("flags"):
                     flags = line.split(":", 1)[1].split()
-                    info["simd_flags"] = sorted(
-                        f for f in flags if f.startswith(("sse4", "avx"))
-                    )
+                    info["simd_flags"] = sorted(f for f in flags if f.startswith(("sse4", "avx")))
     except OSError:
         pass
     try:
@@ -110,24 +112,29 @@ def hw_provenance() -> dict:
 
 # ---- Main -----------------------------------------------------------------
 
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="/md1/huangliang/alaya-dev/data/gist1m")
     parser.add_argument("--out", default="/md1/huangliang/alaya-dev/perf")
-    parser.add_argument("--coll-dir", default=None,
-                        help="Where to write the DiskCollection. Default = a "
-                             "tempdir under perf/, kept after run for inspection.")
-    parser.add_argument("--batch-size", type=int, default=50_000,
-                        help="Rows per add_batch + flush; bounded by 512 MiB pending cap")
-    parser.add_argument("--n-queries", type=int, default=1000,
-                        help="Limit timed queries (default = all 1000)")
+    parser.add_argument(
+        "--coll-dir",
+        default=None,
+        help="Where to write the DiskCollection. Default = a tempdir under perf/, kept after run for inspection.",
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=50_000, help="Rows per add_batch + flush; bounded by 512 MiB pending cap"
+    )
+    parser.add_argument("--n-queries", type=int, default=1000, help="Limit timed queries (default = all 1000)")
     parser.add_argument("--warmup", type=int, default=20)
     parser.add_argument("--k", type=int, default=10)
-    parser.add_argument("--metric", choices=["L2"], default="L2",
-                        help="GIST 1M ground truth is L2 — that's the only "
-                             "metric we evaluate recall against")
-    parser.add_argument("--skip-numpy", action="store_true",
-                        help="Skip numpy reference (saves ~30-60s)")
+    parser.add_argument(
+        "--metric",
+        choices=["L2"],
+        default="L2",
+        help="GIST 1M ground truth is L2 — that's the only metric we evaluate recall against",
+    )
+    parser.add_argument("--skip-numpy", action="store_true", help="Skip numpy reference (saves ~30-60s)")
     args = parser.parse_args()
 
     out_dir = Path(args.out)
@@ -153,6 +160,7 @@ def main() -> int:
         coll_dir = str(out_dir / f"disk_coll_{ts}")
     if os.path.exists(coll_dir):
         import shutil
+
         shutil.rmtree(coll_dir)
 
     print(f"[{datetime.now().isoformat(timespec='seconds')}] building DiskCollection at {coll_dir}")
@@ -179,8 +187,10 @@ def main() -> int:
 
     # ---- Search phase: DiskCollection ------------------------------------
 
-    print(f"[{datetime.now().isoformat(timespec='seconds')}] DiskCollection search loop "
-          f"({n_queries} queries, k={args.k}, +{args.warmup} warmup)")
+    print(
+        f"[{datetime.now().isoformat(timespec='seconds')}] DiskCollection search loop "
+        f"({n_queries} queries, k={args.k}, +{args.warmup} warmup)"
+    )
     # Warmup
     for i in range(args.warmup):
         col.search(np.ascontiguousarray(queries[i]), k=args.k)
@@ -207,8 +217,7 @@ def main() -> int:
     np_recalls: list[float] | None = None
     np_lat_us: list[float] | None = None
     if not args.skip_numpy:
-        print(f"[{datetime.now().isoformat(timespec='seconds')}] numpy bf reference "
-              f"({n_queries} queries, k={args.k})")
+        print(f"[{datetime.now().isoformat(timespec='seconds')}] numpy bf reference ({n_queries} queries, k={args.k})")
         # Warmup
         for i in range(args.warmup):
             d = base - queries[i]
@@ -264,30 +273,27 @@ def main() -> int:
         "",
         "| metric | DiskCollection | numpy bf | DC/np |",
         "|---|---:|---:|---:|",
-        f"| recall@{args.k} | {coll_recall:.4f} | "
-        f"{statistics.mean(np_recalls) if np_recalls else 'n/a'} | n/a |",
+        f"| recall@{args.k} | {coll_recall:.4f} | {statistics.mean(np_recalls) if np_recalls else 'n/a'} | n/a |",
         f"| QPS | {coll_qps:.1f} | "
         f"{f'{np_qps:.1f}' if np_qps else 'n/a'} | "
-        f"{f'{coll_qps/np_qps:.2f}x' if np_qps else 'n/a'} |",
+        f"{f'{coll_qps / np_qps:.2f}x' if np_qps else 'n/a'} |",
         f"| p50 (us) | {coll_p[50]:.0f} | "
         f"{f'{np_p[50]:.0f}' if np_p else 'n/a'} | "
-        f"{f'{coll_p[50]/np_p[50]:.2f}x' if np_p else 'n/a'} |",
+        f"{f'{coll_p[50] / np_p[50]:.2f}x' if np_p else 'n/a'} |",
         f"| p95 (us) | {coll_p[95]:.0f} | "
         f"{f'{np_p[95]:.0f}' if np_p else 'n/a'} | "
-        f"{f'{coll_p[95]/np_p[95]:.2f}x' if np_p else 'n/a'} |",
+        f"{f'{coll_p[95] / np_p[95]:.2f}x' if np_p else 'n/a'} |",
         f"| p99 (us) | {coll_p[99]:.0f} | "
         f"{f'{np_p[99]:.0f}' if np_p else 'n/a'} | "
-        f"{f'{coll_p[99]/np_p[99]:.2f}x' if np_p else 'n/a'} |",
-        f"| min (us) | {min(coll_lat_us):.0f} | "
-        f"{f'{min(np_lat_us):.0f}' if np_lat_us else 'n/a'} | n/a |",
+        f"{f'{coll_p[99] / np_p[99]:.2f}x' if np_p else 'n/a'} |",
+        f"| min (us) | {min(coll_lat_us):.0f} | {f'{min(np_lat_us):.0f}' if np_lat_us else 'n/a'} | n/a |",
         f"| mean (us) | {statistics.mean(coll_lat_us):.0f} | "
         f"{f'{statistics.mean(np_lat_us):.0f}' if np_lat_us else 'n/a'} | n/a |",
         "",
         "## Notes",
         "",
         "- Both phases run single-threaded.",
-        "- Recall is computed against the dataset's published top-100 ground "
-        "truth (k-truncated to args.k).",
+        "- Recall is computed against the dataset's published top-100 ground truth (k-truncated to args.k).",
         "- DiskCollection runs through `mmap`'d on-disk segments; cold-cache "
         "effects are absorbed by the warmup queries.",
         f"- {n_segments} segments at {args.batch_size} rows each forces a "
@@ -318,18 +324,28 @@ def main() -> int:
             "qps": coll_qps,
             "recall_at_k": coll_recall,
             "latency_us": {
-                "p50": coll_p[50], "p95": coll_p[95], "p99": coll_p[99],
-                "min": min(coll_lat_us), "mean": statistics.mean(coll_lat_us),
+                "p50": coll_p[50],
+                "p95": coll_p[95],
+                "p99": coll_p[99],
+                "min": min(coll_lat_us),
+                "mean": statistics.mean(coll_lat_us),
             },
         },
-        "numpy_bf": (None if np_qps is None else {
-            "qps": np_qps,
-            "recall_at_k": statistics.mean(np_recalls) if np_recalls else None,
-            "latency_us": {
-                "p50": np_p[50], "p95": np_p[95], "p99": np_p[99],
-                "min": min(np_lat_us), "mean": statistics.mean(np_lat_us),
-            },
-        }),
+        "numpy_bf": (
+            None
+            if np_qps is None
+            else {
+                "qps": np_qps,
+                "recall_at_k": statistics.mean(np_recalls) if np_recalls else None,
+                "latency_us": {
+                    "p50": np_p[50],
+                    "p95": np_p[95],
+                    "p99": np_p[99],
+                    "min": min(np_lat_us),
+                    "mean": statistics.mean(np_lat_us),
+                },
+            }
+        ),
         "hardware": hw,
     }
     json_path.write_text(json.dumps(json_payload, indent=2))
@@ -338,12 +354,16 @@ def main() -> int:
     print("=== GIST 1M summary ===")
     print(f"  build:       {build_s:.1f}s ({n / build_s:.0f} rows/s), {n_segments} segments")
     print(f"  RSS peak:    {rss_peak_kb / 1024:.0f} MiB")
-    print(f"  DC search:   QPS={coll_qps:.1f}, p50={coll_p[50]:.0f}us, "
-          f"p95={coll_p[95]:.0f}us, p99={coll_p[99]:.0f}us, recall@{args.k}={coll_recall:.4f}")
+    print(
+        f"  DC search:   QPS={coll_qps:.1f}, p50={coll_p[50]:.0f}us, "
+        f"p95={coll_p[95]:.0f}us, p99={coll_p[99]:.0f}us, recall@{args.k}={coll_recall:.4f}"
+    )
     if np_qps is not None:
-        print(f"  numpy bf:    QPS={np_qps:.1f}, p50={np_p[50]:.0f}us, "
-              f"p95={np_p[95]:.0f}us, p99={np_p[99]:.0f}us, "
-              f"recall@{args.k}={statistics.mean(np_recalls):.4f}")
+        print(
+            f"  numpy bf:    QPS={np_qps:.1f}, p50={np_p[50]:.0f}us, "
+            f"p95={np_p[95]:.0f}us, p99={np_p[99]:.0f}us, "
+            f"recall@{args.k}={statistics.mean(np_recalls):.4f}"
+        )
         print(f"  ratio (DC/np): QPS={coll_qps / np_qps:.2f}x, p50={coll_p[50] / np_p[50]:.2f}x")
     print(f"\nreport: {md_path}")
     print(f"raw:    {json_path}")

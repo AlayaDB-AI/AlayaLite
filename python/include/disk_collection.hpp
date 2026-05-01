@@ -20,8 +20,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <cmath>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <limits>
@@ -171,8 +171,8 @@ class PyDiskCollection {
         throw py::value_error("DiskCollection: disk_vamana metric " + metric_name(metric) +
                               " is not supported; Vamana v1 supports L2 only");
       }
-      vamana_params = validate_vamana_params(
-          vamana_R, vamana_L, vamana_alpha, vamana_seed, vamana_num_threads);
+      vamana_params =
+          validate_vamana_params(vamana_R, vamana_L, vamana_alpha, vamana_seed, vamana_num_threads);
     }
     impl_ = std::make_unique<DiskCollection>(path,
                                              dim,

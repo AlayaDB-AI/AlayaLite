@@ -424,7 +424,9 @@ async def test_cosine_metric_setting(fresh_client: httpx.AsyncClient):
     assert resp.status_code == 200
 
     # set metric to cosine
-    resp = await client.post("/api/v1/collection/set_metric", json={"collection_name": "cosine_coll", "metric": "cosine"})
+    resp = await client.post(
+        "/api/v1/collection/set_metric", json={"collection_name": "cosine_coll", "metric": "cosine"}
+    )
     assert resp.status_code == 200
 
     query_vector = np.array([1.0, 0.0, 0.0]).tolist()
