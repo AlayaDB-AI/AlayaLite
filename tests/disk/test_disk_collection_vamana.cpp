@@ -156,6 +156,66 @@ TEST_F(DiskCollectionVamanaTest, duplicate_label_across_vamana_segments_throws) 
   EXPECT_FALSE(std::filesystem::exists(path / "segments" / "seg_00000002"));
 }
 
+TEST_F(DiskCollectionVamanaTest, singleton_flush_rejected_before_publish) {
+  constexpr uint32_t kDim = 4;
+  const auto path = tmp_root_ / "coll";
+  VamanaSegmentBuildParams params;
+  params.R = 1;
+  params.L = 1;
+  params.num_threads = 1;
+  DiskCollection col(path, kDim, MetricType::L2, DiskIndexType::Vamana,
+                     DiskCollection::kDefaultMaxPendingBytes, params);
+  std::vector<float> vectors(kDim, 1.0F);
+  std::vector<uint64_t> ids{123};
+  col.add_batch(vectors.data(), ids.data(), ids.size());
+
+  EXPECT_THROW(col.flush(), std::runtime_error);
+  EXPECT_FALSE(std::filesystem::exists(path / "segments" / "seg_00000001"));
+}
+
+TEST_F(DiskCollectionVamanaTest, open_rejects_invalid_vamana_params) {
+  const auto path = tmp_root_ / "coll";
+  std::filesystem::create_directories(path / "segments");
+  std::ofstream manifest(path / "collection_manifest.txt");
+  manifest << "version=1\n"
+           << "dim=4\n"
+           << "metric=L2\n"
+           << "index_type=disk_vamana\n"
+           << "next_segment_id=1\n"
+           << "x_vamana_R=0\n";
+  manifest.close();
+
+  EXPECT_THROW((void)DiskCollection::open(path), std::runtime_error);
+  EXPECT_FALSE(std::filesystem::exists(path / "segments" / "seg_00000001"));
+}
+
+TEST_F(DiskCollectionVamanaTest, open_rejects_unsupported_vamana_metric) {
+  const auto path = tmp_root_ / "coll";
+  std::filesystem::create_directories(path / "segments");
+  std::ofstream manifest(path / "collection_manifest.txt");
+  manifest << "version=1\n"
+           << "dim=4\n"
+           << "metric=IP\n"
+           << "index_type=disk_vamana\n"
+           << "next_segment_id=1\n";
+  manifest.close();
+
+  EXPECT_THROW((void)DiskCollection::open(path), std::runtime_error);
+}
+
+TEST_F(DiskCollectionVamanaTest, max_pending_bytes_survives_reopen) {
+  constexpr uint32_t kDim = 4;
+  const auto path = tmp_root_ / "coll";
+  {
+    DiskCollection col(path, kDim, MetricType::L2, DiskIndexType::Vamana, 100);
+  }
+
+  auto reopened = DiskCollection::open(path);
+  std::vector<float> vectors(3 * kDim, 0.0F);
+  std::vector<uint64_t> ids{1, 2, 3};
+  EXPECT_THROW(reopened.add_batch(vectors.data(), ids.data(), ids.size()), std::runtime_error);
+}
+
 TEST_F(DiskCollectionVamanaTest, open_classifies_vamana_orphans) {
   constexpr uint32_t kDim = 8;
   const auto path = tmp_root_ / "coll";

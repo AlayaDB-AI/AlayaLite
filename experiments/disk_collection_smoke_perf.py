@@ -29,7 +29,6 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-
 from alayalite import DiskCollection, MetricType
 
 
@@ -172,8 +171,8 @@ def main() -> None:
         "",
         "## Results",
         "",
-        f"| | DiskCollection | numpy bf | ratio |",
-        f"|---|---:|---:|---:|",
+        "| | DiskCollection | numpy bf | ratio |",
+        "|---|---:|---:|---:|",
         f"| build/flush time (ms) | {build_s * 1000:.1f} | n/a | n/a |",
         f"| QPS | {coll_qps:.0f} | {np_qps:.0f} | {coll_qps / np_qps:.2f}x |",
         f"| p50 latency (us) | {coll_p[50]:.1f} | {np_p[50]:.1f} | {coll_p[50] / np_p[50]:.2f}x |",

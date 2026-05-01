@@ -56,8 +56,7 @@ namespace detail {
 // scenarios pin both.
 [[noreturn]] inline auto throw_unsupported_engine(DiskIndexType type) -> void {
   throw std::runtime_error(std::string("DiskSegmentFactory: engine '") +
-                           std::string(index_type_to_string(type)) +
-                           "' not implemented in v1");
+                           std::string(index_type_to_string(type)) + "' not implemented in v1");
 }
 
 }  // namespace detail
@@ -75,11 +74,13 @@ namespace detail {
 // The factory dispatches on `col_manifest.index_type`; `seg_dir` MUST satisfy
 // the format-level constraints enforced by the underlying builder (basename
 // matches `^seg_[0-9]{8}$`, parent exists, target does not yet exist).
-[[nodiscard]] inline auto create_segment_from_pending(const std::filesystem::path &seg_dir,
-                                                      const CollectionManifest &col_manifest,
-                                                      const float *vectors,
-                                                      const uint64_t *labels,
-                                                      uint64_t n_rows)
+[[nodiscard]] inline auto create_segment_from_pending(
+    const std::filesystem::path &seg_dir,
+    const CollectionManifest &col_manifest,
+    const float *vectors,
+    const uint64_t *labels,
+    uint64_t n_rows,
+    const VamanaSegmentBuildParams &vamana_params = VamanaSegmentBuildParams{})
     -> std::shared_ptr<SegmentSearcher> {
   if (!engine_supported_v1(col_manifest.index_type)) {
     // Throw BEFORE creating any files at seg_dir.
@@ -95,12 +96,16 @@ namespace detail {
       break;
     }
     case DiskIndexType::Vamana: {
-      // Build params hard-coded to VamanaBuilder defaults in v1 — a future
-      // change can plumb them through col_manifest.x_extras without touching
-      // this branch. The builder rejects IP/COS in its constructor, before
-      // any filesystem mutation.
+      // The builder rejects IP/COS in finish(), before any filesystem
+      // mutation. Python validates the same policy at construction time so
+      // users get a clean boundary error before a collection directory exists.
+      if (n_rows < 2) {
+        throw std::runtime_error(
+            "DiskSegmentFactory: disk_vamana requires at least 2 rows per segment");
+      }
       VamanaSegmentBuilder builder(static_cast<uint32_t>(col_manifest.dim),
-                                   col_manifest.metric, VamanaSegmentBuildParams{});
+                                   col_manifest.metric,
+                                   vamana_params);
       builder.add_batch(vectors, labels, n_rows);
       (void)builder.finish(seg_dir);
       searcher = std::make_shared<VamanaSegmentSearcher>(seg_dir);

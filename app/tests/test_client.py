@@ -4,62 +4,59 @@ import os
 import shutil
 import sys
 
+import httpx
 import numpy as np
 import pytest
-from fastapi.testclient import TestClient
 
 
-def reload_client():
-    # Simulate restart: force reload of app modules and create a new TestClient
-    # Force garbage collection to release RocksDB locks from previous client
+def reload_client() -> httpx.AsyncClient:
+    # Simulate restart: force reload of app modules and create a new ASGI client.
+    # Force garbage collection to release RocksDB locks from previous client.
     gc.collect()
-    # Remove alayalite modules to ensure Client objects are released
     for name in list(sys.modules.keys()):
         if name.startswith("app.") or name == "app" or name.startswith("alayalite"):
             del sys.modules[name]
     gc.collect()
 
     app_module = importlib.import_module("app.main")
-    test_app = app_module.app
-    tc = TestClient(test_app)
-
-    return tc
+    transport = httpx.ASGITransport(app=app_module.app)
+    return httpx.AsyncClient(transport=transport, base_url="http://testserver")
 
 
 @pytest.mark.asyncio
-async def test_create_lists_delete_collection(fresh_client: TestClient):
+async def test_create_lists_delete_collection(fresh_client: httpx.AsyncClient):
     client = fresh_client
-    response = client.post("/api/v1/collection/create", json={"collection_name": "test"})
+    response = await client.post("/api/v1/collection/create", json={"collection_name": "test"})
     print(response.json())
     assert response.status_code == 200
 
-    response = client.post("/api/v1/collection/create", json={"collection_name": "test"})
+    response = await client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert response.status_code == 409
 
-    response = client.post("/api/v1/collection/list")
+    response = await client.post("/api/v1/collection/list")
     assert response.status_code == 200
     collections = response.json()
     assert "test" in collections
 
-    response = client.post("/api/v1/collection/delete", json={"collection_name": "test"})
+    response = await client.post("/api/v1/collection/delete", json={"collection_name": "test"})
     assert response.status_code == 200
 
-    response = client.post("/api/v1/collection/delete", json={"collection_name": "test"})
+    response = await client.post("/api/v1/collection/delete", json={"collection_name": "test"})
     assert response.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_reset_collection(fresh_client: TestClient):
+async def test_reset_collection(fresh_client: httpx.AsyncClient):
     client = fresh_client
     # insert collection
-    response = client.post("/api/v1/collection/create", json={"collection_name": "test"})
+    response = await client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert response.status_code == 200
 
     # reset collection
-    response = client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
+    response = await client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
     assert response.status_code == 200
 
-    response = client.post("/api/v1/collection/list")
+    response = await client.post("/api/v1/collection/list")
     assert response.status_code == 200
     assert response.json() == []
 
@@ -71,10 +68,10 @@ async def test_reset_persistence_collection(tmp_path, monkeypatch):
     tc = reload_client()
     collection_name_list = ["a", "b", "c", "d", "e"]
     for collection_name in collection_name_list:
-        response = tc.post("/api/v1/collection/create", json={"collection_name": collection_name})
+        response = await tc.post("/api/v1/collection/create", json={"collection_name": collection_name})
         assert response.status_code == 200
 
-        response = tc.post(
+        response = await tc.post(
             "/api/v1/collection/insert",
             json={
                 "collection_name": collection_name,
@@ -84,28 +81,28 @@ async def test_reset_persistence_collection(tmp_path, monkeypatch):
             },
         )
 
-        response = tc.post("/api/v1/collection/save", json={"collection_name": collection_name})
+        response = await tc.post("/api/v1/collection/save", json={"collection_name": collection_name})
         assert response.status_code == 200
 
-    response = tc.post("/api/v1/collection/list")
+    response = await tc.post("/api/v1/collection/list")
     assert response.status_code == 200
     assert set(response.json()) == set(collection_name_list)
 
     # reset collection
-    response = tc.post("/api/v1/collection/reset", json={"delete_on_disk": True})
+    response = await tc.post("/api/v1/collection/reset", json={"delete_on_disk": True})
     assert response.status_code == 200
 
     tc2 = reload_client()
-    response = tc2.post("/api/v1/collection/list")
+    response = await tc2.post("/api/v1/collection/list")
     assert response.status_code == 200
     assert response.json() == []
 
 
 @pytest.mark.asyncio
-async def test_insert_collection(fresh_client: TestClient):
+async def test_insert_collection(fresh_client: httpx.AsyncClient):
     client = fresh_client
     # insert collection
-    response = client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
+    response = await client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
     assert response.status_code == 200
 
     # insert items
@@ -118,13 +115,13 @@ async def test_insert_collection(fresh_client: TestClient):
     }
 
     # Inserting into a non-existent collection should return 404
-    response = client.post("/api/v1/collection/insert", json=insert_payload)
+    response = await client.post("/api/v1/collection/insert", json=insert_payload)
     assert response.status_code == 404
 
     # create collection and insert
-    response = client.post("/api/v1/collection/create", json={"collection_name": "test"})
+    response = await client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert response.status_code == 200
-    response = client.post("/api/v1/collection/insert", json=insert_payload)
+    response = await client.post("/api/v1/collection/insert", json=insert_payload)
     assert response.status_code == 200
 
     # if the items not have same length, should return 422
@@ -135,7 +132,7 @@ async def test_insert_collection(fresh_client: TestClient):
             (2, "Document 2", np.array([0.4, 0.5, 0.6]).tolist(), {"category": "B"}),
         ],
     }
-    response = client.post("/api/v1/collection/insert", json=bad_insert_payload)
+    response = await client.post("/api/v1/collection/insert", json=bad_insert_payload)
     assert response.status_code == 422
 
     query_payload = {
@@ -145,18 +142,18 @@ async def test_insert_collection(fresh_client: TestClient):
         "ef_search": 10,
         "num_threads": 1,
     }
-    response = client.post("/api/v1/collection/query", json=query_payload)
+    response = await client.post("/api/v1/collection/query", json=query_payload)
     print(response.json())
     assert response.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_upsert_collection(fresh_client: TestClient):
+async def test_upsert_collection(fresh_client: httpx.AsyncClient):
     client = fresh_client
     # insert collection
-    response = client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
+    response = await client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
     assert response.status_code == 200
-    response = client.post("/api/v1/collection/create", json={"collection_name": "test"})
+    response = await client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert response.status_code == 200
 
     # insert items
@@ -168,7 +165,7 @@ async def test_upsert_collection(fresh_client: TestClient):
             (3, "Document 3", np.array([0.7, 0.8, 0.9]).tolist(), {"category": "C"}),
         ],
     }
-    response = client.post("/api/v1/collection/insert", json=insert_payload)
+    response = await client.post("/api/v1/collection/insert", json=insert_payload)
     assert response.status_code == 200
 
     upsert_payload = {
@@ -182,7 +179,7 @@ async def test_upsert_collection(fresh_client: TestClient):
             ),
         ],
     }
-    response = client.post("/api/v1/collection/upsert", json=upsert_payload)
+    response = await client.post("/api/v1/collection/upsert", json=upsert_payload)
 
     # upsert into a non-existent collection should return 404
     upsert_payload = {
@@ -196,7 +193,7 @@ async def test_upsert_collection(fresh_client: TestClient):
             ),
         ],
     }
-    response = client.post("/api/v1/collection/upsert", json=upsert_payload)
+    response = await client.post("/api/v1/collection/upsert", json=upsert_payload)
     assert response.status_code == 404
 
     query_payload = {
@@ -206,18 +203,18 @@ async def test_upsert_collection(fresh_client: TestClient):
         "ef_search": 10,
         "num_threads": 1,
     }
-    response = client.post("/api/v1/collection/query", json=query_payload)
+    response = await client.post("/api/v1/collection/query", json=query_payload)
     print(response.json())
     assert response.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_query_collection(fresh_client: TestClient):
+async def test_query_collection(fresh_client: httpx.AsyncClient):
     client = fresh_client
     # insert collection
-    response = client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
+    response = await client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
     assert response.status_code == 200
-    response = client.post("/api/v1/collection/create", json={"collection_name": "test"})
+    response = await client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert response.status_code == 200
 
     # insert items
@@ -229,7 +226,7 @@ async def test_query_collection(fresh_client: TestClient):
             (3, "Document 3", np.array([0.7, 0.8, 0.9]).tolist(), {"category": "C"}),
         ],
     }
-    response = client.post("/api/v1/collection/insert", json=insert_payload)
+    response = await client.post("/api/v1/collection/insert", json=insert_payload)
     assert response.status_code == 200
 
     query_payload = {
@@ -239,7 +236,7 @@ async def test_query_collection(fresh_client: TestClient):
         "ef_search": 10,
         "num_threads": 1,
     }
-    response = client.post("/api/v1/collection/query", json=query_payload)
+    response = await client.post("/api/v1/collection/query", json=query_payload)
     print(response.json())
     assert response.status_code == 200
 
@@ -251,7 +248,7 @@ async def test_query_collection(fresh_client: TestClient):
         "ef_search": 10,
         "num_threads": 1,
     }
-    response = client.post("/api/v1/collection/query", json=query_payload)
+    response = await client.post("/api/v1/collection/query", json=query_payload)
     assert response.status_code == 400
 
 
@@ -264,7 +261,7 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
     tc = reload_client()
 
     # create collection and insert an item
-    resp = tc.post("/api/v1/collection/create", json={"collection_name": "restart_coll"})
+    resp = await tc.post("/api/v1/collection/create", json={"collection_name": "restart_coll"})
     assert resp.status_code == 200
 
     insert_payload = {
@@ -274,7 +271,7 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
             (2, "Document 2", np.array([0.4, 0.5, 0.6]).tolist(), {"category": "B"}),
         ],
     }
-    resp = tc.post("/api/v1/collection/insert", json=insert_payload)
+    resp = await tc.post("/api/v1/collection/insert", json=insert_payload)
     assert resp.status_code == 200
 
     query_payload = {
@@ -284,12 +281,12 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
         "ef_search": 10,
         "num_threads": 1,
     }
-    tc1_ans = tc.post("/api/v1/collection/query", json=query_payload)
+    tc1_ans = await tc.post("/api/v1/collection/query", json=query_payload)
     assert tc1_ans.status_code == 200
     tc1_result = tc1_ans.json()  # Save result before releasing client
 
     # save collection to disk
-    resp = tc.post("/api/v1/collection/save", json={"collection_name": "restart_coll"})
+    resp = await tc.post("/api/v1/collection/save", json={"collection_name": "restart_coll"})
     assert resp.status_code == 200
 
     # verify files exist on disk
@@ -304,26 +301,26 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
 
     tc2 = reload_client()
     # list collections should include our saved collection
-    resp = tc2.post("/api/v1/collection/list")
+    resp = await tc2.post("/api/v1/collection/list")
     assert resp.status_code == 200
     assert "restart_coll" in resp.json()
 
-    tc2_ans = tc2.post("/api/v1/collection/query", json=query_payload)
+    tc2_ans = await tc2.post("/api/v1/collection/query", json=query_payload)
     assert tc2_ans.status_code == 200
     assert tc1_result == tc2_ans.json()
 
     # delete on disk
-    resp = tc2.post("/api/v1/collection/delete", json={"collection_name": "restart_coll", "delete_on_disk": True})
+    resp = await tc2.post("/api/v1/collection/delete", json={"collection_name": "restart_coll", "delete_on_disk": True})
     assert resp.status_code == 200
 
     # list collections should include our saved collection
-    resp = tc2.post("/api/v1/collection/list")
+    resp = await tc2.post("/api/v1/collection/list")
     assert resp.status_code == 200
     assert "restart_coll" not in resp.json()
 
     tc3 = reload_client()
     # list collections should include our saved collection
-    resp = tc3.post("/api/v1/collection/list")
+    resp = await tc3.post("/api/v1/collection/list")
     assert resp.status_code == 200
     assert "restart_coll" not in resp.json()
 
@@ -335,7 +332,7 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_operations_on_nonexistent_collection(fresh_client: TestClient):
+async def test_operations_on_nonexistent_collection(fresh_client: httpx.AsyncClient):
     client = fresh_client
     # query on a non-existent collection should raise error
     payload = {
@@ -345,17 +342,17 @@ async def test_operations_on_nonexistent_collection(fresh_client: TestClient):
         "ef_search": 10,
         "num_threads": 1,
     }
-    resp = client.post("/api/v1/collection/query", json=payload)
+    resp = await client.post("/api/v1/collection/query", json=payload)
     assert resp.status_code == 404
     assert "error" in resp.json()
 
     # delete_by_id on non-existent collection
-    resp = client.post("/api/v1/collection/delete_by_id", json={"collection_name": "nope", "ids": [1]})
+    resp = await client.post("/api/v1/collection/delete_by_id", json={"collection_name": "nope", "ids": [1]})
     assert resp.status_code == 404
     assert "error" in resp.json()
 
     # delete_by_filter on non-existent collection
-    resp = client.post(
+    resp = await client.post(
         "/api/v1/collection/delete_by_filter",
         json={"collection_name": "nope", "filter": {"k": "v"}},
     )
@@ -364,35 +361,36 @@ async def test_operations_on_nonexistent_collection(fresh_client: TestClient):
 
 
 @pytest.mark.asyncio
-async def test_delete_by_id_and_filter(fresh_client: TestClient):
+async def test_delete_by_id_and_filter(fresh_client: httpx.AsyncClient):
     client = fresh_client
-    response = client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
+    response = await client.post("/api/v1/collection/reset", json={"delete_on_disk": False})
     assert response.status_code == 200
-    resp = client.post("/api/v1/collection/create", json={"collection_name": "test"})
+    resp = await client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_duplicate_collection_creation_conflict(fresh_client: TestClient):
+async def test_duplicate_collection_creation_conflict(fresh_client: httpx.AsyncClient):
     client = fresh_client
-    resp = client.post("/api/v1/collection/create", json={"collection_name": "dup"})
+    resp = await client.post("/api/v1/collection/create", json={"collection_name": "dup"})
     assert resp.status_code == 200
     # Second creation should return 409 conflict with error message
-    resp2 = client.post("/api/v1/collection/create", json={"collection_name": "dup"})
+    resp2 = await client.post("/api/v1/collection/create", json={"collection_name": "dup"})
     assert resp2.status_code == 409
     body = resp2.json()
     assert "error" in body and "already exists" in body["error"]
 
 
-def test_root_endpoint(fresh_client: TestClient):
+@pytest.mark.asyncio
+async def test_root_endpoint(fresh_client: httpx.AsyncClient):
     client = fresh_client
-    resp = client.get("/")
+    resp = await client.get("/")
     assert resp.status_code == 200
     data = resp.json()
     assert "message" in data and "AlayaLite" in data["message"]
 
     # create collection
-    resp = client.post("/api/v1/collection/create", json={"collection_name": "test"})
+    resp = await client.post("/api/v1/collection/create", json={"collection_name": "test"})
     assert resp.status_code == 200
 
     insert_payload = {
@@ -403,29 +401,30 @@ def test_root_endpoint(fresh_client: TestClient):
             (3, "Document 3", np.array([0.7, 0.8, 0.9]).tolist(), {"category": "A"}),
         ],
     }
-    client.post("/api/v1/collection/insert", json=insert_payload)
+    await client.post("/api/v1/collection/insert", json=insert_payload)
     assert resp.status_code == 200
 
     # delete by id
-    resp = client.post("/api/v1/collection/delete_by_id", json={"collection_name": "test", "ids": ["2"]})
+    resp = await client.post("/api/v1/collection/delete_by_id", json={"collection_name": "test", "ids": ["2"]})
     assert resp.status_code == 200
 
     # delete by filter
-    resp = client.post(
+    resp = await client.post(
         "/api/v1/collection/delete_by_filter",
         json={"collection_name": "test", "filter": {"category": "A"}},
     )
     assert resp.status_code == 200
 
 
-def test_cosine_metric_setting(fresh_client: TestClient):
+@pytest.mark.asyncio
+async def test_cosine_metric_setting(fresh_client: httpx.AsyncClient):
     client = fresh_client
     # create collection with cosine metric
-    resp = client.post("/api/v1/collection/create", json={"collection_name": "cosine_coll"})
+    resp = await client.post("/api/v1/collection/create", json={"collection_name": "cosine_coll"})
     assert resp.status_code == 200
 
     # set metric to cosine
-    resp = client.post("/api/v1/collection/set_metric", json={"collection_name": "cosine_coll", "metric": "cosine"})
+    resp = await client.post("/api/v1/collection/set_metric", json={"collection_name": "cosine_coll", "metric": "cosine"})
     assert resp.status_code == 200
 
     query_vector = np.array([1.0, 0.0, 0.0]).tolist()
@@ -442,7 +441,7 @@ def test_cosine_metric_setting(fresh_client: TestClient):
             (3, "Document 3", insert_vector_2, {"category": "C"}),
         ],
     }
-    resp = client.post("/api/v1/collection/insert", json=insert_payload)
+    resp = await client.post("/api/v1/collection/insert", json=insert_payload)
     assert resp.status_code == 200
 
     # query
@@ -453,7 +452,7 @@ def test_cosine_metric_setting(fresh_client: TestClient):
         "ef_search": 10,
         "num_threads": 1,
     }
-    resp = client.post("/api/v1/collection/query", json=query_payload)
+    resp = await client.post("/api/v1/collection/query", json=query_payload)
     assert resp.status_code == 200
     ret = resp.json()
     print(ret)

@@ -27,6 +27,8 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>  // NOLINT(build/c++17)
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -70,8 +72,8 @@ inline auto rename_atomic_replace(const std::filesystem::path &from,
 // new manifest is visible to subsequent opens immediately after rename. The
 // parent fsync only promotes durability across a system crash; treating it
 // as a soft step allows the in-memory state to commit on rename success.
-inline auto publish_collection_manifest_atomic_only(
-    const std::filesystem::path &collection_dir, const CollectionManifest &m) -> void {
+inline auto publish_collection_manifest_atomic_only(const std::filesystem::path &collection_dir,
+                                                    const CollectionManifest &m) -> void {
   const auto pid = static_cast<long long>(::getpid());
   const auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
   const std::string tmp_name =
@@ -90,9 +92,7 @@ struct SegmentIdsView {
   alaya::storage::MMapFile mmap;
   uint64_t count = 0;
 
-  auto data() const -> const uint64_t * {
-    return static_cast<const uint64_t *>(mmap.data());
-  }
+  auto data() const -> const uint64_t * { return static_cast<const uint64_t *>(mmap.data()); }
 };
 
 inline auto load_segment_ids_view(const std::filesystem::path &seg_dir) -> SegmentIdsView {
@@ -121,6 +121,135 @@ inline auto load_segment_ids_view(const std::filesystem::path &seg_dir) -> Segme
   return SegmentIdsView{std::move(mmap), sm.count};
 }
 
+inline auto parse_u32_extra(const CollectionManifest &manifest,
+                            const std::string &key,
+                            uint32_t fallback) -> uint32_t {
+  const auto it = manifest.x_extras.find(key);
+  if (it == manifest.x_extras.end()) {
+    return fallback;
+  }
+  try {
+    size_t pos = 0;
+    const auto value = std::stoull(it->second, &pos);
+    if (pos != it->second.size() || value > static_cast<unsigned long long>(UINT32_MAX)) {
+      throw std::out_of_range("not uint32");
+    }
+    return static_cast<uint32_t>(value);
+  } catch (const std::exception &e) {
+    throw std::runtime_error("DiskCollection: invalid collection manifest " + key + "='" +
+                             it->second + "': " + e.what());
+  }
+}
+
+inline auto parse_u64_extra(const CollectionManifest &manifest,
+                            const std::string &key,
+                            uint64_t fallback) -> uint64_t {
+  const auto it = manifest.x_extras.find(key);
+  if (it == manifest.x_extras.end()) {
+    return fallback;
+  }
+  try {
+    size_t pos = 0;
+    const auto value = std::stoull(it->second, &pos);
+    if (pos != it->second.size()) {
+      throw std::out_of_range("not uint64");
+    }
+    return value;
+  } catch (const std::exception &e) {
+    throw std::runtime_error("DiskCollection: invalid collection manifest " + key + "='" +
+                             it->second + "': " + e.what());
+  }
+}
+
+inline auto parse_float_extra(const CollectionManifest &manifest,
+                              const std::string &key,
+                              float fallback) -> float {
+  const auto it = manifest.x_extras.find(key);
+  if (it == manifest.x_extras.end()) {
+    return fallback;
+  }
+  try {
+    size_t pos = 0;
+    const auto value = std::stof(it->second, &pos);
+    if (pos != it->second.size()) {
+      throw std::invalid_argument("trailing characters");
+    }
+    return value;
+  } catch (const std::exception &e) {
+    throw std::runtime_error("DiskCollection: invalid collection manifest " + key + "='" +
+                             it->second + "': " + e.what());
+  }
+}
+
+inline auto is_finite_extra_f32(float value) -> bool {
+  uint32_t bits = 0;
+  static_assert(sizeof(bits) == sizeof(value));
+  std::memcpy(&bits, &value, sizeof(value));
+  return (bits & 0x7F800000U) != 0x7F800000U;
+}
+
+inline auto load_vamana_params_from_manifest(const CollectionManifest &manifest)
+    -> VamanaSegmentBuildParams {
+  VamanaSegmentBuildParams params;
+  params.R = parse_u32_extra(manifest, "x_vamana_R", params.R);
+  params.L = parse_u32_extra(manifest, "x_vamana_L", params.L);
+  params.alpha = parse_float_extra(manifest, "x_vamana_alpha", params.alpha);
+  params.seed = parse_u32_extra(manifest, "x_vamana_seed", static_cast<uint32_t>(params.seed));
+  params.num_threads = parse_u32_extra(manifest, "x_vamana_num_threads", params.num_threads);
+  return params;
+}
+
+inline auto validate_vamana_params(const VamanaSegmentBuildParams &params,
+                                   const std::string &context) -> void {
+  if (params.R == 0) {
+    throw std::runtime_error(context + ": x_vamana_R must be > 0");
+  }
+  if (params.L == 0) {
+    throw std::runtime_error(context + ": x_vamana_L must be > 0");
+  }
+  if (params.L < params.R) {
+    throw std::runtime_error(context + ": x_vamana_L must be >= x_vamana_R");
+  }
+  if (!is_finite_extra_f32(params.alpha) || params.alpha < 1.0F) {
+    throw std::runtime_error(context + ": x_vamana_alpha must be finite and >= 1.0");
+  }
+}
+
+inline auto validate_vamana_manifest_config(const CollectionManifest &manifest,
+                                            const VamanaSegmentBuildParams &params,
+                                            const std::string &context) -> void {
+  if (manifest.metric != MetricType::L2) {
+    throw std::runtime_error(context + ": metric must be L2 for disk_vamana");
+  }
+  validate_vamana_params(params, context);
+}
+
+inline auto store_vamana_params_in_manifest(CollectionManifest &manifest,
+                                            const VamanaSegmentBuildParams &params) -> void {
+  manifest.x_extras["x_vamana_R"] = std::to_string(params.R);
+  manifest.x_extras["x_vamana_L"] = std::to_string(params.L);
+  manifest.x_extras["x_vamana_alpha"] = std::to_string(params.alpha);
+  manifest.x_extras["x_vamana_seed"] = std::to_string(params.seed);
+  manifest.x_extras["x_vamana_num_threads"] = std::to_string(params.num_threads);
+}
+
+inline auto store_max_pending_bytes_in_manifest(CollectionManifest &manifest,
+                                                size_t max_pending_bytes) -> void {
+  manifest.x_extras["x_max_pending_bytes"] =
+      std::to_string(static_cast<unsigned long long>(max_pending_bytes));
+}
+
+inline auto load_max_pending_bytes_from_manifest(const CollectionManifest &manifest,
+                                                 size_t fallback) -> size_t {
+  const auto value =
+      parse_u64_extra(manifest, "x_max_pending_bytes", static_cast<uint64_t>(fallback));
+  if (value > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    throw std::runtime_error("DiskCollection: invalid collection manifest x_max_pending_bytes='" +
+                             std::to_string(value) + "': exceeds size_t");
+  }
+  return static_cast<size_t>(value);
+}
+
 }  // namespace detail
 
 class DiskCollection {
@@ -129,8 +258,12 @@ class DiskCollection {
   static constexpr size_t kDefaultMaxPendingBytes = 512ULL * 1024 * 1024;
 
   // Public constructor: create-only.
-  DiskCollection(const std::filesystem::path &path, uint32_t dim, MetricType metric,
-                 DiskIndexType index_type) {
+  DiskCollection(const std::filesystem::path &path,
+                 uint32_t dim,
+                 MetricType metric,
+                 DiskIndexType index_type,
+                 size_t max_pending_bytes = kDefaultMaxPendingBytes,
+                 VamanaSegmentBuildParams vamana_params = VamanaSegmentBuildParams{}) {
     if (dim == 0) {
       throw std::invalid_argument("DiskCollection: dim must be > 0");
     }
@@ -143,6 +276,9 @@ class DiskCollection {
     // existing scenarios on DiskCollection's error message stay green and the
     // single source of truth lives in segment_factory.
     assert_engine_supported_v1(index_type);
+    if (index_type == DiskIndexType::Vamana) {
+      detail::validate_vamana_params(vamana_params, "DiskCollection");
+    }
     {
       std::error_code ec;
       if (std::filesystem::exists(path, ec) || ec) {
@@ -162,6 +298,12 @@ class DiskCollection {
     manifest_.index_type = index_type;
     manifest_.next_segment_id = 1;
     manifest_.segment_ids.clear();
+    max_pending_bytes_ = max_pending_bytes;
+    vamana_params_ = vamana_params;
+    detail::store_max_pending_bytes_in_manifest(manifest_, max_pending_bytes_);
+    if (manifest_.index_type == DiskIndexType::Vamana) {
+      detail::store_vamana_params_in_manifest(manifest_, vamana_params_);
+    }
 
     // Constructor publish: atomic write + best-effort durability fsync.
     detail::publish_collection_manifest_atomic_only(path_, manifest_);
@@ -185,6 +327,13 @@ class DiskCollection {
     // Same v1 capability gate as the constructor; delegated to the factory so
     // the dual-substring message contract has a single source of truth.
     assert_engine_supported_v1(col.manifest_.index_type);
+    col.max_pending_bytes_ =
+        detail::load_max_pending_bytes_from_manifest(col.manifest_, kDefaultMaxPendingBytes);
+    if (col.manifest_.index_type == DiskIndexType::Vamana) {
+      col.vamana_params_ = detail::load_vamana_params_from_manifest(col.manifest_);
+      detail::validate_vamana_manifest_config(
+          col.manifest_, col.vamana_params_, "DiskCollection::open");
+    }
     col.open_listed_segments();
     col.scan_orphans();
     return col;
@@ -203,8 +352,8 @@ class DiskCollection {
     if (vectors == nullptr || labels == nullptr) {
       throw std::invalid_argument("DiskCollection: add_batch with n>0 requires non-null buffers");
     }
-    const uint64_t per_row = static_cast<uint64_t>(manifest_.dim) * sizeof(float) +
-                             sizeof(uint64_t);
+    const uint64_t per_row =
+        static_cast<uint64_t>(manifest_.dim) * sizeof(float) + sizeof(uint64_t);
     const uint64_t cap = max_pending_bytes_;
 
     // Defense in depth: check n * per_row * 2 for overflow before any cap
@@ -218,10 +367,10 @@ class DiskCollection {
                                std::to_string(n) + ", dim=" + std::to_string(manifest_.dim) + ")");
     }
     if (single_batch_bytes > cap) {
-      throw std::runtime_error(
-          "DiskCollection: single batch (" + std::to_string(single_batch_bytes) +
-          " bytes) exceeds max_pending_bytes (" + std::to_string(cap) +
-          " bytes); split the batch or raise max_pending_bytes");
+      throw std::runtime_error("DiskCollection: single batch (" +
+                               std::to_string(single_batch_bytes) +
+                               " bytes) exceeds max_pending_bytes (" + std::to_string(cap) +
+                               " bytes); split the batch or raise max_pending_bytes");
     }
 
     const uint64_t current_rows = pending_labels_.size();
@@ -238,10 +387,10 @@ class DiskCollection {
     if (new_total > cap) {
       const uint64_t remaining = (cap > current_total) ? (cap - current_total) : 0ULL;
       const uint64_t max_addable = (per_row > 0) ? (remaining / (2ULL * per_row)) : 0ULL;
-      throw std::runtime_error(
-          "DiskCollection: pending buffer would overflow — current=" +
-          std::to_string(current_total) + " bytes, cap=" + std::to_string(cap) +
-          " bytes, addable_rows_under_dim=" + std::to_string(max_addable));
+      throw std::runtime_error("DiskCollection: pending buffer would overflow — current=" +
+                               std::to_string(current_total) +
+                               " bytes, cap=" + std::to_string(cap) +
+                               " bytes, addable_rows_under_dim=" + std::to_string(max_addable));
     }
 
     // Strong exception safety: reserve both buffers BEFORE any insert. If
@@ -250,8 +399,7 @@ class DiskCollection {
     // (Codex section-7 med #5).
     pending_vectors_.reserve(pending_vectors_.size() + n * manifest_.dim);
     pending_labels_.reserve(pending_labels_.size() + n);
-    pending_vectors_.insert(pending_vectors_.end(), vectors,
-                            vectors + n * manifest_.dim);
+    pending_vectors_.insert(pending_vectors_.end(), vectors, vectors + n * manifest_.dim);
     pending_labels_.insert(pending_labels_.end(), labels, labels + n);
   }
 
@@ -279,10 +427,14 @@ class DiskCollection {
       const uint64_t cnt = ids_view.count;
       for (uint64_t i = 0; i < cnt; ++i) {
         if (pending_set.contains(labels[i])) {
-          throw std::invalid_argument(
-              "DiskCollection: duplicate label across segments: " + std::to_string(labels[i]));
+          throw std::invalid_argument("DiskCollection: duplicate label across segments: " +
+                                      std::to_string(labels[i]));
         }
       }
+    }
+
+    if (manifest_.index_type == DiskIndexType::Vamana && pending_labels_.size() < 2) {
+      throw std::runtime_error("DiskCollection: disk_vamana flush requires at least 2 rows");
     }
 
     const uint64_t seg_id = manifest_.next_segment_id;
@@ -294,9 +446,12 @@ class DiskCollection {
     // the dispatch decision in one place. The factory call also constructs
     // the searcher, so a builder-side or open-side failure is reported from
     // a single throw site.
-    auto searcher = create_segment_from_pending(
-        seg_dir, manifest_, pending_vectors_.data(), pending_labels_.data(),
-        pending_labels_.size());
+    auto searcher = create_segment_from_pending(seg_dir,
+                                                manifest_,
+                                                pending_vectors_.data(),
+                                                pending_labels_.data(),
+                                                pending_labels_.size(),
+                                                vamana_params_);
     // Segment is now on disk. Any subsequent failure in this function leaves
     // an orphan segment that will be classified as kind=complete on next open.
     // Eagerly advance in-memory next_segment_id so a retried flush() uses a
@@ -479,8 +634,7 @@ class DiskCollection {
     uint64_t expected = 0;
     ssize_t total = 0;
     while (total < static_cast<ssize_t>(sizeof(expected))) {
-      ssize_t n =
-          ::read(fd, reinterpret_cast<char *>(&expected) + total, sizeof(expected) - total);
+      ssize_t n = ::read(fd, reinterpret_cast<char *>(&expected) + total, sizeof(expected) - total);
       if (n < 0) {
         if (errno == EINTR) {
           continue;
@@ -511,7 +665,8 @@ class DiskCollection {
       sm = SegmentManifest::load(manifest_path);
     } catch (const std::exception &e) {
       LOG_WARN("DiskCollection: orphan segment at {} kind=partial (manifest unparseable: {})",
-               orphan_dir.string(), e.what());
+               orphan_dir.string(),
+               e.what());
       return;
     }
     const auto ids_path = orphan_dir / sm.ids_file;
@@ -578,6 +733,7 @@ class DiskCollection {
   std::vector<float> pending_vectors_;
   std::vector<uint64_t> pending_labels_;
   size_t max_pending_bytes_ = kDefaultMaxPendingBytes;
+  VamanaSegmentBuildParams vamana_params_{};
 };
 
 }  // namespace alaya::disk

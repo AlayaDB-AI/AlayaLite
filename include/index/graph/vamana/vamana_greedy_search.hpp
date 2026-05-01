@@ -41,6 +41,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -67,10 +68,7 @@ class VamanaGreedySearch {
       : reader_(reader),
         vectors_(vectors),
         dim_(dim),
-        kernel_(alaya::simd::get_l2_sqr_func()),
-        visited_(reader.num_nodes(), 0) {
-    visited_touched_.reserve(reader.num_nodes());
-  }
+        kernel_(alaya::simd::get_l2_sqr_func()) {}
 
   // Non-copyable, non-movable — keeps scratch state local-only and
   // matches the reader's ownership contract.
@@ -108,35 +106,47 @@ class VamanaGreedySearch {
           " is smaller than top_k=" + std::to_string(top_k));
     }
 
+    struct SearchScratch {
+      std::vector<uint8_t> visited;
+      std::vector<uint32_t> visited_touched;
+      NeighborPriorityQueue pool;
+    };
+
+    thread_local SearchScratch scratch;
+
     // Clear only the visited entries set in the previous call so reset
     // cost is O(|visited last time|) rather than O(num_nodes).
-    for (uint32_t id : visited_touched_) {
-      visited_[id] = 0;
+    if (scratch.visited.size() == reader_.num_nodes()) {
+      for (uint32_t id : scratch.visited_touched) {
+        scratch.visited[id] = 0;
+      }
+    } else {
+      scratch.visited.assign(reader_.num_nodes(), 0);
     }
-    visited_touched_.clear();
+    scratch.visited_touched.clear();
 
-    pool_.clear();
-    pool_.reserve(search_list_size);
+    scratch.pool.clear();
+    scratch.pool.reserve(search_list_size);
 
     const auto &graph = reader_.graph();
     const uint32_t start_id = reader_.start();
     const size_t dim_sz = static_cast<size_t>(dim_);
 
-    visited_[start_id] = 1;
-    visited_touched_.push_back(start_id);
+    scratch.visited[start_id] = 1;
+    scratch.visited_touched.push_back(start_id);
     const float start_dist = kernel_(query, vectors_ + static_cast<size_t>(start_id) * dim_sz,
                                      dim_sz);
-    pool_.insert(Neighbor(start_id, start_dist));
+    scratch.pool.insert(Neighbor(start_id, start_dist));
 
-    while (pool_.has_unexpanded_node()) {
-      const Neighbor n = pool_.closest_unexpanded();
+    while (scratch.pool.has_unexpanded_node()) {
+      const Neighbor n = scratch.pool.closest_unexpanded();
       const std::vector<uint32_t> &nbrs = graph[n.id];
       for (uint32_t m : nbrs) {
-        if (visited_[m] == 0) {
-          visited_[m] = 1;
-          visited_touched_.push_back(m);
+        if (scratch.visited[m] == 0) {
+          scratch.visited[m] = 1;
+          scratch.visited_touched.push_back(m);
           const float dist = kernel_(query, vectors_ + static_cast<size_t>(m) * dim_sz, dim_sz);
-          pool_.insert(Neighbor(m, dist));
+          scratch.pool.insert(Neighbor(m, dist));
         }
       }
     }
@@ -144,12 +154,16 @@ class VamanaGreedySearch {
     // NeighborPriorityQueue maintains ascending (distance, id) order via
     // Neighbor::operator< (see robust_prune.hpp), so the prefix is the
     // top-k in spec order without an extra sort.
-    const size_t pool_size = pool_.size();
+    const size_t pool_size = scratch.pool.size();
     const size_t take = std::min<size_t>(static_cast<size_t>(top_k), pool_size);
     std::vector<GreedyHit> result;
     result.reserve(take);
     for (size_t i = 0; i < take; ++i) {
-      result.push_back(GreedyHit{pool_[i].id, pool_[i].distance});
+      result.push_back(GreedyHit{scratch.pool[i].id, scratch.pool[i].distance});
+    }
+    {
+      std::lock_guard<std::mutex> guard(last_visited_mutex_);
+      last_visited_order_ = scratch.visited_touched;
     }
     return result;
   }
@@ -163,7 +177,7 @@ class VamanaGreedySearch {
   // `search()` call. Element 0 is always the medoid. Used by the
   // "search starts from medoid" spec scenario; not part of the
   // production query path.
-  const std::vector<uint32_t> &last_visited_order() const { return visited_touched_; }
+  const std::vector<uint32_t> &last_visited_order() const { return last_visited_order_; }
 
  private:
   const VamanaReader &reader_;
@@ -171,10 +185,8 @@ class VamanaGreedySearch {
   uint32_t dim_;
   alaya::simd::L2SqrFunc kernel_;
 
-  // Reusable scratch — allocated once, reset O(visited) per call.
-  std::vector<uint8_t> visited_;
-  std::vector<uint32_t> visited_touched_;
-  NeighborPriorityQueue pool_;
+  mutable std::mutex last_visited_mutex_;
+  std::vector<uint32_t> last_visited_order_;
 };
 
 }  // namespace alaya::vamana

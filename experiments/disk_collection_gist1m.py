@@ -31,15 +31,12 @@ import os
 import resource
 import statistics
 import sys
-import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-
 from alayalite import DiskCollection, MetricType
-
 
 # ---- Format helpers -------------------------------------------------------
 
@@ -64,8 +61,8 @@ def load_ibin(path: str) -> np.ndarray:
 # ---- Recall ---------------------------------------------------------------
 
 def recall_at_k(predicted_ids: list[int], ground_truth: np.ndarray, k: int) -> float:
-    gt_topk = set(int(x) for x in ground_truth[:k])
-    pred_topk = set(int(x) for x in predicted_ids[:k])
+    gt_topk = {int(x) for x in ground_truth[:k]}
+    pred_topk = {int(x) for x in predicted_ids[:k]}
     return len(gt_topk & pred_topk) / k
 
 

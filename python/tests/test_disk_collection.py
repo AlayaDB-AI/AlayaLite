@@ -12,19 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the alayalite.DiskCollection Python binding (v1: disk_flat only)."""
+"""Tests for the alayalite.DiskCollection Python binding."""
 
 import sys
 
 import numpy as np
 import pytest
-
-import alayalite
 from alayalite import DiskCollection, MetricType
 
-pytestmark = pytest.mark.skipif(
-    sys.platform == "win32", reason="DiskCollection v1 is POSIX-only"
-)
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="DiskCollection v1 is POSIX-only")
 
 
 def _rand_vectors(n, dim, seed=42):
@@ -104,9 +100,7 @@ def test_disk_collection_matches_bruteforce(tmp_path):
         (np.float32, np.uint32, "uint64"),
     ],
 )
-def test_disk_collection_add_dtype_errors(
-    tmp_path, vectors_dtype, ids_dtype, expected_msg_token
-):
+def test_disk_collection_add_dtype_errors(tmp_path, vectors_dtype, ids_dtype, expected_msg_token):
     path = str(tmp_path / "coll")
     col = DiskCollection(path=path, dim=4, metric=MetricType.L2, index_type="disk_flat")
     v = np.zeros((3, 4), dtype=vectors_dtype)
@@ -145,9 +139,9 @@ def test_disk_collection_add_non_contiguous_ids_raises(tmp_path):
 @pytest.mark.parametrize(
     "vshape, ishape",
     [
-        ((3,), (3,)),       # 1D vectors
-        ((3, 8), (3,)),     # mismatched dim
-        ((3, 4), (4,)),     # mismatched n
+        ((3,), (3,)),  # 1D vectors
+        ((3, 8), (3,)),  # mismatched dim
+        ((3, 4), (4,)),  # mismatched n
     ],
 )
 def test_disk_collection_add_shape_errors(tmp_path, vshape, ishape):
@@ -225,23 +219,25 @@ def test_disk_collection_cos_distance_docstring():
     doc = DiskCollection.search.__doc__
     assert "L2: squared distance" in doc
     assert "IP: negative inner product" in doc
-    assert "COS: negative inner product of L2-normalized pair" in doc
+    assert "COS: negative cosine similarity" in doc
     assert "smaller is better" in doc
 
 
-def test_disk_collection_index_type_disk_flat_only(tmp_path):
+def test_disk_collection_index_type_rejections(tmp_path):
     path = str(tmp_path / "coll")
-    with pytest.raises(ValueError):
-        DiskCollection(
-            path=path, dim=4, metric=MetricType.L2, index_type="disk_vamana"
-        )
-    # No partial collection should remain on disk after the rejection.
+    with pytest.raises(ValueError) as exc_info:
+        DiskCollection(path=path, dim=4, metric=MetricType.L2, index_type="disk_laser")
+    msg = str(exc_info.value)
+    assert "disk_laser" in msg
+    assert "not implemented in v1" in msg
     assert not (tmp_path / "coll").exists()
 
-    with pytest.raises(ValueError):
-        DiskCollection(
-            path=path, dim=4, metric=MetricType.L2, index_type="disk_laser"
-        )
+    with pytest.raises(ValueError) as exc_info:
+        DiskCollection(path=path, dim=4, metric=MetricType.L2, index_type="disk_unknown")
+    msg = str(exc_info.value)
+    assert "disk_unknown" in msg
+    assert "disk_flat" in msg
+    assert "disk_vamana" in msg
     assert not (tmp_path / "coll").exists()
 
 
@@ -249,9 +245,7 @@ def test_disk_collection_constructor_existing_path_raises(tmp_path):
     path = tmp_path / "coll"
     path.mkdir()
     with pytest.raises(RuntimeError):
-        DiskCollection(
-            path=str(path), dim=4, metric=MetricType.L2, index_type="disk_flat"
-        )
+        DiskCollection(path=str(path), dim=4, metric=MetricType.L2, index_type="disk_flat")
 
 
 def test_disk_collection_open_missing_path_raises(tmp_path):
@@ -289,6 +283,17 @@ def test_disk_collection_top_k_zero_raises(tmp_path):
     q = np.zeros(4, dtype=np.float32)
     with pytest.raises(ValueError):
         col.search(q, k=0)
+
+
+def test_disk_collection_search_ef_zero_raises(tmp_path):
+    path = str(tmp_path / "coll")
+    col = DiskCollection(path=path, dim=4, metric=MetricType.L2, index_type="disk_flat")
+    col.add(_rand_vectors(3, 4), _ids(3))
+    col.flush()
+    q = np.zeros(4, dtype=np.float32)
+    with pytest.raises(ValueError) as exc_info:
+        col.search(q, k=1, ef=0)
+    assert "ef" in str(exc_info.value)
 
 
 def test_disk_collection_top_k_exceeds_count_caps(tmp_path):

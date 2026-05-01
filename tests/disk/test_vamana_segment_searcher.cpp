@@ -21,6 +21,8 @@
 #include <cstdint>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
+#include <future>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <string>
@@ -134,6 +136,61 @@ TEST_F(VamanaSegmentSearcherTest, smoke_search_l2) {
   }
   for (size_t i = 1; i < hits.size(); ++i) {
     EXPECT_LE(hits[i - 1].distance, hits[i].distance);
+  }
+}
+
+TEST_F(VamanaSegmentSearcherTest, top_k_larger_than_count_caps_before_greedy_search) {
+  constexpr uint32_t kDim = 8;
+  constexpr uint64_t kN = 32;
+  const auto seg_dir = build_segment(kN, kDim, 12);
+  VamanaSegmentSearcher searcher(seg_dir);
+  DiskSearchOptions opts;
+  opts.top_k = 200;
+  opts.ef = 10;
+
+  const auto hits = searcher.search(vectors_.data(), opts);
+  EXPECT_EQ(hits.size(), kN);
+}
+
+TEST_F(VamanaSegmentSearcherTest, non_finite_query_throws) {
+  constexpr uint32_t kDim = 8;
+  const auto seg_dir = build_segment(128, kDim, 13);
+  VamanaSegmentSearcher searcher(seg_dir);
+  DiskSearchOptions opts;
+  opts.top_k = 10;
+  opts.ef = 64;
+  std::vector<float> query(vectors_.begin(), vectors_.begin() + kDim);
+  query[3] = std::numeric_limits<float>::quiet_NaN();
+
+  EXPECT_THROW((void)searcher.search(query.data(), opts), std::invalid_argument);
+}
+
+TEST_F(VamanaSegmentSearcherTest, concurrent_search_results_are_stable) {
+  constexpr uint32_t kDim = 16;
+  const auto seg_dir = build_segment(512, kDim, 14);
+  VamanaSegmentSearcher searcher(seg_dir);
+  DiskSearchOptions opts;
+  opts.top_k = 10;
+  opts.ef = 64;
+  const auto query = std::vector<float>(vectors_.begin() + 7 * kDim,
+                                        vectors_.begin() + 8 * kDim);
+  const auto baseline = searcher.search(query.data(), opts);
+
+  std::vector<std::future<std::vector<DiskSearchHit>>> futures;
+  futures.reserve(32);
+  for (uint32_t i = 0; i < 32; ++i) {
+    futures.push_back(std::async(std::launch::async, [&] {
+      return searcher.search(query.data(), opts);
+    }));
+  }
+
+  for (auto &future : futures) {
+    const auto hits = future.get();
+    ASSERT_EQ(hits.size(), baseline.size());
+    for (size_t i = 0; i < hits.size(); ++i) {
+      EXPECT_EQ(hits[i].label, baseline[i].label);
+      EXPECT_FLOAT_EQ(hits[i].distance, baseline[i].distance);
+    }
   }
 }
 

@@ -19,6 +19,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>  // NOLINT(build/c++17)
+#include <algorithm>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -32,6 +35,29 @@
 #include "utils/metric_type.hpp"
 
 namespace alaya::disk {
+
+namespace detail {
+
+inline auto is_finite_query_f32(float value) -> bool {
+  uint32_t bits = 0;
+  static_assert(sizeof(bits) == sizeof(value));
+  std::memcpy(&bits, &value, sizeof(value));
+  return (bits & 0x7F800000U) != 0x7F800000U;
+}
+
+inline auto is_nan_query_f32(float value) -> bool {
+  uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(value));
+  return (bits & 0x7F800000U) == 0x7F800000U && (bits & 0x007FFFFFU) != 0;
+}
+
+inline auto is_neg_query_f32(float value) -> bool {
+  uint32_t bits = 0;
+  std::memcpy(&bits, &value, sizeof(value));
+  return (bits & 0x80000000U) != 0;
+}
+
+}  // namespace detail
 
 // VamanaSegmentSearcher — adapter that opens a Vamana `seg_<id>/` directory
 // and answers `DiskSearchOptions` queries by forwarding to the
@@ -63,6 +89,11 @@ class VamanaSegmentSearcher : public SegmentSearcher {
     if (manifest_.dim > kMaxDim) {
       throw std::runtime_error("VamanaSegmentSearcher: manifest dim exceeds uint32 (" +
                                std::to_string(manifest_.dim) + ") in segment " + seg_dir.string());
+    }
+    if (manifest_.count > kMaxCount) {
+      throw std::runtime_error("VamanaSegmentSearcher: manifest count exceeds uint32 (" +
+                               std::to_string(manifest_.count) + ") in segment " +
+                               seg_dir.string());
     }
     // Step 2 — v1 metric scope. IP / COS surface here with the dual-substring
     // contract before any mmap so an unsupported-metric manifest produces no
@@ -162,15 +193,35 @@ class VamanaSegmentSearcher : public SegmentSearcher {
     if (opts.top_k == 0) {
       throw std::invalid_argument("VamanaSegmentSearcher: top_k must be > 0");
     }
+    if (opts.ef == 0) {
+      throw std::invalid_argument("VamanaSegmentSearcher: ef must be > 0");
+    }
     if (query == nullptr) {
       throw std::invalid_argument("VamanaSegmentSearcher: query must not be null");
     }
+    const uint32_t d = static_cast<uint32_t>(manifest_.dim);
+    for (uint32_t c = 0; c < d; ++c) {
+      const float v = query[c];
+      if (!detail::is_finite_query_f32(v)) {
+        const std::string kind =
+            detail::is_nan_query_f32(v) ? "NaN" : (detail::is_neg_query_f32(v) ? "-Inf" : "+Inf");
+        throw std::invalid_argument("VamanaSegmentSearcher: non-finite query component at "
+                                    "position " +
+                                    std::to_string(c) + " (" + kind + ")");
+      }
+    }
+    const auto count = static_cast<uint32_t>(reader_->num_nodes());
+    const auto effective_top_k = static_cast<uint32_t>(
+        std::min<uint64_t>(static_cast<uint64_t>(opts.top_k), static_cast<uint64_t>(count)));
+    auto effective_ef = static_cast<uint32_t>(
+        std::min<uint64_t>(static_cast<uint64_t>(opts.ef), static_cast<uint64_t>(count)));
+    effective_ef = std::max(effective_ef, effective_top_k);
     // Forward to VamanaGreedySearch — no additional file open, no manifest
     // parse, no mmap rebuild, no metric-string-to-enum lookup. The per-neighbor
     // distance kernel inside greedy search is a `simd::L2SqrFunc` function
     // pointer; the only virtual call on this path is the SegmentSearcher
     // boundary (one per query per segment).
-    auto greedy_hits = greedy_search_->search(query, opts.top_k, opts.ef);
+    auto greedy_hits = greedy_search_->search(query, effective_top_k, effective_ef);
 
     // Internal-id → external-label conversion: a single sequential sweep over
     // the result vector after greedy search returns. The ids mmap is accessed
@@ -190,6 +241,7 @@ class VamanaSegmentSearcher : public SegmentSearcher {
 
  private:
   static constexpr uint64_t kMaxDim = static_cast<uint64_t>(UINT32_MAX);
+  static constexpr uint64_t kMaxCount = static_cast<uint64_t>(UINT32_MAX);
 
   auto compute_expected_vectors_bytes() const -> uint64_t {
     uint64_t cd = 0;
