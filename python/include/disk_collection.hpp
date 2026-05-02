@@ -464,7 +464,16 @@ inline void register_disk_collection(py::module_ &m) {
            py::arg("vamana_num_threads") = 0)
       .def_static("open", &PyDiskCollection::open, py::arg("path"))
       .def("add", &PyDiskCollection::add, py::arg("vectors"), py::arg("ids"))
-      .def("flush", &PyDiskCollection::flush)
+      .def("flush",
+           &PyDiskCollection::flush,
+           "Materialize any pending vectors as a new on-disk segment.\n\n"
+           "On a `disk_laser` collection this method always raises\n"
+           "`RuntimeError` with the dual-substring `disk_laser` /\n"
+           "`not implemented in v1` contract, regardless of pending state.\n"
+           "This intentionally diverges from the underlying C++ `flush()`,\n"
+           "which is a no-op when pending is empty: silent success would\n"
+           "mislead callers who expect `flush()` to materialize a segment.\n"
+           "Use `import_laser_segment` to publish precomputed LASER artifacts.")
       .def("import_laser_segment",
            &PyDiskCollection::import_laser_segment,
            py::arg("src_dir"),
