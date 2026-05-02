@@ -111,12 +111,13 @@ def test_constructor_disk_laser_supported(tmp_path):
 def test_open_disk_laser_supported(tmp_path):
     """On supported builds, opening an existing disk_laser manifest SHALL succeed."""
     path = tmp_path / "coll_laser_open"
-    DiskCollection(
+    col = DiskCollection(
         path=str(path),
         dim=128,
         metric=MetricType.L2,
         index_type="disk_laser",
     )
+    del col
     opened = DiskCollection.open(str(path))
     assert opened.dim() == 128
     assert opened.size() == 0

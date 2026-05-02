@@ -17,6 +17,7 @@
 #pragma once
 
 #include <fcntl.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
@@ -95,6 +96,159 @@ struct SegmentIdsView {
 
   auto data() const -> const uint64_t * { return static_cast<const uint64_t *>(mmap.data()); }
 };
+
+struct LockFd {
+  int fd = -1;
+
+  LockFd() = default;
+  explicit LockFd(int f) : fd(f) {}
+  LockFd(const LockFd &) = delete;
+  auto operator=(const LockFd &) -> LockFd & = delete;
+  LockFd(LockFd &&other) noexcept : fd(other.fd) { other.fd = -1; }
+  auto operator=(LockFd &&other) noexcept -> LockFd & {
+    if (this != &other) {
+      close();
+      fd = other.fd;
+      other.fd = -1;
+    }
+    return *this;
+  }
+  ~LockFd() { close(); }
+
+  // POSIX flock(2) auto-releases the kernel lock on last fd close, so close()
+  // doubles as the lock-release path. Name avoids std::unique_ptr::release
+  // vocabulary (which means "relinquish ownership without disposal").
+  void close() noexcept {
+    if (fd >= 0) {
+      ::close(fd);
+      fd = -1;
+    }
+  }
+};
+
+inline auto absolute_lock_path_string(const std::filesystem::path &lock_path) -> std::string {
+  std::error_code ec;
+  auto abs_path = std::filesystem::absolute(lock_path, ec);
+  if (ec) {
+    return lock_path.string();
+  }
+  return abs_path.lexically_normal().string();
+}
+
+inline auto weakly_canonical_lock_path_string(const std::filesystem::path &lock_path)
+    -> std::string {
+  std::error_code ec;
+  auto canonical = std::filesystem::weakly_canonical(lock_path, ec);
+  if (!ec) {
+    return canonical.string();
+  }
+  return absolute_lock_path_string(lock_path);
+}
+
+inline auto read_lock_holder_pid(int fd) -> std::optional<std::string> {
+  char buf[65] = {};
+  const ssize_t n = ::pread(fd, buf, sizeof(buf) - 1, 0);
+  if (n <= 0) {
+    return std::nullopt;
+  }
+  std::string content(buf, static_cast<size_t>(n));
+  const auto pos = content.find("pid=");
+  if (pos == std::string::npos) {
+    return std::nullopt;
+  }
+  size_t begin = pos + 4;
+  size_t end = begin;
+  while (end < content.size() && content[end] >= '0' && content[end] <= '9') {
+    ++end;
+  }
+  if (end == begin) {
+    return std::nullopt;
+  }
+  return content.substr(begin, end - begin);
+}
+
+inline void write_lock_holder_pid_best_effort(int fd) noexcept {
+  char content[64];
+  const int n = std::snprintf(content,
+                              sizeof(content),
+                              "pid=%" PRId64 "\n",
+                              static_cast<int64_t>(::getpid()));
+  if (n <= 0 || static_cast<size_t>(n) >= sizeof(content)) {
+    return;
+  }
+  (void)::ftruncate(fd, 0);
+  (void)::pwrite(fd, content, static_cast<size_t>(n), 0);
+}
+
+[[noreturn]] inline void throw_lock_open_failed(const std::filesystem::path &lock_path, int saved) {
+  const auto path = absolute_lock_path_string(lock_path);
+  if (saved == EISDIR) {
+    throw std::runtime_error("DiskCollection: lock path is not a regular file: " + path);
+  }
+  if (saved == ENOENT) {
+    throw std::runtime_error("DiskCollection: collection path does not exist for lock file: " +
+                             path);
+  }
+  if (saved == ELOOP) {
+    throw std::runtime_error("DiskCollection: lock file is a symlink or has too many symlinks: " +
+                             path + ": " + std::strerror(saved));
+  }
+  if (saved == ENOTDIR) {
+    throw std::runtime_error("DiskCollection: lock file path contains a non-directory component: " +
+                             path + ": " + std::strerror(saved));
+  }
+  throw std::runtime_error("DiskCollection: lock open failed: " + path + ": " +
+                           std::strerror(saved));
+}
+
+inline auto is_lock_contention_errno(int saved) -> bool {
+  return saved == EWOULDBLOCK || saved == EAGAIN;
+}
+
+inline auto acquire_collection_lock(const std::filesystem::path &collection_root) -> LockFd {
+  const auto lock_path = collection_root / ".lock";
+  const int fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+  if (fd < 0) {
+    throw_lock_open_failed(lock_path, errno);
+  }
+
+  LockFd lock(fd);
+  struct ::stat st{};
+  if (::fstat(lock.fd, &st) != 0) {
+    const int saved = errno;
+    throw std::runtime_error("DiskCollection: lock fstat failed: " +
+                             absolute_lock_path_string(lock_path) + ": " + std::strerror(saved));
+  }
+  if (!S_ISREG(st.st_mode)) {
+    throw std::runtime_error("DiskCollection: lock path is not a regular file: " +
+                             absolute_lock_path_string(lock_path));
+  }
+
+  if (::flock(lock.fd, LOCK_EX | LOCK_NB) != 0) {
+    const int saved = errno;
+    if (is_lock_contention_errno(saved)) {
+      // Stable dual-substring contract: messages for contention must contain
+      // the absolute `.lock` path and "collection is already open by another
+      // process", matching the existing unsupported-engine matching style.
+      // PID read is best-effort and only attempted on the contention path so
+      // a transient pread failure on a non-contention errno path cannot
+      // perturb the acquire-failure throw.
+      const auto holder_pid = read_lock_holder_pid(lock.fd);
+      std::string msg = "DiskCollection: collection is already open by another process: " +
+                        weakly_canonical_lock_path_string(lock_path);
+      if (holder_pid.has_value()) {
+        msg += " (pid=" + *holder_pid + ")";
+      }
+      throw std::runtime_error(msg);
+    }
+    throw std::runtime_error(
+        "DiskCollection: lock flock failed: " + weakly_canonical_lock_path_string(lock_path) +
+        ": " + std::strerror(saved));
+  }
+
+  write_lock_holder_pid_best_effort(lock.fd);
+  return lock;
+}
 
 inline auto load_segment_ids_view(const std::filesystem::path &seg_dir) -> SegmentIdsView {
   const auto manifest_path = seg_dir / "manifest.txt";
@@ -304,6 +458,7 @@ class DiskCollection {
       }
     }
 
+    lock_fd_ = detail::acquire_collection_lock(path);
     path_ = path;
     manifest_.version = kManifestVersion;
     manifest_.dim = dim;
@@ -336,6 +491,9 @@ class DiskCollection {
     }
     DiskCollection col;
     col.path_ = path;
+    // See design.md D6: manifest load, listed segment open, and orphan scan
+    // must run while the collection-level writer lock is held.
+    col.lock_fd_ = detail::acquire_collection_lock(path);
     col.manifest_ = CollectionManifest::load(path / "collection_manifest.txt");
     // Same v1 capability gate as the constructor; delegated to the factory so
     // the dual-substring message contract has a single source of truth.
@@ -868,6 +1026,7 @@ class DiskCollection {
   std::vector<uint64_t> pending_labels_;
   size_t max_pending_bytes_ = kDefaultMaxPendingBytes;
   VamanaSegmentBuildParams vamana_params_{};
+  detail::LockFd lock_fd_;
 };
 
 }  // namespace alaya::disk

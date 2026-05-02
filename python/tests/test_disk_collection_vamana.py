@@ -426,13 +426,14 @@ def test_disk_vamana_open_rejects_invalid_persisted_config(tmp_path, body, token
 @pytest.mark.parametrize("index_type", ["disk_flat", "disk_vamana"])
 def test_max_pending_bytes_survives_reopen(tmp_path, index_type):
     path = tmp_path / index_type
-    DiskCollection(
+    col = DiskCollection(
         path=str(path),
         dim=4,
         metric=MetricType.L2,
         index_type=index_type,
         max_pending_bytes=100,
     )
+    del col
 
     reopened = DiskCollection.open(str(path))
     vectors = np.zeros((3, 4), dtype=np.float32)

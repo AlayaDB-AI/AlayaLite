@@ -48,8 +48,7 @@ class DiskCollectionVamanaTest : public ::testing::Test {
     std::filesystem::remove_all(tmp_root_, ec);
   }
 
-  static auto make_vectors(uint64_t n, uint32_t dim, uint32_t seed = 42)
-      -> std::vector<float> {
+  static auto make_vectors(uint64_t n, uint32_t dim, uint32_t seed = 42) -> std::vector<float> {
     std::vector<float> out(n * dim);
     std::mt19937 rng(seed);
     std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
@@ -109,23 +108,26 @@ TEST_F(DiskCollectionVamanaTest, flush_writes_vamana_segment) {
 TEST_F(DiskCollectionVamanaTest, multi_vamana_segment_search) {
   constexpr uint32_t kDim = 16;
   const auto path = tmp_root_ / "coll";
-  DiskCollection col(path, kDim, MetricType::L2, DiskIndexType::Vamana);
-
-  auto v1 = make_vectors(256, kDim, 2);
-  auto l1 = labels(256, 0);
-  col.add_batch(v1.data(), l1.data(), l1.size());
-  col.flush();
-
-  auto v2 = make_vectors(256, kDim, 3);
-  auto l2 = labels(256, 1000);
-  col.add_batch(v2.data(), l2.data(), l2.size());
-  col.flush();
-
+  auto query = make_vectors(1, kDim, 99);
+  std::vector<DiskSearchHit> hits;
   DiskSearchOptions opts;
   opts.top_k = 10;
   opts.ef = 64;
-  auto query = make_vectors(1, kDim, 99);
-  auto hits = col.search(query.data(), opts);
+  {
+    DiskCollection col(path, kDim, MetricType::L2, DiskIndexType::Vamana);
+
+    auto v1 = make_vectors(256, kDim, 2);
+    auto l1 = labels(256, 0);
+    col.add_batch(v1.data(), l1.data(), l1.size());
+    col.flush();
+
+    auto v2 = make_vectors(256, kDim, 3);
+    auto l2 = labels(256, 1000);
+    col.add_batch(v2.data(), l2.data(), l2.size());
+    col.flush();
+
+    hits = col.search(query.data(), opts);
+  }
   ASSERT_EQ(hits.size(), 10u);
   for (size_t i = 1; i < hits.size(); ++i) {
     EXPECT_LE(hits[i - 1].distance, hits[i].distance);
@@ -163,8 +165,12 @@ TEST_F(DiskCollectionVamanaTest, singleton_flush_rejected_before_publish) {
   params.R = 1;
   params.L = 1;
   params.num_threads = 1;
-  DiskCollection col(path, kDim, MetricType::L2, DiskIndexType::Vamana,
-                     DiskCollection::kDefaultMaxPendingBytes, params);
+  DiskCollection col(path,
+                     kDim,
+                     MetricType::L2,
+                     DiskIndexType::Vamana,
+                     DiskCollection::kDefaultMaxPendingBytes,
+                     params);
   std::vector<float> vectors(kDim, 1.0F);
   std::vector<uint64_t> ids{123};
   col.add_batch(vectors.data(), ids.data(), ids.size());
@@ -206,9 +212,7 @@ TEST_F(DiskCollectionVamanaTest, open_rejects_unsupported_vamana_metric) {
 TEST_F(DiskCollectionVamanaTest, max_pending_bytes_survives_reopen) {
   constexpr uint32_t kDim = 4;
   const auto path = tmp_root_ / "coll";
-  {
-    DiskCollection col(path, kDim, MetricType::L2, DiskIndexType::Vamana, 100);
-  }
+  { DiskCollection col(path, kDim, MetricType::L2, DiskIndexType::Vamana, 100); }
 
   auto reopened = DiskCollection::open(path);
   std::vector<float> vectors(3 * kDim, 0.0F);

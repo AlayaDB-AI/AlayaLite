@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+#include "index/disk/disk_collection.hpp"
 #include <gtest/gtest.h>
 #include <unistd.h>
 #include <algorithm>
@@ -28,7 +29,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include "index/disk/disk_collection.hpp"
 #include "index/disk/segment_manifest.hpp"
 #include "index/disk/types.hpp"
 #include "utils/metric_type.hpp"
@@ -160,31 +160,35 @@ TEST_F(DiskCollectionTest, MultiSegmentGlobalTieBreak) {
   constexpr uint32_t kDim = 4;
   auto coll_path = tmp_root_ / "coll";
 
-  DiskCollection col(coll_path, kDim, MetricType::L2, DiskIndexType::Flat);
   // Same vector under different labels in two segments.
   std::vector<float> v_same{1.0F, 2.0F, 3.0F, 4.0F};
   std::vector<float> v_other{0.0F, 0.0F, 0.0F, 0.0F};
 
-  // Segment 1 has label=200 with v_same.
-  std::vector<float> seg1;
-  seg1.insert(seg1.end(), v_other.begin(), v_other.end());
-  seg1.insert(seg1.end(), v_same.begin(), v_same.end());
-  std::vector<uint64_t> l1{55, 200};
-  col.add_batch(seg1.data(), l1.data(), 2);
-  col.flush();
-
-  // Segment 2 has label=100 with v_same.
-  std::vector<float> seg2;
-  seg2.insert(seg2.end(), v_same.begin(), v_same.end());
-  seg2.insert(seg2.end(), v_other.begin(), v_other.end());
-  std::vector<uint64_t> l2{100, 77};
-  col.add_batch(seg2.data(), l2.data(), 2);
-  col.flush();
-
-  // Query equal to v_same → both labels 100 and 200 have distance 0.
   DiskSearchOptions opts;
   opts.top_k = 2;
-  auto hits = col.search(v_same.data(), opts);
+  std::vector<DiskSearchHit> hits;
+  {
+    DiskCollection col(coll_path, kDim, MetricType::L2, DiskIndexType::Flat);
+
+    // Segment 1 has label=200 with v_same.
+    std::vector<float> seg1;
+    seg1.insert(seg1.end(), v_other.begin(), v_other.end());
+    seg1.insert(seg1.end(), v_same.begin(), v_same.end());
+    std::vector<uint64_t> l1{55, 200};
+    col.add_batch(seg1.data(), l1.data(), 2);
+    col.flush();
+
+    // Segment 2 has label=100 with v_same.
+    std::vector<float> seg2;
+    seg2.insert(seg2.end(), v_same.begin(), v_same.end());
+    seg2.insert(seg2.end(), v_other.begin(), v_other.end());
+    std::vector<uint64_t> l2{100, 77};
+    col.add_batch(seg2.data(), l2.data(), 2);
+    col.flush();
+
+    // Query equal to v_same → both labels 100 and 200 have distance 0.
+    hits = col.search(v_same.data(), opts);
+  }
   ASSERT_EQ(hits.size(), 2u);
   EXPECT_EQ(hits[0].label, 100u) << "ascending label tie-break";
   EXPECT_EQ(hits[1].label, 200u);
@@ -232,11 +236,13 @@ TEST_F(DiskCollectionTest, DuplicateLabelAcrossSegmentsThrows) {
 TEST_F(DiskCollectionTest, OrphanSegmentIgnoredWithClassification) {
   constexpr uint32_t kDim = 4;
   auto coll_path = tmp_root_ / "coll";
-  DiskCollection col(coll_path, kDim, MetricType::L2, DiskIndexType::Flat);
-  auto v = make_random_vectors(2, kDim);
-  std::vector<uint64_t> l{1, 2};
-  col.add_batch(v.data(), l.data(), 2);
-  col.flush();
+  {
+    DiskCollection col(coll_path, kDim, MetricType::L2, DiskIndexType::Flat);
+    auto v = make_random_vectors(2, kDim);
+    std::vector<uint64_t> l{1, 2};
+    col.add_batch(v.data(), l.data(), 2);
+    col.flush();
+  }
 
   // Synthesize three orphans manually.
   // 1) "complete" — copy seg_00000001 to seg_00000003.
@@ -261,11 +267,13 @@ TEST_F(DiskCollectionTest, OrphanSegmentIgnoredWithClassification) {
 TEST_F(DiskCollectionTest, OrphanSegmentIdNoCollision) {
   constexpr uint32_t kDim = 4;
   auto coll_path = tmp_root_ / "coll";
-  DiskCollection col(coll_path, kDim, MetricType::L2, DiskIndexType::Flat);
-  auto v = make_random_vectors(2, kDim);
-  std::vector<uint64_t> l{1, 2};
-  col.add_batch(v.data(), l.data(), 2);
-  col.flush();
+  {
+    DiskCollection col(coll_path, kDim, MetricType::L2, DiskIndexType::Flat);
+    auto v = make_random_vectors(2, kDim);
+    std::vector<uint64_t> l{1, 2};
+    col.add_batch(v.data(), l.data(), 2);
+    col.flush();
+  }
 
   // Create an orphan at seg_00000003 (skipping 2).
   auto orphan = coll_path / "segments" / "seg_00000003";
@@ -414,11 +422,13 @@ TEST_F(DiskCollectionTest, OpenRejectsNonFlatManifest) {
 TEST_F(DiskCollectionTest, SymlinkSegmentRejected) {
   constexpr uint32_t kDim = 4;
   auto coll_path = tmp_root_ / "coll";
-  DiskCollection col(coll_path, kDim, MetricType::L2, DiskIndexType::Flat);
-  auto v = make_random_vectors(2, kDim);
-  std::vector<uint64_t> l{1, 2};
-  col.add_batch(v.data(), l.data(), 2);
-  col.flush();
+  {
+    DiskCollection col(coll_path, kDim, MetricType::L2, DiskIndexType::Flat);
+    auto v = make_random_vectors(2, kDim);
+    std::vector<uint64_t> l{1, 2};
+    col.add_batch(v.data(), l.data(), 2);
+    col.flush();
+  }
 
   // Replace vectors.f32.bin with a symlink.
   auto vec_path = coll_path / "segments" / "seg_00000001" / "vectors.f32.bin";

@@ -58,6 +58,13 @@ inline auto assert_engine_supported_at_binding(DiskIndexType type) -> void {
   }
 }
 
+inline auto is_unsupported_engine_runtime_error(const std::string &msg) -> bool {
+  return msg.find("not implemented in v1") != std::string::npos &&
+         (msg.find("disk_laser") != std::string::npos ||
+          msg.find("disk_vamana") != std::string::npos ||
+          msg.find("disk_flat") != std::string::npos);
+}
+
 inline auto index_type_from_string_strict(const std::string &s) -> DiskIndexType {
   if (s == "disk_flat") {
     return DiskIndexType::Flat;
@@ -211,10 +218,19 @@ class PyDiskCollection {
   }
 
   static auto open(const std::string &path) -> std::shared_ptr<PyDiskCollection> {
+    auto inner = [&path]() {
+      try {
+        return DiskCollection::open(path);
+      } catch (const std::runtime_error &e) {
+        const std::string msg = e.what();
+        if (is_unsupported_engine_runtime_error(msg)) {
+          throw py::value_error(msg);
+        }
+        throw;
+      }
+    }();
     const auto manifest =
         CollectionManifest::load(std::filesystem::path(path) / "collection_manifest.txt");
-    assert_engine_supported_at_binding(manifest.index_type);
-    auto inner = DiskCollection::open(path);
     return std::shared_ptr<PyDiskCollection>(
         new PyDiskCollection(std::move(inner), manifest.index_type));
   }

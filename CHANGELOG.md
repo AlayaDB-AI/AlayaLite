@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `disk-collection-single-writer-lock`: `DiskCollection` now holds a
+  process-level single-writer lock at `<collection>/.lock`; concurrent opens
+  of the same collection raise with a stable dual-substring error containing
+  the lock path and `collection is already open by another process`. NFS /
+  Windows remain unsupported; no reader-writer lock and no WAL are introduced.
+  Scope is "two `open()` calls racing on an existing collection"; constructor
+  concurrent-create races (mkdir-before-lock window, `exists()` TOCTOU) and
+  `.lock` unlink/recreate adversarial scenarios are acknowledged as known
+  limitations and tracked for a follow-up change.
 - `disk-segment-searcher-dispatch`: refactored `DiskCollection` to dispatch
   segment construction through a new `disk-segment-factory` layer
   (`include/index/disk/segment_factory.hpp`). Five sites that previously
