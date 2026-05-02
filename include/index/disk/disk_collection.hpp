@@ -205,21 +205,81 @@ inline auto is_lock_contention_errno(int saved) -> bool {
   return saved == EWOULDBLOCK || saved == EAGAIN;
 }
 
-inline auto acquire_collection_lock(const std::filesystem::path &collection_root) -> LockFd {
+// Post-flock inode revalidation (KL3 closure). Compares the fd's
+// fstat-derived `(st_dev, st_ino)` (captured by the caller before flock)
+// against a fresh `stat(lock_path)`. Throws on mismatch or when
+// `lock_path` no longer exists (the file was unlinked while we hold the
+// fd open). The bounded detection contract: only swaps that happen
+// BETWEEN the caller's fstat and this stat are catchable. A swap that
+// completes before the caller's open is invisible because both
+// readings observe the post-swap inode.
+inline void revalidate_lock_inode_after_flock(const std::filesystem::path &lock_path,
+                                              dev_t fd_st_dev,
+                                              ino_t fd_st_ino) {
+  struct ::stat st_path{};
+  if (::stat(lock_path.c_str(), &st_path) != 0) {
+    const int saved = errno;
+    if (saved == ENOENT) {
+      throw std::runtime_error("DiskCollection: lock file vanished after flock: " +
+                               weakly_canonical_lock_path_string(lock_path));
+    }
+    throw std::runtime_error("DiskCollection: lock stat failed after flock: " +
+                             weakly_canonical_lock_path_string(lock_path) + ": " +
+                             std::strerror(saved));
+  }
+  if (fd_st_ino != st_path.st_ino || fd_st_dev != st_path.st_dev) {
+    throw std::runtime_error("DiskCollection: lock file inode mismatch after acquire: " +
+                             weakly_canonical_lock_path_string(lock_path));
+  }
+}
+
+// AcquireMode selects between the open() entry (O_CREAT, tolerates an
+// existing `.lock` for legacy-collection compatibility) and the ctor entry
+// (O_CREAT|O_EXCL, atomic ownership of the freshly-created `.lock`).
+enum class AcquireMode { ForOpen, ForCreate };
+
+inline auto acquire_collection_lock_impl(const std::filesystem::path &collection_root,
+                                         AcquireMode mode) -> LockFd {
   const auto lock_path = collection_root / ".lock";
-  const int fd = ::open(lock_path.c_str(), O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+  const int base_flags = O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW;
+  const int flags = (mode == AcquireMode::ForCreate) ? (base_flags | O_EXCL) : base_flags;
+  const int fd = ::open(lock_path.c_str(), flags, 0600);
   if (fd < 0) {
-    throw_lock_open_failed(lock_path, errno);
+    const int saved = errno;
+    if (saved == EEXIST && mode == AcquireMode::ForCreate) {
+      // O_EXCL EEXIST: another constructor (or stray `.lock`) holds the
+      // namespace. Dual-substring: weakly_canonical path + literal phrase.
+      throw std::runtime_error(
+          "DiskCollection: target path already exists or is being created concurrently: " +
+          weakly_canonical_lock_path_string(lock_path));
+    }
+    throw_lock_open_failed(lock_path, saved);
   }
 
   LockFd lock(fd);
+  // Pre-flock validation. For `_for_create`, our successful O_EXCL means we
+  // are the sole owner of the freshly-created `.lock` inode until something
+  // else flocks it (or until our own flock attempt). A pre-flock failure
+  // (fstat / !S_ISREG) is a rare-but-possible state; unlink lock_path so
+  // a retry can re-EXCL. We deliberately do NOT unlink after flock failure
+  // (a concurrent `_for_open` may have already grabbed flock on our
+  // inode) nor after post-flock inode revalidation failure (lock_path may
+  // already point to a different inode that we don't own).
+  auto unlink_for_create_pre_flock = [&]() noexcept {
+    if (mode == AcquireMode::ForCreate) {
+      std::error_code unec;
+      std::filesystem::remove(lock_path, unec);
+    }
+  };
   struct ::stat st{};
   if (::fstat(lock.fd, &st) != 0) {
     const int saved = errno;
+    unlink_for_create_pre_flock();
     throw std::runtime_error("DiskCollection: lock fstat failed: " +
                              absolute_lock_path_string(lock_path) + ": " + std::strerror(saved));
   }
   if (!S_ISREG(st.st_mode)) {
+    unlink_for_create_pre_flock();
     throw std::runtime_error("DiskCollection: lock path is not a regular file: " +
                              absolute_lock_path_string(lock_path));
   }
@@ -246,8 +306,32 @@ inline auto acquire_collection_lock(const std::filesystem::path &collection_root
         ": " + std::strerror(saved));
   }
 
+  // KL3 closure: post-flock inode revalidation (extracted for direct
+  // testability). See `revalidate_lock_inode_after_flock` for the bounded
+  // detection contract; the helper throws on `unlink+touch` swaps that
+  // happen between this acquire's `fstat` and `stat` calls.
+  revalidate_lock_inode_after_flock(lock_path, st.st_dev, st.st_ino);
+
   write_lock_holder_pid_best_effort(lock.fd);
   return lock;
+}
+
+// Open-entry acquire: tolerates an existing `.lock`. Used ONLY by
+// `DiskCollection::open(path)`. Backwards-compatible with legacy collections
+// that predate the lock (open(2) creates `.lock` on demand).
+inline auto acquire_collection_lock_for_open(const std::filesystem::path &collection_root)
+    -> LockFd {
+  return acquire_collection_lock_impl(collection_root, AcquireMode::ForOpen);
+}
+
+// Ctor-entry acquire: atomically creates `.lock`. Used ONLY by the
+// `DiskCollection` constructor. EEXIST is reflected as
+// "target path already exists or is being created concurrently" so callers
+// can distinguish a colliding ctor / pre-existing lock from a generic
+// flock contention case.
+inline auto acquire_collection_lock_for_create(const std::filesystem::path &collection_root)
+    -> LockFd {
+  return acquire_collection_lock_impl(collection_root, AcquireMode::ForCreate);
 }
 
 inline auto load_segment_ids_view(const std::filesystem::path &seg_dir) -> SegmentIdsView {
@@ -446,20 +530,54 @@ class DiskCollection {
     if (index_type == DiskIndexType::Vamana) {
       detail::validate_vamana_params(vamana_params, "DiskCollection");
     }
+    // Phase 2 reordered ctor (closes KL1 + KL2):
+    //   exists(path) → mkdir(path) (root only) → _for_create (O_EXCL, atomic
+    //   ownership) → mkdir(path/segments) → publish_manifest.
+    // The O_EXCL acquire is the kernel-level serialization point. Anything
+    // that becomes externally observable before acquire (the bare `path/`
+    // root) is rolled back via best-effort rmdir on acquire failure.
     {
       std::error_code ec;
       if (std::filesystem::exists(path, ec) || ec) {
-        throw std::runtime_error("DiskCollection: target path already exists: " + path.string());
+        // Unified dual-substring contract with the `_for_create` EEXIST
+        // path. Either `path/` is a stale collection from a previous run
+        // (and the user must `rm -rf` it) or a concurrent ctor's mkdir
+        // beat ours — both cases are "exists or being created
+        // concurrently". The message contains `weakly_canonical(.lock
+        // path)` so downstream operators can locate the offending
+        // directory regardless of which branch fired.
+        throw std::runtime_error(
+            "DiskCollection: target path already exists or is being created concurrently: " +
+            detail::weakly_canonical_lock_path_string(path / ".lock"));
       }
-      std::filesystem::create_directories(path / "segments", ec);
+      std::filesystem::create_directories(path, ec);
       if (ec) {
         throw std::runtime_error("DiskCollection: mkdir failed: " + path.string() + ": " +
                                  ec.message());
       }
     }
 
-    lock_fd_ = detail::acquire_collection_lock(path);
+    try {
+      lock_fd_ = detail::acquire_collection_lock_for_create(path);
+    } catch (...) {
+      // Best-effort rollback of our just-created `path/`. rmdir succeeds
+      // only when the directory is empty; if another concurrent ctor won
+      // the EXCL race and dropped its `.lock` into the same dir, the rmdir
+      // returns ENOTEMPTY which we silently ignore — that ctor owns the
+      // path and its manifest publication is independent of ours.
+      std::error_code rmec;
+      std::filesystem::remove(path, rmec);
+      throw;
+    }
     path_ = path;
+    {
+      std::error_code ec;
+      std::filesystem::create_directories(path / "segments", ec);
+      if (ec) {
+        throw std::runtime_error("DiskCollection: mkdir failed: " + (path / "segments").string() +
+                                 ": " + ec.message());
+      }
+    }
     manifest_.version = kManifestVersion;
     manifest_.dim = dim;
     manifest_.metric = metric;
@@ -489,11 +607,31 @@ class DiskCollection {
         throw std::runtime_error("DiskCollection::open: path does not exist: " + path.string());
       }
     }
+    // Caller-level "collection-in-progress" precondition: when `path/`
+    // exists but `.lock` is missing AND no published `collection_manifest.txt`
+    // is present, we are observing a constructor that has created `path/`
+    // but has not yet acquired its O_EXCL `.lock`. Throwing the documented
+    // dual-substring error here gives the caller a clear retry signal
+    // before we touch `_for_open`. Legacy collections (no `.lock` but a
+    // valid manifest) intentionally fall through — `_for_open` will create
+    // `.lock` for them.
+    {
+      std::error_code ec_lock;
+      std::error_code ec_manifest;
+      const bool lock_exists = std::filesystem::exists(path / ".lock", ec_lock);
+      const bool manifest_exists =
+          std::filesystem::exists(path / "collection_manifest.txt", ec_manifest);
+      if (!lock_exists && !manifest_exists) {
+        throw std::runtime_error(
+            "DiskCollection::open: target path is a collection-in-progress, not yet published: " +
+            detail::weakly_canonical_lock_path_string(path / ".lock"));
+      }
+    }
     DiskCollection col;
     col.path_ = path;
     // See design.md D6: manifest load, listed segment open, and orphan scan
     // must run while the collection-level writer lock is held.
-    col.lock_fd_ = detail::acquire_collection_lock(path);
+    col.lock_fd_ = detail::acquire_collection_lock_for_open(path);
     col.manifest_ = CollectionManifest::load(path / "collection_manifest.txt");
     // Same v1 capability gate as the constructor; delegated to the factory so
     // the dual-substring message contract has a single source of truth.

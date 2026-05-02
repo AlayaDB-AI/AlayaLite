@@ -102,3 +102,70 @@ def test_legacy_collection_without_lock_opens_cleanly(tmp_path):
 
     assert col.size() == 2
     assert (path / ".lock").is_file()
+
+
+# Phase 4 task 4.5: dual-substring error literals SHALL propagate from C++
+# `std::runtime_error` to Python `RuntimeError` verbatim. The Python binding
+# delegates to pybind11's default exception translator for these (no
+# special-case mapping), so we assert the propagation contract directly.
+def test_open_collection_in_progress_propagates_literal(tmp_path):
+    path = tmp_path / "coll"
+    path.mkdir()  # mimic ctor mid-flight: dir exists, no .lock, no manifest
+
+    with pytest.raises(RuntimeError) as exc_info:
+        DiskCollection.open(str(path))
+
+    msg = str(exc_info.value)
+    assert "target path is a collection-in-progress, not yet published" in msg, msg
+    assert _lock_path_text(path) in msg, msg
+
+
+def _ctor_worker(path, queue):
+    try:
+        col = DiskCollection(str(path), 4, MetricType.L2, "disk_flat")
+        queue.put(("OK", ""))
+        del col
+        return
+    # pylint: disable=broad-exception-caught
+    except BaseException as exc:  # noqa: BLE001 - serialize across process boundary
+        queue.put((type(exc).__name__, str(exc)))
+
+
+def test_two_concurrent_ctors_one_wins_other_gets_runtime_error(tmp_path):
+    """Two concurrent ctors against an absent path: exactly one SHALL succeed; the other
+    SHALL raise RuntimeError whose message contains a documented dual substring (the
+    weakly_canonical .lock path AND either "target path already exists" or
+    "is being created concurrently"). The on-disk state SHALL be a complete collection.
+    """
+    ctx = mp.get_context("fork")
+    path = tmp_path / "race_coll"
+    queue1 = ctx.Queue()
+    queue2 = ctx.Queue()
+    p1 = ctx.Process(target=_ctor_worker, args=(path, queue1))
+    p2 = ctx.Process(target=_ctor_worker, args=(path, queue2))
+    p1.start()
+    p2.start()
+    p1.join(timeout=10)
+    p2.join(timeout=10)
+    if p1.is_alive():
+        p1.terminate()
+    if p2.is_alive():
+        p2.terminate()
+    assert p1.exitcode == 0 and p2.exitcode == 0
+
+    r1 = queue1.get(timeout=1)
+    r2 = queue2.get(timeout=1)
+    successes = [r for r in (r1, r2) if r[0] == "OK"]
+    failures = [r for r in (r1, r2) if r[0] != "OK"]
+    assert len(successes) == 1, (r1, r2)
+    assert len(failures) == 1, (r1, r2)
+
+    kind, msg = failures[0]
+    assert kind == "RuntimeError", (kind, msg)
+    assert _lock_path_text(path) in msg or path.name in msg, msg
+    assert "target path already exists" in msg or "is being created concurrently" in msg, msg
+
+    # On-disk state: full collection.
+    assert (path / ".lock").is_file()
+    assert (path / "segments").is_dir()
+    assert (path / "collection_manifest.txt").is_file()

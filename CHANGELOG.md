@@ -13,10 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the same collection raise with a stable dual-substring error containing
   the lock path and `collection is already open by another process`. NFS /
   Windows remain unsupported; no reader-writer lock and no WAL are introduced.
-  Scope is "two `open()` calls racing on an existing collection"; constructor
-  concurrent-create races (mkdir-before-lock window, `exists()` TOCTOU) and
-  `.lock` unlink/recreate adversarial scenarios are acknowledged as known
-  limitations and tracked for a follow-up change.
+- `disk-collection-ctor-create-atomicity`: closes the three residual
+  concurrency windows acknowledged by `disk-collection-single-writer-lock`.
+  The `DiskCollection` constructor now uses an `O_CREAT|O_EXCL` acquire
+  helper (`acquire_collection_lock_for_create`) that serializes concurrent
+  ctors at the kernel layer and rolls back its just-created `path/`
+  directory on acquire failure. `DiskCollection::open(path)` rejects a
+  half-published target (`path/` exists but neither `.lock` nor
+  `collection_manifest.txt` are present) with the dual-substring error
+  containing the `.lock` path and `target path is a collection-in-progress,
+  not yet published`. Both acquire entry points run a post-flock
+  `(st_dev, st_ino)` revalidation against `fstat(fd)` so an in-flight
+  `unlink(.lock); touch .lock` swap throws `lock file inode mismatch
+  after acquire`. EEXIST on the ctor entry surfaces `target path already
+  exists or is being created concurrently`. Out-of-band `.lock`
+  manipulation that completes before a new acquire begins remains an
+  explicit non-goal (no stat-based mechanism can observe it).
 - `disk-segment-searcher-dispatch`: refactored `DiskCollection` to dispatch
   segment construction through a new `disk-segment-factory` layer
   (`include/index/disk/segment_factory.hpp`). Five sites that previously
