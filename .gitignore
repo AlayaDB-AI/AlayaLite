@@ -11,6 +11,8 @@ CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
 build
+build_asan
+build_tsan
 **/__pycache__
 .cache
 .vscode/*

@@ -17,6 +17,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cerrno>
 #include <cstdint>
@@ -24,6 +25,7 @@
 #include <filesystem>  // NOLINT(build/c++17)
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -374,6 +376,10 @@ class LaserSegmentSearcher : public SegmentSearcher {
       throw std::invalid_argument("LaserSegmentSearcher: beam_width exceeds int max");
     }
 
+    // Argument validation stays pre-lock per spec; the rest serialises so
+    // QuantizedGraph::set_params' destroy + rebuild cannot race in-flight searches.
+    const std::lock_guard<std::mutex> lock(search_mutex_);
+
     const auto effective_top_k = static_cast<uint32_t>(
         std::min<uint64_t>(static_cast<uint64_t>(opts.top_k), manifest_.count));
     const LastSetParams requested{
@@ -386,12 +392,13 @@ class LaserSegmentSearcher : public SegmentSearcher {
       last_set_params_ = requested;
     }
 
-    pid_buf_.resize(effective_top_k);
-    quantized_graph_->search(query, effective_top_k, pid_buf_.data());
+    std::vector<uint32_t> pid_buf;
+    pid_buf.resize(effective_top_k);
+    quantized_graph_->search(query, effective_top_k, pid_buf.data());
 
     std::vector<DiskSearchHit> out;
     out.reserve(effective_top_k);
-    for (uint32_t pid : pid_buf_) {
+    for (uint32_t pid : pid_buf) {
       if (pid >= manifest_.count) {
         throw std::runtime_error("LaserSegmentSearcher: QuantizedGraph returned PID " +
                                  std::to_string(pid) + " outside segment count " +
@@ -408,7 +415,9 @@ class LaserSegmentSearcher : public SegmentSearcher {
   // Test-only observer for the cached set_params triple (D5). Counts how many
   // times `QuantizedGraph::set_params` has been forwarded; tests rely on this
   // to assert the cache-and-skip behaviour without reaching into private state.
-  auto set_params_call_count() const noexcept -> uint64_t { return set_params_call_count_; }
+  auto set_params_call_count() const noexcept -> uint64_t {
+    return set_params_call_count_.load(std::memory_order_relaxed);
+  }
 
  private:
   struct LastSetParams {
@@ -421,7 +430,7 @@ class LaserSegmentSearcher : public SegmentSearcher {
 
   void apply_set_params(const LastSetParams &requested) const {
     quantized_graph_->set_params(requested.ef_search, requested.num_threads, requested.beam_width);
-    ++set_params_call_count_;
+    set_params_call_count_.fetch_add(1, std::memory_order_relaxed);
   }
 
   // Declaration order matters: quantized_graph_ is destroyed before ids_mmap_.
@@ -429,9 +438,9 @@ class LaserSegmentSearcher : public SegmentSearcher {
   alaya::storage::MMapFile ids_mmap_;
   std::unique_ptr<alaya::laser::QuantizedGraph> quantized_graph_;
   const uint64_t *ids_view_ = nullptr;
-  mutable std::vector<uint32_t> pid_buf_;
   mutable LastSetParams last_set_params_{0, 0, 0};
-  mutable uint64_t set_params_call_count_ = 0;
+  mutable std::atomic<uint64_t> set_params_call_count_{0};
+  mutable std::mutex search_mutex_;
 };
 
 #else

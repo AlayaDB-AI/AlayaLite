@@ -66,6 +66,7 @@ if(ALAYA_ENABLE_LASER)
       test_segment_factory_laser.cpp
       test_disk_collection_laser.cpp
       test_laser_adapter_overhead.cpp
+      test_laser_searcher_thread_safety.cpp
   )
   set(ALAYA_LASER_SEGMENT_TEST_SOURCES)
   foreach(laser_segment_test_source IN LISTS ALAYA_LASER_SEGMENT_TEST_CANDIDATES)
