@@ -16,7 +16,6 @@
 
 import concurrent.futures
 import os
-import shutil
 import subprocess
 import sys
 import textwrap
@@ -621,13 +620,16 @@ def test_disk_laser_still_unsupported(tmp_path):
     assert not path.exists()
 
 
-def test_disk_vamana_benchmark_keep_preserves_temp_dir():
-    repo_root = Path(__file__).resolve().parents[2]
-    script = repo_root / "python" / "benchmarks" / "disk_vamana_smoke.py"
+def test_disk_vamana_benchmark_harness_writes_outputs_and_cleans_scratch(tmp_path):
     result = subprocess.run(
         [
             sys.executable,
-            str(script),
+            "-m",
+            "alayalite.bench.disk_collection",
+            "--engine",
+            "disk_vamana",
+            "--dataset",
+            "synth",
             "--n",
             "16",
             "--dim",
@@ -638,11 +640,18 @@ def test_disk_vamana_benchmark_keep_preserves_temp_dir():
             "3",
             "--ef",
             "8",
+            "--warmup",
+            "0",
             "--vamana-R",
             "4",
             "--vamana-L",
             "8",
-            "--keep",
+            "--out",
+            str(tmp_path),
+            "--run-id",
+            "vamana",
+            "--sweep",
+            "off",
         ],
         check=False,
         capture_output=True,
@@ -650,9 +659,8 @@ def test_disk_vamana_benchmark_keep_preserves_temp_dir():
         env=_pythonpath_env(),
     )
     assert result.returncode == 0, result.stderr
-    line = next(line for line in result.stdout.splitlines() if line.startswith("work_dir: "))
-    work_dir = Path(line.split(": ", 1)[1])
-    try:
-        assert work_dir.exists()
-    finally:
-        shutil.rmtree(work_dir, ignore_errors=True)
+    run_dir = tmp_path / "vamana"
+    assert (run_dir / "summary.json").exists()
+    assert (run_dir / "summary.md").exists()
+    assert (run_dir / "raw" / "disk_vamana_synth_L2.json").exists()
+    assert not (run_dir / "_scratch").exists()

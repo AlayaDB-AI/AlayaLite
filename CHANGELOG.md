@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name + "not implemented in v1").
 
 ### Added
+- Add unified DiskCollection benchmark harness
+  (`python -m alayalite.bench.disk_collection`) covering disk_flat /
+  disk_vamana / disk_laser engines with runtime-gated laser support and
+  provenance-bearing JSON+MD output.
 - expose `disk_laser` via `alayalite.DiskCollection` Python binding (import +
   search; v1 does not support add/flush/batch_search). Lifts the binding-side
   hard veto so `index_type="disk_laser"` is gated by the C++
