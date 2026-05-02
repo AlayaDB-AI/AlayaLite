@@ -34,12 +34,29 @@
 #include <utility>
 #include <vector>
 #include "index/disk/disk_collection.hpp"
+#include "index/disk/segment_factory.hpp"
 #include "index/disk/types.hpp"
 #include "utils/metric_type.hpp"
 
 namespace alaya::disk::pybindings {
 
 namespace py = pybind11;
+
+// Pre-gate the engine via `engine_supported_v1` and re-raise the C++ factory's
+// own `std::runtime_error` ("DiskSegmentFactory: engine '<engine>' not
+// implemented in v1") as `py::value_error`. This preserves the spec contract
+// "the message SHALL be sourced from the C++ factory's throw site (single
+// source of truth)" while avoiding fragile substring matching against
+// generic `std::runtime_error` paths in the C++ ctor / open() call stacks.
+inline auto assert_engine_supported_at_binding(DiskIndexType type) -> void {
+  if (!engine_supported_v1(type)) {
+    try {
+      detail::throw_unsupported_engine(type);
+    } catch (const std::runtime_error &e) {
+      throw py::value_error(e.what());
+    }
+  }
+}
 
 inline auto index_type_from_string_strict(const std::string &s) -> DiskIndexType {
   if (s == "disk_flat") {
@@ -49,10 +66,19 @@ inline auto index_type_from_string_strict(const std::string &s) -> DiskIndexType
     return DiskIndexType::Vamana;
   }
   if (s == "disk_laser") {
-    throw py::value_error("DiskCollection: index_type \"disk_laser\" not implemented in v1");
+    // No hard binding-policy veto: forward the parsed enum and let
+    // `assert_engine_supported_at_binding` (called from the ctor / open)
+    // re-raise the C++ factory's "not implemented in v1" runtime_error as
+    // ValueError on unsupported builds. Single source of truth lives in
+    // `segment_factory.hpp::throw_unsupported_engine`.
+    return DiskIndexType::Laser;
   }
-  throw py::value_error("DiskCollection: unknown index_type \"" + s +
-                        "\"; supported values are \"disk_flat\" and \"disk_vamana\"");
+  std::string supported = "\"disk_flat\" and \"disk_vamana\"";
+  if constexpr (engine_supported_v1(DiskIndexType::Laser)) {
+    supported = "\"disk_flat\", \"disk_vamana\", and \"disk_laser\"";
+  }
+  throw py::value_error("DiskCollection: unknown index_type \"" + s + "\"; supported values are " +
+                        supported);
 }
 
 inline auto metric_name(MetricType metric) -> std::string {
@@ -174,25 +200,34 @@ class PyDiskCollection {
       vamana_params =
           validate_vamana_params(vamana_R, vamana_L, vamana_alpha, vamana_seed, vamana_num_threads);
     }
+    assert_engine_supported_at_binding(parsed_index_type);
     impl_ = std::make_unique<DiskCollection>(path,
                                              dim,
                                              metric,
                                              parsed_index_type,
                                              max_pending_bytes,
                                              vamana_params);
+    cached_index_type_ = parsed_index_type;
   }
 
   static auto open(const std::string &path) -> std::shared_ptr<PyDiskCollection> {
     const auto manifest =
         CollectionManifest::load(std::filesystem::path(path) / "collection_manifest.txt");
-    if (manifest.index_type == DiskIndexType::Laser) {
-      throw py::value_error("DiskCollection.open: index_type \"disk_laser\" not implemented in v1");
-    }
+    assert_engine_supported_at_binding(manifest.index_type);
     auto inner = DiskCollection::open(path);
-    return std::shared_ptr<PyDiskCollection>(new PyDiskCollection(std::move(inner)));
+    return std::shared_ptr<PyDiskCollection>(
+        new PyDiskCollection(std::move(inner), manifest.index_type));
   }
 
   void add(py::array vectors, py::array ids) {
+    // Pre-call reject for disk_laser collections so the binding boundary
+    // surfaces a clear "use import_laser_segment" message before the GIL is
+    // released. Same dual-substring contract as the C++ `add_batch` reject.
+    if (cached_index_type_ == DiskIndexType::Laser) {
+      throw std::runtime_error(
+          "DiskCollection.add: disk_laser add not implemented in v1; use "
+          "import_laser_segment for precomputed LASER artifacts");
+    }
     require_dtype(vectors,
                   py::dtype::of<float>(),
                   "DiskCollection.add: vectors.dtype must be float32");
@@ -233,18 +268,100 @@ class PyDiskCollection {
   }
 
   void flush() {
+    // Unconditional reject for disk_laser regardless of pending state. The C++
+    // `flush()` is a no-op when pending is empty (Laser collections always
+    // have empty pending because `add()` rejects), so silent success would
+    // mislead callers who expect `flush()` to materialize a segment. The
+    // binding adds an explicit reject pointing at `import_laser_segment` —
+    // see design D3 for the rationale; this is the only place where the
+    // Python contract intentionally diverges from the C++ semantics.
+    if (cached_index_type_ == DiskIndexType::Laser) {
+      throw std::runtime_error(
+          "DiskCollection.flush: disk_laser flush not implemented in v1; use "
+          "import_laser_segment for precomputed LASER artifacts");
+    }
     py::gil_scoped_release release;
     std::unique_lock<std::shared_mutex> lock(mutex_);
     impl_->flush();
   }
 
-  auto search(py::array query, int k, int ef) -> std::vector<std::tuple<uint64_t, float>> {
+  void import_laser_segment(py::object src_dir_obj, py::array labels, bool copy) {
+    // Validation order matches the spec (`disk-laser-python-binding`
+    // `Python import_laser_segment method` requirement):
+    //   1. wrapped collection is disk_laser
+    //   2. src_dir exists and is a directory
+    //   3. labels.dtype == numpy.uint64
+    //   4. labels is C-contiguous
+    //   5. labels.ndim == 1 and shape[0] >= 1
+    //   6. copy is True (v1 rejects copy=False with NotImplementedError)
+    // Step 6 runs LAST so `copy=False` does not short-circuit the
+    // src_dir / labels error scenarios that the spec parametrizes
+    // independently. The "no seg_* directory created" contract is
+    // preserved either way because the C++ importer is not invoked
+    // until step 7.
+    if (cached_index_type_ != DiskIndexType::Laser) {
+      throw std::runtime_error(
+          "DiskCollection.import_laser_segment: import_laser_segment requires a "
+          "disk_laser collection");
+    }
+    std::string src_dir_str;
+    {
+      auto fspath = py::module_::import("os").attr("fspath");
+      src_dir_str = std::string(py::str(fspath(src_dir_obj)));
+    }
+    std::filesystem::path src_dir_path(src_dir_str);
+    {
+      std::error_code ec;
+      const bool is_dir = std::filesystem::is_directory(src_dir_path, ec);
+      if (ec || !is_dir) {
+        throw py::value_error(
+            "DiskCollection.import_laser_segment: src_dir is not an existing directory: " +
+            src_dir_str);
+      }
+    }
+    require_dtype(labels,
+                  py::dtype::of<uint64_t>(),
+                  "DiskCollection.import_laser_segment: labels.dtype must be uint64");
+    if ((labels.flags() & py::array::c_style) == 0) {
+      throw py::type_error("DiskCollection.import_laser_segment: labels must be C-contiguous");
+    }
+    if (labels.ndim() != 1) {
+      throw py::value_error("DiskCollection.import_laser_segment: labels must be 1D (got ndim=" +
+                            std::to_string(labels.ndim()) + ")");
+    }
+    const auto n = static_cast<uint64_t>(labels.shape(0));
+    if (n == 0) {
+      throw py::value_error("DiskCollection.import_laser_segment: labels must be non-empty");
+    }
+    if (!copy) {
+      PyErr_SetString(PyExc_NotImplementedError,
+                      "DiskCollection.import_laser_segment: v1 supports copy=True only; "
+                      "hard-link import requires a future C++ API extension to "
+                      "DiskCollection::import_laser_segment to accept "
+                      "LaserSegmentImportParams");
+      throw py::error_already_set();
+    }
+    const auto *labels_data = static_cast<const uint64_t *>(labels.data());
+    {
+      py::gil_scoped_release release;
+      std::unique_lock<std::shared_mutex> lock(mutex_);
+      impl_->import_laser_segment(src_dir_path, labels_data, n);
+    }
+  }
+
+  auto search(py::array query, int k, int ef, int64_t beam_width)
+      -> std::vector<std::tuple<uint64_t, float>> {
     if (k <= 0) {
       throw py::value_error("DiskCollection.search: k must be > 0 (got " + std::to_string(k) + ")");
     }
     if (ef <= 0) {
       throw py::value_error("DiskCollection.search: ef must be > 0 (got " + std::to_string(ef) +
                             ")");
+    }
+    if (beam_width <= 0 ||
+        beam_width > static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+      throw py::value_error("DiskCollection.search: beam_width must be in [1, 2**32 - 1] (got " +
+                            std::to_string(beam_width) + ")");
     }
     require_dtype(query,
                   py::dtype::of<float>(),
@@ -262,10 +379,30 @@ class PyDiskCollection {
       throw py::type_error("DiskCollection.search: query must be C-contiguous");
     }
 
+    // Engine-uniform NaN / Inf check on `query`. Uses the bit-pattern helper
+    // because `-Ofast` / `-ffast-math` folds `<cmath>` finite checks into
+    // constants (per `project_ofast_finiteness_check`). Applies before
+    // engine dispatch so disk_flat / disk_vamana / disk_laser see the same
+    // contract.
+    const auto *query_data = static_cast<const float *>(query.data());
+    const uint64_t dim = impl_->dim();
+    for (uint64_t i = 0; i < dim; ++i) {
+      const float v = query_data[i];
+      if (!is_finite_f32(v)) {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &v, sizeof(v));
+        const bool nan_bit = (bits & 0x7F800000U) == 0x7F800000U && (bits & 0x007FFFFFU) != 0;
+        const bool sign_bit = (bits & 0x80000000U) != 0;
+        const std::string kind = nan_bit ? "nan" : (sign_bit ? "-inf" : "inf");
+        throw py::value_error("DiskCollection.search: query[" + std::to_string(i) + "] is " + kind +
+                              " (non-finite query components are not allowed)");
+      }
+    }
+
     DiskSearchOptions opts;
     opts.top_k = static_cast<uint32_t>(k);
     opts.ef = static_cast<uint32_t>(ef);
-    const auto *query_data = static_cast<const float *>(query.data());
+    opts.beam_width = static_cast<uint32_t>(beam_width);
 
     std::vector<DiskSearchHit> hits;
     {
@@ -292,11 +429,14 @@ class PyDiskCollection {
   }
 
  private:
-  explicit PyDiskCollection(DiskCollection &&inner)
-      : impl_(std::make_unique<DiskCollection>(std::move(inner))) {}
+  PyDiskCollection(DiskCollection &&inner, DiskIndexType index_type)
+      : impl_(std::make_unique<DiskCollection>(std::move(inner))), cached_index_type_(index_type) {}
 
   std::unique_ptr<DiskCollection> impl_;
   mutable std::shared_mutex mutex_;
+  // Cached at construction so add() / flush() / import_laser_segment() reject
+  // paths can fire without reading the C++ manifest on every call.
+  DiskIndexType cached_index_type_{DiskIndexType::Flat};
 };
 
 inline void register_disk_collection(py::module_ &m) {
@@ -325,11 +465,41 @@ inline void register_disk_collection(py::module_ &m) {
       .def_static("open", &PyDiskCollection::open, py::arg("path"))
       .def("add", &PyDiskCollection::add, py::arg("vectors"), py::arg("ids"))
       .def("flush", &PyDiskCollection::flush)
+      .def("import_laser_segment",
+           &PyDiskCollection::import_laser_segment,
+           py::arg("src_dir"),
+           py::arg("labels"),
+           py::kw_only(),
+           py::arg("copy") = true,
+           "Import a precomputed LASER native-artifact directory as a new segment.\n\n"
+           "Requires the wrapped collection to have been constructed with\n"
+           "`index_type=\"disk_laser\"` on a build where `disk_laser` is supported.\n\n"
+           "Arguments:\n"
+           "  src_dir: directory containing the four required LASER artifacts\n"
+           "    (`*_R<R>_MD<main_dim>.index`, `_rotator`, `_cache_ids`,\n"
+           "    `_cache_nodes`) plus optional sidecars (`_pca.bin`,\n"
+           "    `_medoids`, `_medoids_indices`).\n"
+           "  labels: numpy.uint64 1-D C-contiguous array of external labels\n"
+           "    matching the LASER index's row count exactly.\n"
+           "  copy (kw-only): v1 SHALL only accept `True`. `False` raises\n"
+           "    `NotImplementedError`; hard-link import requires a future C++\n"
+           "    API extension to accept `LaserSegmentImportParams`.\n\n"
+           "Releases the GIL around the C++ import call. Raises:\n"
+           "  RuntimeError: collection is not a `disk_laser` collection, or any\n"
+           "    runtime error from the C++ importer (file open, copy, fsync).\n"
+           "  ValueError: `src_dir` is not an existing directory, `labels` is\n"
+           "    empty / wrong shape, or contains a duplicate label (within\n"
+           "    batch or across previously-imported segments).\n"
+           "  TypeError: `labels.dtype` is not `numpy.uint64`, or `labels`\n"
+           "    is not C-contiguous.\n"
+           "  NotImplementedError: `copy=False` (see above).")
       .def("search",
            &PyDiskCollection::search,
            py::arg("query"),
            py::arg("k") = 10,
            py::arg("ef") = 100,
+           py::kw_only(),
+           py::arg("beam_width") = 4,
            // The metric contract docstring is enforced by spec scenario
            // `test_disk_collection_cos_distance_docstring`; the literal phrases
            // below are required.
@@ -339,7 +509,13 @@ inline void register_disk_collection(py::module_ &m) {
            "  IP: negative inner product (-Σ(qi * vi))\n"
            "  COS: negative cosine similarity after L2-normalizing stored vectors and query\n\n"
            "Argument k must be > 0; k > total_count returns total_count results.\n"
-           "Argument ef must be > 0; Vamana uses ef as the greedy-search beam size.")
+           "Argument ef must be > 0; Vamana uses ef as the greedy-search beam size.\n"
+           "Argument beam_width (keyword-only, default 4) must be > 0; LASER uses\n"
+           "  it as the libaio I/O parallelism setting. disk_flat / disk_vamana\n"
+           "  ignore beam_width semantically (it is part of the engine-agnostic\n"
+           "  DiskSearchOptions struct, but only LASER reads it).\n\n"
+           "The query SHALL pass a finite-component check; a NaN or ±Inf value\n"
+           "raises ValueError naming the offending position and value.")
       .def("size", &PyDiskCollection::size)
       .def("dim", &PyDiskCollection::dim);
 }

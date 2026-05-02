@@ -24,6 +24,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from _laser_support import DISK_LASER_SUPPORTED
 from alayalite import DiskCollection, MetricType
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="DiskCollection v1 is POSIX-only")
@@ -598,6 +599,12 @@ def test_disk_vamana_unsupported_metric_if_applicable(tmp_path, metric, token):
     assert not path.exists()
 
 
+@pytest.mark.skipif(
+    DISK_LASER_SUPPORTED,
+    reason="disk_laser is supported on this build; the rejection contract is "
+    "pinned by tests in test_disk_collection_dispatch.py and "
+    "test_disk_collection_laser.py::test_disk_laser_unsupported_platform",
+)
 def test_disk_laser_still_unsupported(tmp_path):
     path = tmp_path / "laser"
     with pytest.raises(ValueError) as exc_info:

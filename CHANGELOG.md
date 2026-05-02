@@ -21,6 +21,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name + "not implemented in v1").
 
 ### Added
+- expose `disk_laser` via `alayalite.DiskCollection` Python binding (import +
+  search; v1 does not support add/flush/batch_search). Lifts the binding-side
+  hard veto so `index_type="disk_laser"` is gated by the C++
+  `engine_supported_v1(Laser)` predicate (Linux + `ALAYA_ENABLE_LASER=ON` +
+  libaio). Adds `DiskCollection.import_laser_segment(src_dir, labels, *,
+  copy=True)` driving the C++ importer with binding-side validation
+  (src_dir directory check, labels dtype/contig/shape, GIL release). Threads
+  `beam_width` (keyword-only, default 4) through `search()`, applied
+  uniformly across engines. Adds an engine-uniform NaN / Inf check on
+  `query` that uses the bit-pattern `is_finite_f32` helper (per
+  `project_ofast_finiteness_check`). Rejects `add()` / `flush()` on
+  `disk_laser` collections at the binding boundary with the dual-substring
+  contract pointing at `import_laser_segment`. Non-goals: no in-C++ build
+  pipeline, no add/flush/batch_search, no PCA/medoid C++ port, no LASER
+  format change, no metadata filter, no WAL/compaction/delete/upsert. v1's
+  `copy=False` raises `NotImplementedError` (the C++ entry point does not
+  accept a per-call params override; the keyword is preserved on the API
+  surface for a future change). On unsupported configurations
+  (Linux+OFF / macOS / Windows / SIMD-unsupported Linux) the wheel keeps
+  building and `disk_laser` raises `ValueError` with the dual-substring
+  message; positive-path Python tests are gated on a runtime probe so the
+  test matrix stays green across the wheel matrix.
 - DiskCollection now supports the LASER engine end-to-end at the C++ level for
   load+search+import (L2 only; Linux + libaio +
   `ALAYA_ENABLE_LASER=ON` only): `index_type=disk_laser` reachable through

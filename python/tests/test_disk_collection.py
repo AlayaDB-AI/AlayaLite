@@ -18,6 +18,7 @@ import sys
 
 import numpy as np
 import pytest
+from _laser_support import DISK_LASER_SUPPORTED
 from alayalite import DiskCollection, MetricType
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="DiskCollection v1 is POSIX-only")
@@ -223,22 +224,32 @@ def test_disk_collection_cos_distance_docstring():
     assert "smaller is better" in doc
 
 
-def test_disk_collection_index_type_rejections(tmp_path):
-    path = str(tmp_path / "coll")
+@pytest.mark.skipif(
+    DISK_LASER_SUPPORTED,
+    reason="disk_laser construction is allowed on supported builds; the unsupported-build "
+    "rejection contract is pinned in test_disk_collection_dispatch.py and "
+    "test_disk_collection_laser.py::test_disk_laser_unsupported_platform",
+)
+def test_disk_collection_index_type_rejection_disk_laser_unsupported_only(tmp_path):
+    """On unsupported builds the constructor SHALL still raise ValueError on disk_laser."""
+    path = str(tmp_path / "coll_laser")
     with pytest.raises(ValueError) as exc_info:
         DiskCollection(path=path, dim=4, metric=MetricType.L2, index_type="disk_laser")
     msg = str(exc_info.value)
     assert "disk_laser" in msg
     assert "not implemented in v1" in msg
-    assert not (tmp_path / "coll").exists()
+    assert not (tmp_path / "coll_laser").exists()
 
+
+def test_disk_collection_index_type_rejection_unknown(tmp_path):
+    path = str(tmp_path / "coll_unknown")
     with pytest.raises(ValueError) as exc_info:
         DiskCollection(path=path, dim=4, metric=MetricType.L2, index_type="disk_unknown")
     msg = str(exc_info.value)
     assert "disk_unknown" in msg
     assert "disk_flat" in msg
     assert "disk_vamana" in msg
-    assert not (tmp_path / "coll").exists()
+    assert not (tmp_path / "coll_unknown").exists()
 
 
 def test_disk_collection_constructor_existing_path_raises(tmp_path):

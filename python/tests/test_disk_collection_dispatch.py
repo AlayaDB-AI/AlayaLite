@@ -18,15 +18,21 @@ Pinned by `disk-segment-searcher-dispatch`:
 - `index_type="disk_flat"` keeps working unchanged.
 - `index_type="disk_vamana"` is allowed at the Python boundary once the
   Vamana segment adapter is exposed.
-- `index_type="disk_laser"` keeps raising, with both the engine name and the
-  literal "not implemented in v1" present in the error message so the Python
-  rejection contract aligns with the C++ factory.
+- `index_type="disk_laser"` is build/platform-gated by
+  `engine_supported_v1(Laser)`: on supported builds the constructor and
+  `open()` SHALL succeed; on unsupported builds they SHALL raise
+  `ValueError` with the dual-substring `disk_laser` / `not implemented in
+  v1` message. The negative-path tests below are gated on
+  `not DISK_LASER_SUPPORTED` so they continue to pin the contract on
+  Linux+OFF / macOS / Windows builds; the positive-path tests are gated
+  on `DISK_LASER_SUPPORTED`.
 """
 
 import sys
 
 import numpy as np
 import pytest
+from _laser_support import DISK_LASER_SUPPORTED
 from alayalite import DiskCollection, MetricType
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="DiskCollection v1 is POSIX-only")
@@ -59,6 +65,11 @@ def test_constructor_disk_flat_unchanged(tmp_path):
     assert distances == sorted(distances), "hits must be ascending by distance"
 
 
+@pytest.mark.skipif(
+    DISK_LASER_SUPPORTED,
+    reason="disk_laser is supported on this build; the positive-path test "
+    "test_constructor_disk_laser_supported runs instead",
+)
 @pytest.mark.parametrize("engine", ["disk_laser"])
 def test_constructor_unsupported_engine_still_rejected(tmp_path, engine):
     """Both engine name AND v1 marker must appear in the rejection message."""
@@ -70,6 +81,45 @@ def test_constructor_unsupported_engine_still_rejected(tmp_path, engine):
     assert "not implemented in v1" in msg, f"error message must include the v1 capability marker: {msg}"
     # No partial collection should remain on disk after rejection.
     assert not (tmp_path / f"coll_{engine}").exists()
+
+
+@pytest.mark.skipif(
+    not DISK_LASER_SUPPORTED,
+    reason="run only on supported builds; the negative-path test "
+    "test_constructor_unsupported_engine_still_rejected runs otherwise",
+)
+def test_constructor_disk_laser_supported(tmp_path):
+    """On supported builds the constructor SHALL succeed; the manifest declares disk_laser."""
+    path = tmp_path / "coll_laser_ok"
+    col = DiskCollection(
+        path=str(path),
+        dim=128,
+        metric=MetricType.L2,
+        index_type="disk_laser",
+    )
+    assert col.dim() == 128
+    assert col.size() == 0
+    assert (path / "segments").is_dir()
+    manifest_text = (path / "collection_manifest.txt").read_text(encoding="utf-8")
+    assert "index_type=disk_laser" in manifest_text
+
+
+@pytest.mark.skipif(
+    not DISK_LASER_SUPPORTED,
+    reason="run only on supported builds; the unsupported-path manifest rejection runs otherwise",
+)
+def test_open_disk_laser_supported(tmp_path):
+    """On supported builds, opening an existing disk_laser manifest SHALL succeed."""
+    path = tmp_path / "coll_laser_open"
+    DiskCollection(
+        path=str(path),
+        dim=128,
+        metric=MetricType.L2,
+        index_type="disk_laser",
+    )
+    opened = DiskCollection.open(str(path))
+    assert opened.dim() == 128
+    assert opened.size() == 0
 
 
 def test_open_empty_disk_vamana_manifest_allowed(tmp_path):
@@ -95,8 +145,12 @@ def test_open_empty_disk_vamana_manifest_allowed(tmp_path):
     assert opened.size() == 0
 
 
+@pytest.mark.skipif(
+    DISK_LASER_SUPPORTED,
+    reason="disk_laser is supported on this build; the positive-path test test_open_disk_laser_supported runs instead",
+)
 def test_open_disk_laser_manifest_still_rejected(tmp_path):
-    """Python open keeps disk_laser behind the binding-level v1 allowlist."""
+    """Python open keeps disk_laser behind the v1 allowlist on unsupported builds."""
     coll = tmp_path / "coll_laser"
     (coll / "segments").mkdir(parents=True)
     (coll / "collection_manifest.txt").write_text(
