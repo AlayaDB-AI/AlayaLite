@@ -925,6 +925,64 @@ class DiskCollection {
     return out;
   }
 
+  // Run `n_queries` searches against `queries` (row-major `(n_queries, dim)`
+  // float buffer) and write results into the caller-owned output buffers
+  // `out_labels` / `out_distances` (row-major `(n_queries, opts.top_k)`).
+  //
+  // Padding contract: the caller MUST pre-fill `out_labels` with
+  // `UINT64_MAX` and (if non-null) `out_distances` with NaN. Per the
+  // `disk-collection-batch-search` spec the implementation only overwrites
+  // the slots `[0, hits.size())` for each query, so trailing slots retain
+  // the caller's sentinels and the labels-only fast path is selected by
+  // passing `out_distances == nullptr`.
+  //
+  // `n_queries == 0` is a silent noop. `num_threads == 0` and
+  // `opts.top_k == 0` throw `std::invalid_argument` (the Python adapter
+  // resolves `num_threads = 0` upstream).
+  auto batch_search(const float *queries,
+                    uint64_t n_queries,
+                    const DiskSearchOptions &opts,
+                    uint32_t num_threads,
+                    uint64_t *out_labels,
+                    float *out_distances) const -> void {
+    if (opts.top_k == 0) {
+      throw std::invalid_argument("DiskCollection: top_k must be > 0");
+    }
+    if (num_threads == 0) {
+      throw std::invalid_argument(
+          "DiskCollection::batch_search: num_threads must be > 0 (the Python "
+          "adapter resolves num_threads = 0 before this entry)");
+    }
+    if (n_queries == 0) {
+      return;
+    }
+
+    const uint64_t dim = static_cast<uint64_t>(manifest_.dim);
+    const uint32_t top_k = opts.top_k;
+
+    // Caller pre-fills the output buffers with sentinels (UINT64_MAX /
+    // NaN); writing only the [0, hits.size()) prefix is what makes the
+    // padding contract hold without an explicit sentinel pass. The
+    // labels-only fast path is selected by `out_distances == nullptr`.
+    auto write_to_output = [&](uint64_t i, const std::vector<DiskSearchHit> &hits) {
+      const uint64_t base = i * top_k;
+      const size_t n = std::min<size_t>(hits.size(), static_cast<size_t>(top_k));
+      for (size_t j = 0; j < n; ++j) {
+        out_labels[base + j] = hits[j].label;
+      }
+      if (out_distances != nullptr) {
+        for (size_t j = 0; j < n; ++j) {
+          out_distances[base + j] = hits[j].distance;
+        }
+      }
+    };
+
+    for (uint64_t i = 0; i < n_queries; ++i) {
+      auto hits = search(queries + i * dim, opts);
+      write_to_output(i, hits);
+    }
+  }
+
   // Returns the total number of FLUSHED rows. Pending rows are intentionally
   // excluded — see spec scenario "size() excludes pending rows".
   auto size() const -> uint64_t {
