@@ -21,6 +21,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cinttypes>
@@ -29,13 +30,16 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -977,9 +981,65 @@ class DiskCollection {
       }
     };
 
-    for (uint64_t i = 0; i < n_queries; ++i) {
-      auto hits = search(queries + i * dim, opts);
-      write_to_output(i, hits);
+    // num_threads == 1 runs on the calling thread and skips the std::thread
+    // spawn/join + atomic dispatch overhead. The spec requires the resulting
+    // out_labels / out_distances state to be byte-identical to the 1-worker
+    // multi-thread path; both write the same hits in query-index order.
+    if (num_threads == 1) {
+      for (uint64_t i = 0; i < n_queries; ++i) {
+        auto hits = search(queries + i * dim, opts);
+        write_to_output(i, hits);
+      }
+      return;
+    }
+
+    // Multi-thread: per-query parallelism. workers share an atomic counter
+    // that doles out query indices; each worker invokes the existing
+    // single-query search() path on its slice. Per spec D3 we deliberately
+    // do NOT parallelize across segments inside a single search().
+    //
+    // Clamp workers to n_queries (Decision 5: optimization, not contract):
+    // a worker that immediately observes fetch_add >= n_queries returns
+    // without doing useful work, so spawning more than n_queries threads
+    // is wasted thread-spawn cost.
+    const uint32_t worker_count = static_cast<uint32_t>(std::min<uint64_t>(num_threads, n_queries));
+    std::atomic<uint64_t> next_query{0};
+    std::atomic<bool> aborted{false};
+    std::mutex error_mutex;
+    std::exception_ptr first_error{nullptr};
+
+    std::vector<std::thread> workers;
+    workers.reserve(worker_count);
+    for (uint32_t t = 0; t < worker_count; ++t) {
+      workers.emplace_back([&, this]() {
+        try {
+          while (!aborted.load(std::memory_order_relaxed)) {
+            const uint64_t i = next_query.fetch_add(1, std::memory_order_relaxed);
+            if (i >= n_queries) {
+              return;
+            }
+            auto hits = this->search(queries + i * dim, opts);
+            write_to_output(i, hits);
+          }
+        } catch (...) {
+          // Capture only the first exception; subsequent failures from
+          // sibling workers are intentionally discarded so the caller
+          // observes exactly one exception type matching the first
+          // failure (spec contract 8). Setting `aborted` lets sibling
+          // workers exit at the head of their next loop iteration.
+          std::lock_guard<std::mutex> lk(error_mutex);
+          if (!first_error) {
+            first_error = std::current_exception();
+          }
+          aborted.store(true, std::memory_order_relaxed);
+        }
+      });
+    }
+    for (auto &w : workers) {
+      w.join();
+    }
+    if (first_error) {
+      std::rethrow_exception(first_error);
     }
   }
 
