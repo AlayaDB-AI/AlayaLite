@@ -16,6 +16,7 @@ add_executable(test_vamana_segment_searcher ${CMAKE_CURRENT_SOURCE_DIR}/test_vam
 add_executable(test_segment_factory_vamana ${CMAKE_CURRENT_SOURCE_DIR}/test_segment_factory_vamana.cpp)
 add_executable(test_disk_collection_vamana ${CMAKE_CURRENT_SOURCE_DIR}/test_disk_collection_vamana.cpp)
 add_executable(test_vamana_adapter_overhead ${CMAKE_CURRENT_SOURCE_DIR}/test_vamana_adapter_overhead.cpp)
+add_executable(test_disk_collection_batch_search ${CMAKE_CURRENT_SOURCE_DIR}/test_disk_collection_batch_search.cpp)
 
 if(ALAYA_ENABLE_LASER)
   find_package(
@@ -94,6 +95,17 @@ if(ALAYA_ENABLE_LASER)
     endforeach()
     add_custom_target(test_laser_segment DEPENDS ${ALAYA_LASER_SEGMENT_TEST_TARGETS})
   endif()
+
+  # The hybrid Flat/Vamana/Laser batch_search test is registered as a standard executable above; only its Laser-engine
+  # branch needs the fixture, the alaya_laser link, and ALAYA_ENABLE_LASER=1.
+  add_dependencies(test_disk_collection_batch_search laser_segment_fixture)
+  target_link_libraries(test_disk_collection_batch_search PRIVATE alaya_laser)
+  target_compile_options(test_disk_collection_batch_search PRIVATE ${_ALAYA_LASER_CONSUMER_OPTIONS})
+  target_compile_definitions(
+    test_disk_collection_batch_search
+    PRIVATE ALAYA_ENABLE_LASER=1 ALAYA_LASER_FIXTURE_DIR="${ALAYA_LASER_SEGMENT_FIXTURE_DIR}"
+            ALAYA_LASER_FIXTURE_PREFIX="${ALAYA_LASER_SEGMENT_FIXTURE_PREFIX}"
+  )
 else()
   set(ALAYA_LASER_NEGATIVE_TEST_CANDIDATES test_laser_segment_importer.cpp test_laser_segment_searcher.cpp
                                            test_segment_factory_laser.cpp test_disk_collection_laser.cpp
@@ -131,6 +143,7 @@ target_link_libraries(test_vamana_segment_searcher PRIVATE ${THIRD_PARTY_LIBS} $
 target_link_libraries(test_segment_factory_vamana PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 target_link_libraries(test_disk_collection_vamana PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 target_link_libraries(test_vamana_adapter_overhead PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
+target_link_libraries(test_disk_collection_batch_search PRIVATE ${THIRD_PARTY_LIBS} ${GTEST_LIBS})
 add_coverage_to_target(disk_types_test)
 add_coverage_to_target(segment_manifest_test)
 add_coverage_to_target(mmap_file_test)
@@ -147,6 +160,7 @@ add_coverage_to_target(test_vamana_segment_searcher)
 add_coverage_to_target(test_segment_factory_vamana)
 add_coverage_to_target(test_disk_collection_vamana)
 add_coverage_to_target(test_vamana_adapter_overhead)
+add_coverage_to_target(test_disk_collection_batch_search)
 
 add_test(NAME disk_test_types COMMAND $<TARGET_FILE:disk_types_test>)
 add_test(NAME disk_test_segment_manifest COMMAND $<TARGET_FILE:segment_manifest_test>)
@@ -164,3 +178,4 @@ add_test(NAME test_vamana_segment_searcher COMMAND $<TARGET_FILE:test_vamana_seg
 add_test(NAME test_segment_factory_vamana COMMAND $<TARGET_FILE:test_segment_factory_vamana>)
 add_test(NAME test_disk_collection_vamana COMMAND $<TARGET_FILE:test_disk_collection_vamana>)
 add_test(NAME test_vamana_adapter_overhead COMMAND $<TARGET_FILE:test_vamana_adapter_overhead>)
+add_test(NAME test_disk_collection_batch_search COMMAND $<TARGET_FILE:test_disk_collection_batch_search>)
