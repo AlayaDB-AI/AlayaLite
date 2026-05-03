@@ -752,7 +752,8 @@ inline void register_disk_collection(py::module_ &m) {
            "    does not scale throughput beyond the single-thread baseline; correctness\n"
            "    (labels match the per-query serial search) is preserved.\n"
            "  - The GIL is released around the C++ batch loop. The N=0 case returns an\n"
-           "    empty (0, k) array without touching the C++ batch path.")
+           "    empty (0, k) array; the C++ entry early-returns without spawning a worker\n"
+           "    thread or reading the queries / output buffers.")
       .def("batch_search_with_distance",
            &PyDiskCollection::batch_search_with_distance,
            py::arg("queries"),

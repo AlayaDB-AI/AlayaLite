@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import math
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -432,16 +433,22 @@ def test_disk_laser_batch_8threads_matches_serial_baseline(tmp_path):
 
     Laser is mutex-serialized internally so this test verifies correctness
     (labels match) — not throughput scaling, which is intentionally not
-    delivered for Laser per spec D3.
+    delivered for Laser per spec D3. The query batch matches the spec
+    scenario (N=64) and the call must complete inside the 60-second
+    wall-clock budget the spec mandates; we measure the budget inline
+    rather than introducing a pytest-timeout dependency.
     """
     col, vectors = _build_laser(tmp_path)
-    n = 32
+    n = 64
     queries = vectors[:n].copy()
     expected = np.full((n, 10), _UINT64_MAX, dtype=np.uint64)
     for i in range(n):
         for j, (label, _) in enumerate(col.search(queries[i], k=10, ef=100, beam_width=4)):
             expected[i, j] = label
+    started = time.monotonic()
     labels = col.batch_search(queries, k=10, ef=100, beam_width=4, num_threads=8)
+    elapsed = time.monotonic() - started
+    assert elapsed < 60.0, f"batch_search did not complete within 60s budget (took {elapsed:.2f}s)"
     assert np.array_equal(labels, expected)
 
 
