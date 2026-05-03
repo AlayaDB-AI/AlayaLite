@@ -19,6 +19,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -30,6 +31,7 @@
 #include <shared_mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -135,6 +137,32 @@ inline auto resolve_vamana_num_threads(int64_t num_threads) -> int64_t {
     // Invalid environment values keep the C++ adapter default.
   }
   return 0;
+}
+
+// Resolves `num_threads = 0` for batch_search the same way Vamana does, but
+// adds a `hardware_concurrency()` fallback (with a 1-thread floor) because the
+// C++ `DiskCollection::batch_search` rejects `num_threads = 0` outright.
+// Caller must validate `num_threads >= 0` before invoking this helper.
+inline auto resolve_batch_num_threads(int64_t num_threads) -> uint32_t {
+  if (num_threads > 0) {
+    return static_cast<uint32_t>(num_threads);
+  }
+  const char *env = std::getenv("OMP_NUM_THREADS");
+  if (env != nullptr && *env != '\0') {
+    try {
+      size_t pos = 0;
+      const auto value = std::stoll(env, &pos);
+      if (pos == std::strlen(env) && value >= 1 &&
+          value <= static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+        return static_cast<uint32_t>(value);
+      }
+    } catch (const std::exception &) {
+      // Invalid environment values fall through to the hardware concurrency
+      // probe; no separate signal is surfaced to the caller.
+    }
+  }
+  const auto hw = std::thread::hardware_concurrency();
+  return hw == 0 ? 1U : hw;
 }
 
 inline auto validate_vamana_params(int64_t r,
@@ -435,6 +463,57 @@ class PyDiskCollection {
     return out;
   }
 
+  auto batch_search(py::array queries, int k, int ef, int64_t beam_width, int64_t num_threads)
+      -> py::array {
+    const auto prep = prepare_batch_search(queries, k, ef, beam_width, num_threads, "batch_search");
+    py::array_t<uint64_t> labels({static_cast<py::ssize_t>(prep.n_queries),
+                                  static_cast<py::ssize_t>(static_cast<uint32_t>(k))});
+    auto *labels_ptr = static_cast<uint64_t *>(labels.request().ptr);
+    std::fill_n(labels_ptr,
+                prep.n_queries * static_cast<uint64_t>(k),
+                std::numeric_limits<uint64_t>::max());
+    {
+      py::gil_scoped_release release;
+      std::shared_lock<std::shared_mutex> lock(mutex_);
+      impl_->batch_search(prep.queries_data,
+                          prep.n_queries,
+                          prep.opts,
+                          prep.resolved_threads,
+                          labels_ptr,
+                          /*out_distances=*/nullptr);
+    }
+    return labels;
+  }
+
+  auto batch_search_with_distance(py::array queries,
+                                  int k,
+                                  int ef,
+                                  int64_t beam_width,
+                                  int64_t num_threads) -> py::tuple {
+    const auto prep =
+        prepare_batch_search(queries, k, ef, beam_width, num_threads, "batch_search_with_distance");
+    py::array_t<uint64_t> labels({static_cast<py::ssize_t>(prep.n_queries),
+                                  static_cast<py::ssize_t>(static_cast<uint32_t>(k))});
+    py::array_t<float> distances({static_cast<py::ssize_t>(prep.n_queries),
+                                  static_cast<py::ssize_t>(static_cast<uint32_t>(k))});
+    auto *labels_ptr = static_cast<uint64_t *>(labels.request().ptr);
+    auto *distances_ptr = static_cast<float *>(distances.request().ptr);
+    const auto total = prep.n_queries * static_cast<uint64_t>(k);
+    std::fill_n(labels_ptr, total, std::numeric_limits<uint64_t>::max());
+    std::fill_n(distances_ptr, total, std::numeric_limits<float>::quiet_NaN());
+    {
+      py::gil_scoped_release release;
+      std::shared_lock<std::shared_mutex> lock(mutex_);
+      impl_->batch_search(prep.queries_data,
+                          prep.n_queries,
+                          prep.opts,
+                          prep.resolved_threads,
+                          labels_ptr,
+                          distances_ptr);
+    }
+    return py::make_tuple(labels, distances);
+  }
+
   auto size() const -> uint64_t {
     std::shared_lock<std::shared_mutex> lock(mutex_);
     return impl_->size();
@@ -447,6 +526,99 @@ class PyDiskCollection {
  private:
   PyDiskCollection(DiskCollection &&inner, DiskIndexType index_type)
       : impl_(std::make_unique<DiskCollection>(std::move(inner))), cached_index_type_(index_type) {}
+
+  // Result of `prepare_batch_search`. The `queries_data` pointer aliases into
+  // the caller-supplied py::array, which the public methods keep alive for
+  // the duration of the C++ call (the array is a function parameter).
+  struct BatchPrep {
+    uint64_t n_queries;
+    uint32_t resolved_threads;
+    DiskSearchOptions opts;
+    const float *queries_data;
+  };
+
+  // Common validation prologue shared by `batch_search` and
+  // `batch_search_with_distance`. Runs the dtype / shape / contiguity / k /
+  // ef / beam_width / num_threads / per-element finite checks (all spec
+  // requirement points 1..9) and resolves `num_threads = 0` via
+  // `resolve_batch_num_threads`. The GIL is held throughout: per spec the
+  // first validation failure must raise without entering the C++ batch path.
+  auto prepare_batch_search(const py::array &queries,
+                            int k,
+                            int ef,
+                            int64_t beam_width,
+                            int64_t num_threads,
+                            const std::string &method) const -> BatchPrep {
+    require_dtype(queries,
+                  py::dtype::of<float>(),
+                  "DiskCollection." + method + ": queries.dtype must be float32");
+    if (queries.ndim() != 2) {
+      throw py::value_error("DiskCollection." + method + ": queries must be 2D (got ndim=" +
+                            std::to_string(queries.ndim()) + ")");
+    }
+    if (static_cast<uint64_t>(queries.shape(1)) != impl_->dim()) {
+      throw py::value_error("DiskCollection." + method +
+                            ": queries.shape[1]=" + std::to_string(queries.shape(1)) +
+                            " does not match collection dim=" + std::to_string(impl_->dim()));
+    }
+    if ((queries.flags() & py::array::c_style) == 0) {
+      throw py::type_error("DiskCollection." + method + ": queries must be C-contiguous");
+    }
+    if (k <= 0) {
+      throw py::value_error("DiskCollection." + method + ": k must be > 0 (got " +
+                            std::to_string(k) + ")");
+    }
+    if (ef <= 0) {
+      throw py::value_error("DiskCollection." + method + ": ef must be > 0 (got " +
+                            std::to_string(ef) + ")");
+    }
+    if (beam_width <= 0 ||
+        beam_width > static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+      throw py::value_error("DiskCollection." + method +
+                            ": beam_width must be in [1, 2**32 - 1] (got " +
+                            std::to_string(beam_width) + ")");
+    }
+    if (num_threads < 0 ||
+        num_threads > static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+      throw py::value_error("DiskCollection." + method +
+                            ": num_threads must be in [0, 2**32 - 1] (got " +
+                            std::to_string(num_threads) + ")");
+    }
+
+    const auto n_queries = static_cast<uint64_t>(queries.shape(0));
+    const auto dim = impl_->dim();
+    const auto *queries_data = static_cast<const float *>(queries.data());
+
+    // Per-element finite check. Bit-pattern helper because `-Ofast` /
+    // `-ffast-math` folds `<cmath>` finite checks (per
+    // `project_ofast_finiteness_check`). Engine-uniform: applies before
+    // engine dispatch so disk_flat / disk_vamana / disk_laser all see the
+    // same contract.
+    for (uint64_t row = 0; row < n_queries; ++row) {
+      for (uint64_t col = 0; col < dim; ++col) {
+        const float v = queries_data[row * dim + col];
+        if (!is_finite_f32(v)) {
+          uint32_t bits = 0;
+          std::memcpy(&bits, &v, sizeof(v));
+          const bool nan_bit = (bits & 0x7F800000U) == 0x7F800000U && (bits & 0x007FFFFFU) != 0;
+          const bool sign_bit = (bits & 0x80000000U) != 0;
+          const std::string kind = nan_bit ? "nan" : (sign_bit ? "-inf" : "inf");
+          throw py::value_error("DiskCollection." + method + ": queries[" + std::to_string(row) +
+                                "][" + std::to_string(col) + "] is " + kind +
+                                " (non-finite query components are not allowed)");
+        }
+      }
+    }
+
+    BatchPrep prep;
+    prep.n_queries = n_queries;
+    prep.resolved_threads = resolve_batch_num_threads(num_threads);
+    prep.opts.top_k = static_cast<uint32_t>(k);
+    prep.opts.ef = static_cast<uint32_t>(ef);
+    prep.opts.beam_width = static_cast<uint32_t>(beam_width);
+    prep.queries_data = queries_data;
+    return prep;
+  }
 
   std::unique_ptr<DiskCollection> impl_;
   mutable std::shared_mutex mutex_;
@@ -541,6 +713,70 @@ inline void register_disk_collection(py::module_ &m) {
            "  DiskSearchOptions struct, but only LASER reads it).\n\n"
            "The query SHALL pass a finite-component check; a NaN or ±Inf value\n"
            "raises ValueError naming the offending position and value.")
+      .def("batch_search",
+           &PyDiskCollection::batch_search,
+           py::arg("queries"),
+           py::arg("k") = 10,
+           py::arg("ef") = 100,
+           py::kw_only(),
+           py::arg("beam_width") = 4,
+           py::arg("num_threads") = 0,
+           "Run N queries in parallel and return the top-k labels as a (N, k) numpy.uint64 "
+           "matrix.\n"
+           "\n"
+           "Inputs:\n"
+           "  queries: numpy.ndarray, dtype=float32, shape=(N, dim), C-contiguous.\n"
+           "  k: int > 0; top-k per query.\n"
+           "  ef: int > 0; greedy-search beam size (engine-specific use, same as search()).\n"
+           "  beam_width (kw-only, default 4): int > 0; LASER libaio I/O parallelism setting,\n"
+           "    ignored by disk_flat / disk_vamana.\n"
+           "  num_threads (kw-only, default 0): int >= 0. `0` auto-resolves to the\n"
+           "    `OMP_NUM_THREADS` environment variable when it parses to an integer in\n"
+           "    [1, 2**32 - 1], otherwise to `std::thread::hardware_concurrency()` with a\n"
+           "    one-thread floor.\n"
+           "\n"
+           "Output:\n"
+           "  labels: numpy.uint64 array of shape (N, k). For queries that yielded fewer\n"
+           "    than k hits, trailing slots remain at the padding sentinel\n"
+           "    `numpy.iinfo(numpy.uint64).max`.\n"
+           "\n"
+           "Validation: queries.dtype must be float32; queries.ndim must be 2;\n"
+           "queries.shape[1] must equal dim(); queries must be C-contiguous; every element\n"
+           "must be finite (NaN / +-Inf raises ValueError naming the offending row, col,\n"
+           "and kind).\n"
+           "\n"
+           "Concurrency notes:\n"
+           "  - Engine coverage is uniform across disk_flat, disk_vamana, and disk_laser.\n"
+           "  - On disk_laser the per-segment search holds an internal mutex (see the\n"
+           "    `disk-laser-searcher-thread-safety` contract), so multi-thread batch_search\n"
+           "    does not scale throughput beyond the single-thread baseline; correctness\n"
+           "    (labels match the per-query serial search) is preserved.\n"
+           "  - The GIL is released around the C++ batch loop. The N=0 case returns an\n"
+           "    empty (0, k) array without touching the C++ batch path.")
+      .def("batch_search_with_distance",
+           &PyDiskCollection::batch_search_with_distance,
+           py::arg("queries"),
+           py::arg("k") = 10,
+           py::arg("ef") = 100,
+           py::kw_only(),
+           py::arg("beam_width") = 4,
+           py::arg("num_threads") = 0,
+           "Run N queries in parallel and return (labels, distances) as two (N, k) arrays.\n"
+           "\n"
+           "labels: numpy.uint64, shape (N, k); UINT64_MAX padding for short returns.\n"
+           "distances: numpy.float32, shape (N, k); NaN padding for short returns.\n"
+           "\n"
+           "Distance contract:\n"
+           "  - On disk_flat / disk_vamana every overwritten distance is the engine-native\n"
+           "    distance value returned by the per-query search() (bit-exact against\n"
+           "    `search()`'s second tuple element).\n"
+           "  - On disk_laser every overwritten distance is NaN, consistent with the\n"
+           "    `x_laser_distance_field_supported = false` contract; trailing slots remain\n"
+           "    at the NaN sentinel for both engines.\n"
+           "\n"
+           "Validation, num_threads resolution (including `OMP_NUM_THREADS` lookup), GIL\n"
+           "behavior, padding sentinels, and the `does not scale` note for disk_laser\n"
+           "match `batch_search` exactly; only the return type differs.")
       .def("size", &PyDiskCollection::size)
       .def("dim", &PyDiskCollection::dim);
 }
