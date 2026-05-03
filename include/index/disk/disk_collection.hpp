@@ -961,6 +961,16 @@ class DiskCollection {
       return;
     }
 
+    // Empty collection: every per-query search() would return an empty hits
+    // vector, leaving the caller-pre-filled UINT64_MAX / NaN sentinels in
+    // place. Spec point 7 requires "no exception, no allocation"; returning
+    // here skips the worker-pool allocation and the std::thread spawns
+    // entirely, so the caller's sentinels are observed without us touching
+    // any heap or kernel.
+    if (segments_.empty()) {
+      return;
+    }
+
     const uint64_t dim = static_cast<uint64_t>(manifest_.dim);
     const uint32_t top_k = opts.top_k;
 
