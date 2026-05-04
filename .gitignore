@@ -13,6 +13,7 @@ CMakeUserPresets.json
 build
 build_asan
 build_tsan
+TEST*
 **/__pycache__
 .cache
 .vscode/*
@@ -70,3 +71,5 @@ CLAUDE.md
 # codex
 AGENTS.md
 .codex
+
+package-lock.json
