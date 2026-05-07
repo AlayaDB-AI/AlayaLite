@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_set>
 #include <vector>
 
 #include "executor/search_info.hpp"
@@ -115,6 +116,7 @@ inline auto build_scalar_data_vec(const py::list &item_ids,
 
   py::list docs = documents.is_none() ? py::list() : documents.cast<py::list>();
   py::list metas = metadata_list.is_none() ? py::list() : metadata_list.cast<py::list>();
+  std::unordered_set<std::string> seen_item_ids;
 
   for (size_t i = 0; i < count; i++) {
     MetadataMap meta_map;
@@ -123,6 +125,9 @@ inline auto build_scalar_data_vec(const py::list &item_ids,
     }
     std::string doc = (i < docs.size()) ? docs[i].cast<std::string>() : "";
     auto item_id_str = py::str(item_ids[i]).cast<std::string>();
+    if (!item_id_str.empty() && !seen_item_ids.insert(item_id_str).second) {
+      throw std::runtime_error("Duplicate item_id: " + item_id_str);
+    }
     scalar_data_vec.emplace_back(item_id_str, doc, std::move(meta_map));
   }
   return scalar_data_vec;

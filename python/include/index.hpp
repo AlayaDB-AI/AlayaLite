@@ -335,6 +335,23 @@ class PyIndex : public BasePyIndex {
     return inserted_id;
   }
 
+  void validate_insert_item_id_available(const ScalarData &scalar_data) const {
+    if constexpr (SearchSpaceType::has_scalar_data) {
+      if (scalar_data.item_id.empty() || search_space_ == nullptr) {
+        return;
+      }
+      auto *storage = search_space_->get_scalar_storage();
+      if (storage == nullptr) {
+        throw std::runtime_error("Scalar storage is not initialized");
+      }
+      if (!storage->item_id_available(scalar_data.item_id)) {
+        throw std::runtime_error("Duplicate item_id: " + scalar_data.item_id);
+      }
+    } else {
+      (void)scalar_data;
+    }
+  }
+
   auto remove_nondurable(IDType id) -> void {
     if (update_job_ == nullptr) {
       throw std::runtime_error("incremental updates are not supported for the current index type");
@@ -685,6 +702,7 @@ class PyIndex : public BasePyIndex {
     auto insert_data_ptr = static_cast<DataType *>(insert_data.request().ptr);
     MetadataMap meta_map = pydict_to_metadata_map(metadata);
     ScalarData scalar_data{item_id, document, meta_map};
+    validate_insert_item_id_available(scalar_data);
 
     // TODO(P2): RocksDB has its own internal WAL and the custom WAL must stay
     // in sync. If the process crashes between insert_nondurable (RocksDB write)

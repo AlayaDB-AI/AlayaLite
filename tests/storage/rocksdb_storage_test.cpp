@@ -127,6 +127,78 @@ TEST_F(RocksDBStorageTest, UpdateOperations) {
     EXPECT_EQ(std::get<int64_t>(retrieved.metadata.at("version")), 2);
 }
 
+TEST_F(RocksDBStorageTest, InsertRejectsDuplicateItemIdAndKeepsOriginalRecord) {
+    RocksDBStorage<> storage(config_);
+
+    ASSERT_TRUE(storage.insert(0, ScalarData{"dup", "original", {{"version", int64_t(1)}}}));
+
+    EXPECT_FALSE(storage.insert(1, ScalarData{"dup", "duplicate", {{"version", int64_t(2)}}}));
+
+    EXPECT_EQ(storage.count(), 1U);
+    EXPECT_TRUE(storage.is_valid(0));
+    EXPECT_FALSE(storage.is_valid(1));
+    EXPECT_EQ(storage[0].document, "original");
+
+    auto owner = storage.find_by_item_id("dup");
+    ASSERT_TRUE(owner.has_value());
+    EXPECT_EQ(owner.value(), 0U);
+}
+
+TEST_F(RocksDBStorageTest, EmptyItemIdsAreNotUniqueKeys) {
+    RocksDBStorage<> storage(config_);
+
+    EXPECT_TRUE(storage.insert(0, ScalarData{"", "first", {}}));
+    EXPECT_TRUE(storage.insert(1, ScalarData{"", "second", {}}));
+
+    EXPECT_EQ(storage.count(), 2U);
+    EXPECT_TRUE(storage[0].item_id.empty());
+    EXPECT_TRUE(storage[1].item_id.empty());
+}
+
+TEST_F(RocksDBStorageTest, UpdateRejectsItemIdOwnedByAnotherRecord) {
+    RocksDBStorage<> storage(config_);
+
+    ASSERT_TRUE(storage.insert(0, ScalarData{"item_a", "doc a", {}}));
+    ASSERT_TRUE(storage.insert(1, ScalarData{"item_b", "doc b", {}}));
+
+    EXPECT_FALSE(storage.update(1, ScalarData{"item_a", "doc b updated", {}}));
+
+    EXPECT_EQ(storage.count(), 2U);
+    EXPECT_EQ(storage[1].item_id, "item_b");
+    EXPECT_EQ(storage[1].document, "doc b");
+
+    auto item_a_owner = storage.find_by_item_id("item_a");
+    auto item_b_owner = storage.find_by_item_id("item_b");
+    ASSERT_TRUE(item_a_owner.has_value());
+    ASSERT_TRUE(item_b_owner.has_value());
+    EXPECT_EQ(item_a_owner.value(), 0U);
+    EXPECT_EQ(item_b_owner.value(), 1U);
+}
+
+TEST_F(RocksDBStorageTest, InsertReplacingSameInternalIdCleansOldIndexes) {
+    RocksDBConfig indexed_config = config_;
+    indexed_config.indexed_fields_ = {"category"};
+    RocksDBStorage<> storage(indexed_config);
+
+    ASSERT_TRUE(storage.insert(
+        7, ScalarData{"old_item", "old doc", {{"category", std::string("old")}}}));
+
+    EXPECT_TRUE(storage.insert(
+        7, ScalarData{"new_item", "new doc", {{"category", std::string("new")}}}));
+
+    EXPECT_EQ(storage.count(), 1U);
+    EXPECT_FALSE(storage.find_by_item_id("old_item").has_value());
+
+    auto new_owner = storage.find_by_item_id("new_item");
+    ASSERT_TRUE(new_owner.has_value());
+    EXPECT_EQ(new_owner.value(), 7U);
+
+    EXPECT_TRUE(storage.get_ids_by_field_value("category", std::string("old")).empty());
+    auto new_category_ids = storage.get_ids_by_field_value("category", std::string("new"));
+    ASSERT_EQ(new_category_ids.size(), 1U);
+    EXPECT_EQ(new_category_ids[0], 7U);
+}
+
 TEST_F(RocksDBStorageTest, RemoveOperations) {
     RocksDBStorage<> storage(config_);
 
@@ -213,6 +285,41 @@ TEST_F(RocksDBStorageTest, BatchInsertWithOffset) {
     EXPECT_EQ(storage[1].item_id, "id_002");
     EXPECT_EQ(storage[2].item_id, "id_003");
     EXPECT_EQ(storage[3].item_id, "id_004");
+}
+
+TEST_F(RocksDBStorageTest, BatchInsertRejectsDuplicateItemIdsBeforeWriting) {
+    RocksDBStorage<> storage(config_);
+
+    std::vector<ScalarData> duplicate_batch = {
+        {"dup", "doc1", {}},
+        {"dup", "doc2", {}},
+    };
+
+    EXPECT_FALSE(storage.batch_insert(0, duplicate_batch.begin(), duplicate_batch.end()));
+    EXPECT_EQ(storage.count(), 0U);
+    EXPECT_FALSE(storage.is_valid(0));
+    EXPECT_FALSE(storage.is_valid(1));
+    EXPECT_FALSE(storage.find_by_item_id("dup").has_value());
+}
+
+TEST_F(RocksDBStorageTest, BatchInsertRejectsExistingItemIdBeforeWritingAnyRecord) {
+    RocksDBStorage<> storage(config_);
+
+    ASSERT_TRUE(storage.insert(0, ScalarData{"taken", "existing", {}}));
+    std::vector<ScalarData> batch = {
+        {"fresh", "fresh doc", {}},
+        {"taken", "duplicate doc", {}},
+    };
+
+    EXPECT_FALSE(storage.batch_insert(1, batch.begin(), batch.end()));
+    EXPECT_EQ(storage.count(), 1U);
+    EXPECT_FALSE(storage.is_valid(1));
+    EXPECT_FALSE(storage.is_valid(2));
+    EXPECT_FALSE(storage.find_by_item_id("fresh").has_value());
+
+    auto taken_owner = storage.find_by_item_id("taken");
+    ASSERT_TRUE(taken_owner.has_value());
+    EXPECT_EQ(taken_owner.value(), 0U);
 }
 
 // ============================================================================

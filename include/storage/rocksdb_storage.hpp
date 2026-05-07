@@ -23,11 +23,13 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -220,12 +222,33 @@ class RocksDBStorage {
    * @return true on success
    */
   auto insert(IDType id, const ScalarData &data) -> bool {
+    std::lock_guard<std::mutex> lock(write_mutex_);
     ensure_writable("insert");
     std::string key = data_key(id);
+    std::string old_serialized;
+    std::string resolved_key;
+    std::optional<ScalarData> old_data;
+    bool replacing_existing = get_data_value(id, &old_serialized, &resolved_key);
+    if (replacing_existing) {
+      old_data = ScalarData::deserialize(old_serialized.data(), old_serialized.size());
+    }
+
+    if (!item_id_available_for_locked(data.item_id, id)) {
+      LOG_ERROR("Failed to insert ScalarData for ID {}: duplicate item_id '{}'", id, data.item_id);
+      return false;
+    }
+
     auto serialized = data.serialize();
     rocksdb::Slice value_slice(serialized.data(), serialized.size());
 
     rocksdb::WriteBatch batch;
+    if (old_data.has_value()) {
+      if (resolved_key != key) {
+        batch.Delete(resolved_key);
+      }
+      delete_item_id_index_if_owned(batch, old_data->item_id, id);
+      remove_field_indexes(batch, id, *old_data);
+    }
     batch.Put(key, value_slice);
 
     // Add secondary index: item_id -> internal_id
@@ -244,7 +267,9 @@ class RocksDBStorage {
       return false;
     }
 
-    ++cached_count_;
+    if (!replacing_existing) {
+      ++cached_count_;
+    }
     return true;
   }
 
@@ -261,27 +286,70 @@ class RocksDBStorage {
    */
   template <typename Iterator>
   auto batch_insert(IDType start_id, Iterator begin, Iterator end) -> bool {
+    std::lock_guard<std::mutex> lock(write_mutex_);
     ensure_writable("batch_insert");
-    rocksdb::WriteBatch batch;
-    IDType current_id = start_id;
-    size_t count = 0;
+    struct PendingRecord {
+      IDType id;
+      ScalarData data;
+      std::optional<ScalarData> old_data;
+      std::string resolved_key;
+    };
 
-    for (auto it = begin; it != end; ++it, ++current_id) {
-      std::string key = data_key(current_id);
-      auto serialized = it->serialize();
+    std::vector<PendingRecord> records;
+    std::unordered_map<std::string, IDType> batch_item_ids;
+
+    IDType preflight_id = start_id;
+    for (auto it = begin; it != end; ++it, ++preflight_id) {
+      PendingRecord record{preflight_id, *it, std::nullopt, {}};
+
+      if (!record.data.item_id.empty()) {
+        if (!batch_item_ids.emplace(record.data.item_id, preflight_id).second) {
+          LOG_ERROR("Batch insert failed: duplicate item_id '{}' in batch", record.data.item_id);
+          return false;
+        }
+      }
+
+      std::string serialized;
+      if (get_data_value(preflight_id, &serialized, &record.resolved_key)) {
+        record.old_data = ScalarData::deserialize(serialized.data(), serialized.size());
+      }
+      records.push_back(std::move(record));
+    }
+
+    for (const auto &record : records) {
+      if (!item_id_available_for_locked(record.data.item_id, record.id)) {
+        LOG_ERROR("Batch insert failed: duplicate item_id '{}'", record.data.item_id);
+        return false;
+      }
+    }
+
+    rocksdb::WriteBatch batch;
+    size_t inserted_count = 0;
+
+    for (const auto &record : records) {
+      std::string key = data_key(record.id);
+      if (record.old_data.has_value()) {
+        if (record.resolved_key != key) {
+          batch.Delete(record.resolved_key);
+        }
+        delete_item_id_index_if_owned(batch, record.old_data->item_id, record.id);
+        remove_field_indexes(batch, record.id, *record.old_data);
+      } else {
+        ++inserted_count;
+      }
+
+      auto serialized = record.data.serialize();
       batch.Put(key, rocksdb::Slice(serialized.data(), serialized.size()));
 
       // Add secondary index
-      if (!it->item_id.empty()) {
-        std::string idx_key = item_id_index_key(it->item_id);
-        rocksdb::Slice id_slice(reinterpret_cast<const char *>(&current_id), sizeof(IDType));
+      if (!record.data.item_id.empty()) {
+        std::string idx_key = item_id_index_key(record.data.item_id);
+        rocksdb::Slice id_slice(reinterpret_cast<const char *>(&record.id), sizeof(IDType));
         batch.Put(idx_key, id_slice);
       }
 
       // Add field indexes for indexed fields
-      add_field_indexes(batch, current_id, *it);
-
-      ++count;
+      add_field_indexes(batch, record.id, record.data);
     }
 
     rocksdb::Status status = db_->Write(rocksdb::WriteOptions(), &batch);
@@ -290,7 +358,7 @@ class RocksDBStorage {
       return false;
     }
 
-    cached_count_ += count;
+    cached_count_ += inserted_count;
     return true;
   }
 
@@ -298,6 +366,7 @@ class RocksDBStorage {
    * @brief Remove ScalarData by ID
    */
   auto remove(IDType id) -> bool {
+    std::lock_guard<std::mutex> lock(write_mutex_);
     ensure_writable("remove");
 
     std::string serialized;
@@ -312,9 +381,7 @@ class RocksDBStorage {
     rocksdb::WriteBatch batch;
     batch.Delete(resolved_key);
 
-    if (!data.item_id.empty()) {
-      batch.Delete(item_id_index_key(data.item_id));
-    }
+    delete_item_id_index_if_owned(batch, data.item_id, id);
 
     // Remove field indexes
     remove_field_indexes(batch, id, data);
@@ -335,6 +402,7 @@ class RocksDBStorage {
    * @brief Update ScalarData
    */
   auto update(IDType id, const ScalarData &data) -> bool {
+    std::lock_guard<std::mutex> lock(write_mutex_);
     ensure_writable("update");
 
     std::string serialized_value;
@@ -344,6 +412,10 @@ class RocksDBStorage {
       return false;
     }
     auto old_data = ScalarData::deserialize(serialized_value.data(), serialized_value.size());
+    if (!item_id_available_for_locked(data.item_id, id)) {
+      LOG_ERROR("Failed to update ID {}: duplicate item_id '{}'", id, data.item_id);
+      return false;
+    }
 
     rocksdb::WriteBatch batch;
 
@@ -357,9 +429,7 @@ class RocksDBStorage {
 
     // Update secondary index if item_id changed
     if (old_data.item_id != data.item_id) {
-      if (!old_data.item_id.empty()) {
-        batch.Delete(item_id_index_key(old_data.item_id));
-      }
+      delete_item_id_index_if_owned(batch, old_data.item_id, id);
       if (!data.item_id.empty()) {
         rocksdb::Slice id_slice(reinterpret_cast<const char *>(&id), sizeof(IDType));
         batch.Put(item_id_index_key(data.item_id), id_slice);
@@ -394,6 +464,16 @@ class RocksDBStorage {
     IDType id;
     std::memcpy(&id, value.data(), sizeof(IDType));
     return id;
+  }
+
+  [[nodiscard]] auto item_id_available(const std::string &item_id,
+                                       std::optional<IDType> allowed_id = std::nullopt) const
+      -> bool {
+    if (item_id.empty()) {
+      return true;
+    }
+    auto existing = find_by_item_id(item_id);
+    return !existing.has_value() || (allowed_id.has_value() && *existing == *allowed_id);
   }
 
   /**
@@ -823,6 +903,23 @@ class RocksDBStorage {
 
   static auto count_key() -> std::string { return "__COUNT__"; }
 
+  [[nodiscard]] auto item_id_available_for_locked(const std::string &item_id,
+                                                  IDType allowed_id) const -> bool {
+    return item_id_available(item_id, std::optional<IDType>{allowed_id});
+  }
+
+  void delete_item_id_index_if_owned(rocksdb::WriteBatch &batch,
+                                     const std::string &item_id,
+                                     IDType owner_id) const {
+    if (item_id.empty()) {
+      return;
+    }
+    auto existing = find_by_item_id(item_id);
+    if (existing.has_value() && *existing == owner_id) {
+      batch.Delete(item_id_index_key(item_id));
+    }
+  }
+
   /**
    * @brief Add field indexes for indexed fields
    */
@@ -854,6 +951,7 @@ class RocksDBStorage {
   std::unique_ptr<rocksdb::DB> db_ = nullptr;
   RocksDBConfig config_;
   mutable std::atomic<size_t> cached_count_;
+  mutable std::mutex write_mutex_;
   bool read_only_{false};
 };
 

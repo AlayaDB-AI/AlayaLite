@@ -64,6 +64,42 @@ class TestCollection(unittest.TestCase):
         result = self.collection.filter_query({})
         self.assertEqual(len(result["id"]), 2)
 
+    def test_initial_insert_rejects_duplicate_item_id(self):
+        """First-batch insert should reject duplicate non-empty item IDs before building."""
+        items = [
+            ("dup", "Document 1", np.array([0.1, 0.2, 0.3], dtype=np.float32), {"category": "A"}),
+            ("dup", "Document 2", np.array([0.4, 0.5, 0.6], dtype=np.float32), {"category": "B"}),
+        ]
+
+        with self.assertRaisesRegex(RuntimeError, "Duplicate item_id: dup"):
+            self.collection.insert(items)
+
+    def test_incremental_insert_rejects_duplicate_item_id_and_keeps_original(self):
+        """Incremental insert should not mutate graph/vector/scalar state on duplicate item_id."""
+        self.collection.insert([("item_a", "Original", np.array([0.1, 0.2, 0.3], dtype=np.float32), {"category": "A"})])
+
+        with self.assertRaisesRegex(RuntimeError, "Duplicate item_id: item_a"):
+            self.collection.insert(
+                [("item_a", "Duplicate", np.array([0.4, 0.5, 0.6], dtype=np.float32), {"category": "B"})]
+            )
+
+        result = self.collection.get_by_id(["item_a"])
+        self.assertEqual(result["document"], ["Original"])
+        self.assertEqual(result["metadata"], [{"category": "A"}])
+        self.assertEqual(len(self.collection.filter_query({})["id"]), 1)
+
+    def test_fit_rejects_duplicate_item_id(self):
+        """Columnar fit should reject duplicate non-empty item IDs."""
+        vectors = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=np.float32)
+
+        with self.assertRaisesRegex(RuntimeError, "Duplicate item_id: dup"):
+            self.collection.fit(
+                vectors,
+                item_ids=["dup", "dup"],
+                documents=["Document 1", "Document 2"],
+                metadata_list=[{"category": "A"}, {"category": "B"}],
+            )
+
     def test_get_cpp_index_before_first_insert_has_actionable_error(self):
         """Accessing the native index before first insert should explain how to initialize it."""
         with self.assertRaisesRegex(RuntimeError, "Call insert\\(\\) with the first batch of data first"):

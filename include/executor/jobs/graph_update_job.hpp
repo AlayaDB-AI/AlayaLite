@@ -79,6 +79,7 @@ class GraphUpdateJob {
 
   auto insert_and_update(DataType *query, uint32_t ef, const ScalarData *scalar_data = nullptr)
       -> IDType {
+    validate_scalar_insertable(scalar_data);
     uint32_t search_size = graph_->max_nbrs_;
     std::vector<IDType> search_results(search_size, static_cast<IDType>(-1));
 
@@ -193,6 +194,23 @@ class GraphUpdateJob {
 
  private:
   static constexpr auto invalid_id() -> IDType { return std::numeric_limits<IDType>::max(); }
+
+  void validate_scalar_insertable(const ScalarData *scalar_data) const {
+    if constexpr (DistanceSpaceType::has_scalar_data) {
+      if (scalar_data == nullptr || scalar_data->item_id.empty()) {
+        return;
+      }
+      auto *storage = space_->get_scalar_storage();
+      if (storage == nullptr) {
+        throw std::runtime_error("Scalar storage is not initialized");
+      }
+      if (!storage->item_id_available(scalar_data->item_id)) {
+        throw std::runtime_error("Duplicate item_id: " + scalar_data->item_id);
+      }
+    } else {
+      (void)scalar_data;
+    }
+  }
 
   auto insert_search_space(DataType *query, const ScalarData *scalar_data) -> IDType {
     if constexpr (DistanceSpaceType::has_scalar_data) {
