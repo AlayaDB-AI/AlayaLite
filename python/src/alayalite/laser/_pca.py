@@ -7,7 +7,7 @@ import numpy as np
 from sklearn.decomposition import IncrementalPCA
 from tqdm import tqdm
 
-from alayalite.laser.io import read_fbin
+from alayalite.laser._io import read_fbin
 
 
 def save_pca_params(pca, filepath):
@@ -32,28 +32,6 @@ def save_pca_params(pca, filepath):
     print(f"  - Dimension: {dim}")
     print(f"  - Mean shape: {mean.shape}")
     print(f"  - Components shape: {components.shape}")
-
-
-class PCATransformer:
-    """Lightweight PCA transformer reconstructed from saved parameters."""
-
-    def __init__(self, mean, components):
-        self.mean_ = mean
-        self.components_ = components
-        self.n_components_ = components.shape[0]
-
-    def transform(self, X):  # pylint: disable=invalid-name
-        return np.dot(X - self.mean_, self.components_.T)
-
-
-def load_pca_params(filepath):
-    """Load PCA parameters from binary file and return a PCATransformer."""
-    with open(filepath, "rb") as f:
-        (dim,) = struct.unpack("<Q", f.read(8))
-        mean = np.frombuffer(f.read(dim * 4), dtype=np.float32).copy()
-        components = np.frombuffer(f.read(dim * dim * 4), dtype=np.float32).copy().reshape(dim, dim)
-    print(f"PCA parameters loaded from {filepath} (dim={dim})")
-    return PCATransformer(mean, components)
 
 
 def _canonicalize_pca_sign(pca):

@@ -4,6 +4,13 @@ on         :
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: Run integration tests (requires self-hosted runner with LASER build)
+        required: false
+        default: 'false'
+        type: boolean
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -76,7 +83,7 @@ jobs       :
 
   py-unit-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
 
@@ -84,10 +91,24 @@ jobs       :
       uses: ./.github/actions/cache-restore
 
     - name: Install uv
-        # if: runner.os == 'macOS'
       uses: astral-sh/setup-uv@v5
 
-    - name: Run Python unit tests
+    - name: Run Python unit/mock tests
       run: |
         uv sync --dev
-        uv run pytest
+        uv run pytest -v
+
+  py-integration-test:
+    runs-on: [self-hosted, laser]
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration == 'true'
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Run Python integration tests
+      run: |
+        uv sync --dev --group laser
+        uv run pytest -m integration -v

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 from alayalite import laser
-from alayalite.laser.io import read_fbin
+from alayalite.laser._io import read_fbin
 
 
 def _measure(idx, queries, *, k, ef, threads, beam, warmup, runs):

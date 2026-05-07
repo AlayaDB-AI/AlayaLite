@@ -35,7 +35,7 @@ def _write_fbin(path: Path, vectors: np.ndarray) -> None:
 
 
 def _run_pca_once(base_path: Path, out_dir: Path) -> tuple[bytes, bytes]:
-    from alayalite.laser.pca import (  # pylint: disable=import-outside-toplevel
+    from alayalite.laser._pca import (  # pylint: disable=import-outside-toplevel
         fit_incremental_pca,
         pca_transform_and_save,
         sample_vectors_from_fbin,

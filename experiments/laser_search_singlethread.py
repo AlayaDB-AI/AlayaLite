@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 from alayalite import laser
-from alayalite.laser.io import read_fbin, read_ibin
+from alayalite.laser._io import read_fbin, read_ibin
 
 
 def _recall_at_k(predictions: np.ndarray, gt: np.ndarray, k: int) -> float:

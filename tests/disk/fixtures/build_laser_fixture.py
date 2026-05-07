@@ -181,11 +181,11 @@ def _ensure_required_imports() -> tuple[object, object]:
 
 def _ensure_optional_imports() -> tuple[object, object, object]:
     try:
-        from alayalite.laser.io import read_fbin  # pylint: disable=import-outside-toplevel
-        from alayalite.laser.medoid import (  # pylint: disable=import-outside-toplevel
+        from alayalite.laser._io import read_fbin  # pylint: disable=import-outside-toplevel
+        from alayalite.laser._medoid import (  # pylint: disable=import-outside-toplevel
             generate_and_save_medoids,
         )
-        from alayalite.laser.pca import (  # pylint: disable=import-outside-toplevel
+        from alayalite.laser._pca import (  # pylint: disable=import-outside-toplevel
             fit_incremental_pca,
             pca_transform_and_save,
             save_pca_params,
@@ -194,11 +194,11 @@ def _ensure_optional_imports() -> tuple[object, object, object]:
         first_error = exc
         _ensure_python_path()
         try:
-            from alayalite.laser.io import read_fbin  # pylint: disable=import-outside-toplevel
-            from alayalite.laser.medoid import (  # pylint: disable=import-outside-toplevel
+            from alayalite.laser._io import read_fbin  # pylint: disable=import-outside-toplevel
+            from alayalite.laser._medoid import (  # pylint: disable=import-outside-toplevel
                 generate_and_save_medoids,
             )
-            from alayalite.laser.pca import (  # pylint: disable=import-outside-toplevel
+            from alayalite.laser._pca import (  # pylint: disable=import-outside-toplevel
                 fit_incremental_pca,
                 pca_transform_and_save,
                 save_pca_params,

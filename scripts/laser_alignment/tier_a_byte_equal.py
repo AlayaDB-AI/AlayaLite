@@ -79,10 +79,10 @@ def sha256_of(path: Path) -> str:
 
 
 def parse_pca_bin(path: Path) -> tuple[int, int, np.ndarray, np.ndarray]:
-    """Parse the laser.pca.save_pca_params binary layout.
+    """Parse the laser._pca.save_pca_params binary layout.
 
     File format (see Laser/src/laser/pca.py and
-    AlayaLite/python/src/alayalite/laser/pca.py::save_pca_params):
+    AlayaLite/python/src/alayalite/laser/_pca.py::save_pca_params):
       uint64   dim                      (= n_components_ = main_dim)
       float32  mean[raw_dim]
       float32  components[dim, raw_dim] (row-major)

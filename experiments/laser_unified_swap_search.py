@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 from alayalite import laser
-from alayalite.laser.io import read_fbin
+from alayalite.laser._io import read_fbin
 
 
 def _measure(idx, queries: np.ndarray, *, k: int, ef: int, threads: int, beam: int, warmup: int, runs: int) -> float:

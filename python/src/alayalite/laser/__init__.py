@@ -27,6 +27,7 @@ from ._idempotence import (
     validate_pca_params,
     validate_vamana_index,
 )
+from ._io import write_fbin
 from ._seeds import derive_subseeds
 
 PathLikeStr = Union[str, os.PathLike[str]]
@@ -69,14 +70,6 @@ def _read_fbin_header(path: str) -> tuple[int, int]:
     if size != expected:
         raise ValueError(f"invalid fbin payload size for {path}: expected {expected}, got {size}")
     return int(n), int(dim)
-
-
-def _write_fbin(path: str, vectors: np.ndarray) -> None:
-    arr = np.ascontiguousarray(vectors, dtype=np.float32)
-    n, dim = arr.shape
-    with open(path, "wb") as f:
-        np.array([n, dim], dtype=np.int32).tofile(f)
-        arr.tofile(f)
 
 
 def _parse_index_filename(path: str) -> tuple[int, int]:
@@ -182,7 +175,7 @@ class Index:
 
         if vectors_arr is not None:
             if not (skip_existing and validate_pca_base(raw_fbin_path, n, raw_dim)):
-                _write_fbin(raw_fbin_path, vectors_arr)
+                write_fbin(raw_fbin_path, vectors_arr)
 
         pca_base_path = f"{prefix}_pca_base.fbin"
         pca_params_path = f"{prefix}_pca.bin"
@@ -192,7 +185,7 @@ class Index:
                 and validate_pca_base(pca_base_path, n, raw_dim)
                 and validate_pca_params(pca_params_path, raw_dim)
             ):
-                from alayalite.laser.pca import (  # pylint: disable=import-outside-toplevel
+                from alayalite.laser._pca import (  # pylint: disable=import-outside-toplevel
                     fit_incremental_pca,
                     pca_transform_and_save,
                     sample_vectors_from_fbin,
@@ -212,7 +205,7 @@ class Index:
 
         if not disable_medoid:
             if not (skip_existing and validate_medoids(prefix)):
-                from alayalite.laser.medoid import generate_and_save_medoids  # pylint: disable=import-outside-toplevel
+                from alayalite.laser._medoid import generate_and_save_medoids  # pylint: disable=import-outside-toplevel
 
                 generate_and_save_medoids(
                     pca_base_path,

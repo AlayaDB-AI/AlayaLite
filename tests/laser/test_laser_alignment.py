@@ -203,7 +203,7 @@ def _sha256(path: Path) -> str:
 
 
 def _compare_pca(baseline: Path, ported: Path) -> tuple[bool, str]:
-    """The .pca.bin file is written by `alayalite.laser.pca.save_pca_params`
+    """The .pca.bin file is written by `alayalite.laser._pca.save_pca_params`
     as:
         struct: <Q>   (uint64 dim)
         float32: mean[dim]

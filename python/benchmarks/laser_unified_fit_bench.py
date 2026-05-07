@@ -139,8 +139,8 @@ def _build_manual_pipeline(
 ) -> str:
     # pylint: disable=import-outside-toplevel
     from alayalite._alayalitepy import laser as raw_laser
-    from alayalite.laser.medoid import generate_and_save_medoids
-    from alayalite.laser.pca import (
+    from alayalite.laser._medoid import generate_and_save_medoids
+    from alayalite.laser._pca import (
         fit_incremental_pca,
         pca_transform_and_save,
         sample_vectors_from_fbin,
@@ -351,7 +351,7 @@ def _run_one_dataset(
 ) -> dict[str, Any]:
     # pylint: disable=import-outside-toplevel
     from alayalite import laser
-    from alayalite.laser.io import read_fbin, read_ibin
+    from alayalite.laser._io import read_fbin, read_ibin
 
     queries = np.asarray(read_fbin(str(spec.query_fbin), use_mmap=False), dtype=np.float32)
     gt = np.asarray(read_ibin(str(spec.gt_ibin)), dtype=np.int32)

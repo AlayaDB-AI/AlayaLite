@@ -22,10 +22,13 @@ import numpy as np
 import pytest
 from _laser_support import DISK_LASER_SUPPORTED  # noqa: E402
 
-pytestmark = pytest.mark.skipif(
-    not DISK_LASER_SUPPORTED,
-    reason="disk_laser is not supported on this build/platform",
-)
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not DISK_LASER_SUPPORTED,
+        reason="disk_laser is not supported on this build/platform",
+    ),
+]
 
 
 def _vectors(n: int = 512, dim: int = 128, seed: int = 7) -> np.ndarray:

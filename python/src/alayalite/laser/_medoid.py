@@ -4,7 +4,7 @@ import faiss
 import numpy as np
 from tqdm import tqdm
 
-from alayalite.laser.io import read_fbin, write_fbin, write_ibin
+from alayalite.laser._io import read_fbin, write_fbin, write_ibin
 
 
 def generate_medoids(base_path, n_clusters, sample_ratio=0.10, seed=None):

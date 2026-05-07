@@ -14,9 +14,12 @@ Usage:
 """
 
 import argparse
+import builtins
+import functools
 import gc
 import os
 import sys
+from math import log10
 from time import time
 
 # tomllib is stdlib from Python 3.11 onwards; fall back to the tomli backport
@@ -27,18 +30,67 @@ else:
     import tomli as tomllib
 
 import numpy as np  # pylint: disable=wrong-import-position
-from alayalite.laser.pretty import (  # pylint: disable=wrong-import-position
-    BOLD,
-    GREEN,
-    RED,
-    RESET,
-    YELLOW,
-    header,
-    info,
-    separator,
-    step_header,
-    success,
-)
+import psutil  # pylint: disable=wrong-import-position
+
+# Keep print and C++ stdout in sync.
+builtins.print = functools.partial(builtins.print, flush=True)
+
+# pylint: disable=invalid-name
+DIM = "\033[2m"
+BOLD = "\033[1m"
+GREEN = "\033[32m"
+CYAN = "\033[36m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
+RESET = "\033[0m"
+
+if not sys.stdout.isatty():
+    DIM = BOLD = GREEN = CYAN = YELLOW = RED = RESET = ""
+
+
+def header(text, width=60):
+    print(f"\n{BOLD}{CYAN}" + "=" * width + f"{RESET}")
+    print(f"{BOLD}{CYAN}  {text}{RESET}")
+    print(f"{BOLD}{CYAN}" + "=" * width + f"{RESET}")
+
+
+def step_header(name, width=40):
+    print(f"\n{BOLD}>> {name.upper()}{RESET}")
+    print(f"{DIM}" + "─" * width + f"{RESET}")
+
+
+def info(tag, msg):
+    print(f"  {DIM}[{tag}]{RESET} {msg}")
+
+
+def success(tag, msg):
+    print(f"  {GREEN}[{tag}]{RESET} {msg}")
+
+
+def warn(tag, msg):
+    print(f"  {YELLOW}[{tag}]{RESET} {msg}")
+
+
+def separator(width=56):
+    print(f"  {DIM}" + "─" * width + f"{RESET}")
+
+
+def beam_size_gen(k):
+    assert k >= 1
+    e = max(0, int(log10(k)) - 1)
+    index = 0
+    bases = [10, 15, 20, 25, 30, 40, 50, 60, 70, 80]
+    while True:
+        yield bases[index] * int(10**e)
+        index += 1
+        if index == len(bases):
+            e += 1
+            index = 0
+
+
+def get_memory_usage():
+    return psutil.Process().memory_info().rss / 1024 / 1024
+
 
 STEPS = ["vamana", "pca", "medoid", "index", "search"]
 
@@ -339,8 +391,6 @@ def step_index(cfg):
 
 
 def _find_efs(index, query, gt, nq, topk):
-    from alayalite.laser.beam_size import beam_size_gen  # pylint: disable=import-outside-toplevel
-
     efs = []
     gen = beam_size_gen(topk)
     prev_recall = 0
@@ -374,8 +424,7 @@ def step_search(cfg):
     # pylint: disable=import-outside-toplevel
     import pandas as pd
     from alayalite import laser
-    from alayalite.laser.io import read_fbin, read_ibin
-    from alayalite.laser.memory import get_memory_usage
+    from alayalite.laser._io import read_fbin, read_ibin
 
     name = cfg["name"]
     ddir = data_dir(cfg)

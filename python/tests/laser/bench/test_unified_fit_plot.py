@@ -21,6 +21,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 
 def test_plot_cli_writes_curve_png(tmp_path: Path) -> None:
     report = {

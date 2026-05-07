@@ -62,8 +62,11 @@ test: test-cpp test-py ## Run all tests (C++ and Python)
 test-cpp: build ## Run C++ tests with CTest
 	@cd $(BUILD_DIR) && ctest $(CTEST_FLAGS) -j$(JOBS)
 
-test-py: ## Run Python tests with pytest
+test-py: ## Run Python unit/mock tests (fast, default)
 	@uv run pytest $(PYTEST_FLAGS)
+
+test-py-integration: ## Run Python integration tests (builds real indices; requires LASER build)
+	@uv run pytest $(PYTEST_FLAGS) -m integration
 
 test-py-cov: ## Run Python tests with coverage
 	@uv run pytest $(PYTEST_FLAGS) --cov=python/src --cov-report=html
