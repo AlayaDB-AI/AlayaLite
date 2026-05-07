@@ -25,6 +25,12 @@ import numpy as np
 import pytest
 
 
+class _FakeBuildParams:
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+
 def _load_adapter_module(monkeypatch):
     repo_root = Path(__file__).resolve().parents[4]
     module_path = repo_root / "python" / "adapters" / "annbenchmark" / "alayalite" / "module.py"
@@ -50,7 +56,7 @@ def _load_adapter_module(monkeypatch):
     fake_alayalite = types.ModuleType("alayalite")
     fake_alayalite.Client = _Stub
     fake_alayalite.Index = _Stub
-    fake_alayalite.laser = types.SimpleNamespace(Index=_Stub)
+    fake_alayalite.laser = types.SimpleNamespace(Index=_Stub, BuildParams=_FakeBuildParams)
 
     monkeypatch.setitem(sys.modules, "ann_benchmarks", ann_pkg)
     monkeypatch.setitem(sys.modules, "ann_benchmarks.algorithms", algo_pkg)
@@ -134,7 +140,12 @@ def test_fit_calls_unified_index_fit(monkeypatch, tmp_path):
         def from_prefix(cls, prefix, dram_budget_gb=1.0):
             raise AssertionError("from_prefix should not run during fit()")
 
-    monkeypatch.setattr(module, "laser", types.SimpleNamespace(Index=FakeIndex), raising=False)
+    monkeypatch.setattr(
+        module,
+        "laser",
+        types.SimpleNamespace(Index=FakeIndex, BuildParams=_FakeBuildParams),
+        raising=False,
+    )
     monkeypatch.setattr(module, "_laser_runtime_supported", lambda: True, raising=False)
 
     adapter = module.AlayaLiteDiskLaser("euclidean", 256, _method_param(work_root=str(tmp_path)))
@@ -145,9 +156,10 @@ def test_fit_calls_unified_index_fit(monkeypatch, tmp_path):
     assert calls[0][1] == (512, 256)
     kwargs = calls[0][2]
     assert kwargs["name"] == "dsqg_seg_00000001"
-    assert kwargs["metric"] == "l2"
-    assert kwargs["main_dim"] == 256
-    assert kwargs["R"] == 64
+    build_params = kwargs["build_params"]
+    assert build_params.metric == "l2"
+    assert build_params.main_dim == 256
+    assert build_params.R == 64
     assert kwargs["auto_load"] is False
     assert kwargs["skip_existing"] is False
     assert kwargs["num_threads"] == 2
@@ -196,7 +208,12 @@ def test_set_query_arguments_loads_from_prefix_and_sets_params(monkeypatch, tmp_
             calls.append(("from_prefix", prefix, dram_budget_gb))
             return FakeLoaded()
 
-    monkeypatch.setattr(module, "laser", types.SimpleNamespace(Index=FakeIndex), raising=False)
+    monkeypatch.setattr(
+        module,
+        "laser",
+        types.SimpleNamespace(Index=FakeIndex, BuildParams=_FakeBuildParams),
+        raising=False,
+    )
     monkeypatch.setattr(module, "_laser_runtime_supported", lambda: True, raising=False)
 
     adapter = module.AlayaLiteDiskLaser("l2", 256, _method_param(work_root=str(tmp_path), search_dram_budget_gb=2.5))
@@ -241,7 +258,12 @@ def test_prepare_query_run_and_batch_query(monkeypatch, tmp_path):
         def from_prefix(cls, prefix, dram_budget_gb=1.0):  # pylint: disable=unused-argument
             return loaded
 
-    monkeypatch.setattr(module, "laser", types.SimpleNamespace(Index=FakeIndex), raising=False)
+    monkeypatch.setattr(
+        module,
+        "laser",
+        types.SimpleNamespace(Index=FakeIndex, BuildParams=_FakeBuildParams),
+        raising=False,
+    )
     monkeypatch.setattr(module, "_laser_runtime_supported", lambda: True, raising=False)
 
     adapter = module.AlayaLiteDiskLaser("l2", 256, _method_param(work_root=str(tmp_path)))
