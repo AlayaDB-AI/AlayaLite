@@ -1,169 +1,134 @@
 #!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.10"
-# dependencies = ["matplotlib"]
-# ///
-"""
-GIST-1M: Recall@10 vs QPS (LASER 2×2 Cross-Benchmark)
+"""Plot Recall@10 vs QPS for all (laser, vamana_tag) cells in a config.
 
-Data embedded for reproducibility.
-Run: uv run python experiments/laser_cross_bench/plot_recall_qps.py
+Reads CSVs from ``<tmp_dir>/results/{orig,lite}_<tag>.csv`` (no embedded data).
+Cells whose CSV is missing are skipped silently::
+
+    # Default: all cells in config (e.g. 6 curves for 3 vamana_sources × 2 lasers)
+    python plot_recall_qps.py --config configs/gist1m.toml
+
+    # Subset: only the L=100 vs L=200 comparison (mirrors the old _l200 plot)
+    python plot_recall_qps.py --config configs/gist1m.toml \\
+        --tags alayalite_l100 alayalite_l200
+
+    # Only one vamana source, both lasers (mirrors the old 4-curve plot's diskann pair)
+    python plot_recall_qps.py --config configs/gist1m.toml --tags diskann
 """
 
+from __future__ import annotations
+
+import argparse
+import csv
+import sys
 from pathlib import Path
 
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402  pylint: disable=wrong-import-position
 
-# ---------------------------------------------------------------------------
-# embedded data
-# ---------------------------------------------------------------------------
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import CrossBenchConfig  # noqa: E402  pylint: disable=wrong-import-position
 
-DATA: dict[str, list[tuple[int, float, float]]] = {
-    # (ef, qps, recall_at_10)
-    "orig_diskann": [
-        (80, 964.91, 0.9165),
-        (90, 934.07, 0.9267),
-        (100, 898.75, 0.9348),
-        (110, 867.03, 0.9420),
-        (130, 816.99, 0.9526),
-        (150, 770.60, 0.9595),
-        (200, 682.96, 0.9731),
-        (250, 614.03, 0.9798),
-        (300, 558.18, 0.9842),
-        (400, 475.14, 0.9897),
-        (500, 413.15, 0.9927),
-    ],
-    "orig_lite": [
-        (80, 979.26, 0.8862),
-        (90, 954.81, 0.9002),
-        (100, 913.52, 0.9111),
-        (110, 883.83, 0.9239),
-        (130, 830.88, 0.9369),
-        (150, 791.99, 0.9476),
-        (200, 704.06, 0.9628),
-        (250, 634.14, 0.9726),
-        (300, 575.93, 0.9775),
-        (400, 492.00, 0.9836),
-        (500, 426.20, 0.9876),
-    ],
-    "lite_diskann": [
-        (80, 948.86, 0.9074),
-        (90, 922.60, 0.9178),
-        (100, 886.89, 0.9283),
-        (110, 873.26, 0.9364),
-        (130, 814.51, 0.9495),
-        (150, 763.03, 0.9566),
-        (200, 674.21, 0.9679),
-        (250, 605.22, 0.9772),
-        (300, 552.68, 0.9813),
-        (400, 475.06, 0.9877),
-        (500, 413.32, 0.9906),
-    ],
-    "lite_lite": [
-        (80, 980.36, 0.8819),
-        (90, 940.34, 0.8975),
-        (100, 904.08, 0.9093),
-        (110, 880.90, 0.9175),
-        (130, 841.47, 0.9334),
-        (150, 789.62, 0.9459),
-        (200, 708.63, 0.9596),
-        (250, 634.36, 0.9698),
-        (300, 572.11, 0.9746),
-        (400, 497.94, 0.9820),
-        (500, 431.60, 0.9859),
-    ],
-}
+# Stable colour palette for vamana sources; cycled if the config has more
+# sources than colours. Linestyle distinguishes orig (solid) vs lite (dashed).
+_PALETTE = ["#2196F3", "#FF9800", "#4CAF50", "#9C27B0", "#F44336", "#607D8B"]
+_MARKERS = ["o", "s", "^", "D", "v", "P"]
+_ANNOTATE_EFS = {80, 500}
 
-SERIES_STYLE: dict[str, dict] = {
-    "orig_diskann": {
-        "label": "Orig + DiskANN Vamana",
-        "color": "#2196F3",
-        "linestyle": "-",
-        "marker": "o",
-    },
-    "orig_lite": {
-        "label": "Orig + AlayaLite Vamana",
-        "color": "#2196F3",
-        "linestyle": "--",
-        "marker": "s",
-    },
-    "lite_diskann": {
-        "label": "AlayaLite + DiskANN Vamana",
-        "color": "#FF9800",
-        "linestyle": "-",
-        "marker": "o",
-    },
-    "lite_lite": {
-        "label": "AlayaLite + AlayaLite Vamana",
-        "color": "#FF9800",
-        "linestyle": "--",
-        "marker": "s",
-    },
-}
 
-ANNOTATE_EFS = {80, 500}
-
-OUTPUT_PATH = Path("/md1/huangliang/alaya-dev/tmp/laser_cross_bench/results/recall_qps.png")
-
-# ---------------------------------------------------------------------------
-# plotting
-# ---------------------------------------------------------------------------
+def _load_rows(path: Path) -> list[tuple[int, float, float]]:
+    rows: list[tuple[int, float, float]] = []
+    with path.open() as f:
+        for row in csv.DictReader(f):
+            rows.append((int(row["ef"]), float(row["qps"]), float(row["recall_at_10"])))
+    return sorted(rows)
 
 
 def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--config", required=True, type=Path)
+    p.add_argument(
+        "--tags",
+        nargs="+",
+        default=None,
+        help="Subset of vamana_source tags to plot (default: all in config)",
+    )
+    p.add_argument("--output", type=Path, default=None, help="Output PNG path")
+    p.add_argument("--annotate-efs", type=int, nargs="*", default=sorted(_ANNOTATE_EFS))
+    args = p.parse_args()
+
+    cfg = CrossBenchConfig.from_toml(args.config)
+    selected = list(cfg.vamana_sources)
+    if args.tags is not None:
+        wanted = set(args.tags)
+        selected = [vs for vs in selected if vs.tag in wanted]
+        unknown = wanted - {vs.tag for vs in cfg.vamana_sources}
+        if unknown:
+            raise ValueError(f"unknown vamana tags: {sorted(unknown)}")
+
     fig, ax = plt.subplots(figsize=(10, 6))
+    annotate_efs = set(args.annotate_efs)
+    plotted = 0
 
-    for key, rows in DATA.items():
-        style = SERIES_STYLE[key]
-        recalls = [r[2] for r in rows]
-        qps = [r[1] for r in rows]
-        efs = [r[0] for r in rows]
+    for src_idx, source in enumerate(selected):
+        colour = _PALETTE[src_idx % len(_PALETTE)]
+        marker = _MARKERS[src_idx % len(_MARKERS)]
+        for laser, linestyle, marker_offset in (("orig", "-", 0), ("lite", "--", 4)):
+            csv_path = cfg.cell_csv(laser, source.tag)
+            if not csv_path.is_file():
+                print(f"[skip] missing: {csv_path}")
+                continue
+            rows = _load_rows(csv_path)
+            if not rows:
+                continue
+            efs = [r[0] for r in rows]
+            qps = [r[1] for r in rows]
+            recalls = [r[2] for r in rows]
+            label = f"{('Orig Laser' if laser == 'orig' else 'AlayaLite')} + {source.tag}"
+            ax.plot(
+                recalls,
+                qps,
+                color=colour,
+                linestyle=linestyle,
+                marker=marker,
+                markersize=6,
+                linewidth=1.8,
+                label=label,
+            )
+            for ef, recall, q in zip(efs, recalls, qps):
+                if ef in annotate_efs:
+                    x_offset = 4 if ef == min(annotate_efs) else -42
+                    ax.annotate(
+                        f"ef={ef}",
+                        xy=(recall, q),
+                        xytext=(x_offset, 8 + marker_offset),
+                        textcoords="offset points",
+                        fontsize=7.5,
+                        color=colour,
+                    )
+            plotted += 1
 
-        ax.plot(
-            recalls,
-            qps,
-            color=style["color"],
-            linestyle=style["linestyle"],
-            marker=style["marker"],
-            markersize=6,
-            linewidth=1.8,
-            label=style["label"],
-        )
-
-        for ef, recall, q in zip(efs, recalls, qps):
-            if ef in ANNOTATE_EFS:
-                # ef=80: annotate right-above; ef=500: annotate left-above
-                x_offset = 4 if ef == 80 else -42
-                y_offset = 8
-                ax.annotate(
-                    f"ef={ef}",
-                    xy=(recall, q),
-                    xytext=(x_offset, y_offset),
-                    textcoords="offset points",
-                    fontsize=7.5,
-                    color=style["color"],
-                )
+    if plotted == 0:
+        raise FileNotFoundError("no result CSVs found; run step3/step4 first")
 
     ax.set_title(
-        "GIST-1M: Recall@10 vs QPS (LASER 2×2 Cross-Benchmark)",
+        f"{cfg.name}: Recall@10 vs QPS (LASER cross-benchmark)",
         fontsize=13,
         fontweight="bold",
         pad=12,
     )
     ax.set_xlabel("Recall@10", fontsize=11)
     ax.set_ylabel("QPS (queries/sec)", fontsize=11)
-    ax.set_xlim(0.878, 0.997)
     ax.grid(color="#CCCCCC", linewidth=0.6, linestyle="-", alpha=0.7)
-    ax.legend(loc="lower right", fontsize=9.5, framealpha=0.9)
+    ax.legend(loc="lower left", fontsize=9, framealpha=0.9)
 
     fig.tight_layout()
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUTPUT_PATH, dpi=150)
+    out = args.output or (cfg.results_dir() / "recall_qps.png")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=150)
     plt.close(fig)
-    print(f"Saved: {OUTPUT_PATH}")
+    print(f"Saved: {out}")
 
 
 if __name__ == "__main__":

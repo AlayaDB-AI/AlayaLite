@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
-"""
-Full pipeline with AlayaLite Laser:
-  (pre-place Vamana) -> Index.fit -> EF sweep search -> CSV
+"""LASER cross-bench step4: AlayaLite Laser Index.fit -> EF sweep.
 
-Run twice (once per Vamana source):
+Run under the AlayaLite venv::
 
-    # DiskANN Vamana
-    numactl --interleave=all \\
-        uv run python experiments/laser_cross_bench/step4_bench_alayalite_laser.py \\
-        --vamana-path /md1/huangliang/alaya-dev/tmp/laser_cross_bench/vamana_diskann/gist_vamana.index \\
-        --tag diskann
+    /path/to/AlayaLite/.venv/bin/python step4_bench_alayalite_laser.py \\
+        --config configs/gist1m.toml \\
+        --vamana-tag diskann
 
-    # AlayaLite Vamana
-    numactl --interleave=all \\
-        uv run python experiments/laser_cross_bench/step4_bench_alayalite_laser.py \\
-        --vamana-path /md1/huangliang/alaya-dev/tmp/laser_cross_bench/vamana_alayalite/gist_vamana.index \\
-        --tag lite
+Outputs:
+  * Build artifacts under ``<tmp_dir>/lite_<vamana_tag>/laser_*``
+  * Search results CSV at ``<tmp_dir>/results/lite_<vamana_tag>.csv``
 """
 
 from __future__ import annotations
@@ -23,100 +17,109 @@ from __future__ import annotations
 import argparse
 import csv
 import shutil
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
-DATA = Path("/md1/huangliang/alaya-dev/data/gist1m")
-TMP = Path("/md1/huangliang/alaya-dev/tmp/laser_cross_bench")
-
-R = 64
-MAIN_DIM = 256
-L_VAMANA = 100  # AlayaLite vamana L (skipped if vamana pre-placed)
-ALPHA = 1.2
-EF_INDEXING = 200
-BUILD_THREADS = 48
-K = 10
-BEAM = 16
-WARMUP = 10
-RUNS = 30
-DRAM_BUDGET = 1.0
-SEED = 42
-EP_NUM = 300
-EFS = [80, 90, 100, 110, 130, 150, 200, 250, 300, 400, 500]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import CrossBenchConfig  # noqa: E402  pylint: disable=wrong-import-position
 
 
 def main() -> None:
-    p = argparse.ArgumentParser()
-    p.add_argument("--vamana-path", required=True, type=Path, help="Pre-built Vamana .index file (DiskANN format)")
-    p.add_argument("--tag", required=True, help="Label for the Vamana source (used in output path)")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--config", required=True, type=Path)
+    p.add_argument(
+        "--vamana-tag",
+        required=True,
+        help="Tag from config.vamana_sources (e.g. 'diskann', 'alayalite_l100')",
+    )
     args = p.parse_args()
 
-    from alayalite import laser
-    from alayalite.laser._io import read_fbin, read_ibin
+    cfg = CrossBenchConfig.from_toml(args.config)
+    source = cfg.find_vamana(args.vamana_tag)
+    vamana_path = cfg.vamana_path(source)
+    if not vamana_path.is_file():
+        raise FileNotFoundError(
+            f"Vamana graph not found at {vamana_path}. Run step1/step2 (builder={source.builder!r}) first."
+        )
 
-    output_dir = TMP / f"lite_{args.tag}"
+    from alayalite import laser  # pylint: disable=import-outside-toplevel
+    from alayalite.laser._io import read_fbin, read_ibin  # pylint: disable=import-outside-toplevel
+
+    base_fbin = cfg.dataset.base_fbin(cfg.paths.data_dir)
+    if not base_fbin.is_file():
+        raise FileNotFoundError(f"dataset base fbin not found: {base_fbin}")
+
+    output_dir = cfg.cell_dir("lite", source.tag)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Pre-place vamana so Index.fit(skip_existing=True) skips its internal build.
-    # Index.fit with name="laser" expects the vamana at "{output_dir}/laser_vamana_graph.index".
+    # Pre-place the externally-built Vamana so Index.fit(skip_existing=True)
+    # reuses it instead of triggering a fresh internal build.
     vamana_target = output_dir / "laser_vamana_graph.index"
     print(f"[prep] copying vamana -> {vamana_target}")
-    shutil.copyfile(args.vamana_path, vamana_target)
+    shutil.copyfile(vamana_path, vamana_target)
 
-    print(f"[fit] building LASER R{R}_MD{MAIN_DIM} threads={BUILD_THREADS}...")
+    print(f"[fit] building LASER R{cfg.build.R}_MD{cfg.build.main_dim} threads={cfg.bench.build_threads}...")
     t0 = time.perf_counter()
     idx = laser.Index.fit(
-        str(DATA / "gist_base.fbin"),
+        str(base_fbin),
         output_dir=output_dir,
         name="laser",
-        metric="l2",
-        main_dim=MAIN_DIM,
-        R=R,
-        L=L_VAMANA,
-        alpha=ALPHA,
-        ef_indexing=EF_INDEXING,
-        beam_width=BEAM,
-        num_threads=BUILD_THREADS,
-        ep_num=EP_NUM,
-        seed=SEED,
-        dram_budget_gb=DRAM_BUDGET,
-        disable_medoid=False,
+        build_params=laser.BuildParams(
+            main_dim=cfg.build.main_dim,
+            R=cfg.build.R,
+            L=cfg.build.L,
+            alpha=cfg.build.alpha,
+            ef_indexing=cfg.build.ef_indexing,
+            ep_num=cfg.build.ep_num,
+        ),
+        num_threads=cfg.bench.build_threads,
+        seed=cfg.bench.seed,
+        dram_budget_gb=cfg.bench.dram_budget_gb,
         skip_existing=True,
         auto_load=True,
     )
+    idx.set_params(
+        ef_search=cfg.build.ef_indexing,
+        num_threads=cfg.bench.search_threads,
+        beam_width=cfg.bench.beam,
+    )
     print(f"[fit] done in {time.perf_counter() - t0:.1f}s")
 
-    query = np.ascontiguousarray(read_fbin(str(DATA / "gist_query.fbin"), use_mmap=False), dtype=np.float32)
-    gt = np.asarray(read_ibin(str(DATA / "gist_gt.ibin")), dtype=np.int32)
-    NQ = query.shape[0]
-    print(f"[search] NQ={NQ:,} K={K} beam={BEAM} warmup={WARMUP} runs={RUNS}")
+    query = np.ascontiguousarray(
+        read_fbin(str(cfg.dataset.query_fbin(cfg.paths.data_dir)), use_mmap=False),
+        dtype=np.float32,
+    )
+    gt = np.asarray(read_ibin(str(cfg.dataset.gt_ibin(cfg.paths.data_dir))), dtype=np.int32)
+    nq = query.shape[0]
+    print(f"[search] NQ={nq:,} K={cfg.bench.k} beam={cfg.bench.beam} warmup={cfg.bench.warmup} runs={cfg.bench.runs}")
 
     rows: list[dict] = []
-    for ef in EFS:
-        idx.set_params(ef_search=ef, num_threads=1, beam_width=BEAM)
+    for ef in cfg.bench.ef_sweep:
+        idx.set_params(ef_search=ef, num_threads=cfg.bench.search_threads, beam_width=cfg.bench.beam)
 
-        for _ in range(WARMUP):
-            for i in range(NQ):
-                idx.search(query[i], K)
+        for _ in range(cfg.bench.warmup):
+            for i in range(nq):
+                idx.search(query[i], cfg.bench.k)
 
         total_time = 0.0
         latencies_us: list[float] = []
         results: list = []
-        for _ in range(RUNS):
+        for _ in range(cfg.bench.runs):
             results = []
-            for i in range(NQ):
+            for i in range(nq):
                 t0 = time.perf_counter()
-                pred = idx.search(query[i], K)
+                pred = idx.search(query[i], cfg.bench.k)
                 t1 = time.perf_counter()
                 results.append(pred)
                 latencies_us.append((t1 - t0) * 1e6)
                 total_time += t1 - t0
 
-        correct = sum(1 for i in range(NQ) for j in range(K) if gt[i][j] in set(results[i]))
-        recall = correct / (NQ * K)
-        qps = NQ * RUNS / total_time
+        correct = sum(1 for i in range(nq) for j in range(cfg.bench.k) if gt[i][j] in set(results[i]))
+        recall = correct / (nq * cfg.bench.k)
+        qps = nq * cfg.bench.runs / total_time
         mean_lat = float(np.mean(latencies_us))
         p99_lat = float(np.percentile(latencies_us, 99.9))
 
@@ -131,9 +134,9 @@ def main() -> None:
         )
         print(f"  EF={ef:>4}  QPS={qps:>8.1f}  Recall={recall:.4f}  mean={mean_lat:.0f}us  p99.9={p99_lat:.0f}us")
 
-    out_csv = TMP / "results" / f"lite_{args.tag}.csv"
+    out_csv = cfg.cell_csv("lite", source.tag)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_csv, "w", newline="") as f:
+    with out_csv.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["ef", "qps", "recall_at_10", "mean_lat_us", "p99_9_lat_us"])
         w.writeheader()
         w.writerows(rows)

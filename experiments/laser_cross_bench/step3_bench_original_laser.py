@@ -1,62 +1,35 @@
 #!/usr/bin/env python3
-"""
-Full pipeline with original Laser library:
-  PCA -> Medoid -> Index build -> EF sweep search -> CSV
+"""LASER cross-bench step3: original Laser PCA -> Medoid -> Index -> EF sweep.
 
-Run twice (once per Vamana source):
+Imports the upstream ``laser`` package, so it must run under
+``config.paths.laser_venv``::
 
-    # DiskANN Vamana
-    numactl --interleave=all \\
-        /md1/huangliang/alaya-dev/Laser/.venv/bin/python \\
-        /md1/huangliang/alaya-dev/AlayaLite/experiments/laser_cross_bench/step3_bench_original_laser.py \\
-        --vamana-path /md1/huangliang/alaya-dev/tmp/laser_cross_bench/vamana_diskann/gist_vamana.index \\
-        --tag diskann
+    /path/to/Laser/.venv/bin/python step3_bench_original_laser.py \\
+        --config configs/gist1m.toml \\
+        --vamana-tag diskann
 
-    # AlayaLite Vamana
-    numactl --interleave=all \\
-        /md1/huangliang/alaya-dev/Laser/.venv/bin/python \\
-        /md1/huangliang/alaya-dev/AlayaLite/experiments/laser_cross_bench/step3_bench_original_laser.py \\
-        --vamana-path /md1/huangliang/alaya-dev/tmp/laser_cross_bench/vamana_alayalite/gist_vamana.index \\
-        --tag lite
+Outputs:
+  * Build artifacts under ``<tmp_dir>/orig_<vamana_tag>/dsqg_<prefix>_*``
+  * Search results CSV at ``<tmp_dir>/results/orig_<vamana_tag>.csv``
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
-import struct
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
 
-DATA = Path("/md1/huangliang/alaya-dev/data/gist1m")
-TMP = Path("/md1/huangliang/alaya-dev/tmp/laser_cross_bench")
-
-R = 64
-MAIN_DIM = 256
-EF_INDEXING = 200
-BUILD_THREADS = 48
-K = 10
-BEAM = 16
-WARMUP = 10
-RUNS = 30
-DRAM_BUDGET = 1.0
-PCA_SEED = 42
-MEDOID_SEED = 42
-ROTATOR_SEED = 0
-EP_NUM = 300
-EFS = [80, 90, 100, 110, 130, 150, 200, 250, 300, 400, 500]
+# Local sibling import; Laser venv has no _config in site-packages.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import CrossBenchConfig  # noqa: E402  pylint: disable=wrong-import-position
 
 
-def _read_fbin_shape(path: str) -> tuple[int, int]:
-    with open(path, "rb") as f:
-        n, d = struct.unpack("<ii", f.read(8))
-    return int(n), int(d)
-
-
-def step_pca(base_fbin: str, pca_base_path: str, pca_params_path: str) -> None:
-    from laser.pca import (
+def step_pca(cfg: CrossBenchConfig, base_fbin: Path, pca_base_path: Path, pca_params_path: Path) -> None:
+    from laser.pca import (  # pylint: disable=import-outside-toplevel,import-error
         fit_incremental_pca,
         pca_transform_and_save,
         sample_vectors_from_fbin,
@@ -65,89 +38,103 @@ def step_pca(base_fbin: str, pca_base_path: str, pca_params_path: str) -> None:
 
     print("[pca] sampling and fitting...")
     t0 = time.perf_counter()
-    vectors, sample_vecs = sample_vectors_from_fbin(base_fbin, seed=PCA_SEED)
+    vectors, sample_vecs = sample_vectors_from_fbin(str(base_fbin), seed=cfg.bench.seed)
     _, d = vectors.shape
     pca = fit_incremental_pca(sample_vecs, n_components=d)
-    save_pca_params(pca, pca_params_path)
-    pca_transform_and_save(vectors, pca, pca_base_path)
+    save_pca_params(pca, str(pca_params_path))
+    pca_transform_and_save(vectors, pca, str(pca_base_path))
     print(f"[pca] done in {time.perf_counter() - t0:.1f}s -> {pca_base_path}")
 
 
-def step_medoid(pca_base: str, idx_path: str, vec_path: str) -> None:
-    from laser.medoid import generate_and_save_medoids
+def step_medoid(cfg: CrossBenchConfig, pca_base: Path, idx_path: Path, vec_path: Path) -> None:
+    from laser.medoid import generate_and_save_medoids  # pylint: disable=import-outside-toplevel,import-error
 
-    print(f"[medoid] generating {EP_NUM} entry points...")
+    print(f"[medoid] generating {cfg.build.ep_num} entry points...")
     t0 = time.perf_counter()
-    generate_and_save_medoids(pca_base, idx_path, vec_path, EP_NUM, seed=MEDOID_SEED)
+    generate_and_save_medoids(
+        str(pca_base),
+        str(idx_path),
+        str(vec_path),
+        cfg.build.ep_num,
+        seed=cfg.bench.seed,
+    )
     print(f"[medoid] done in {time.perf_counter() - t0:.1f}s")
 
 
-def step_index(pca_base: str, vamana_path: str, index_prefix: str) -> tuple[int, int]:
-    import laser
-    from laser.io import read_fbin
+def step_index(cfg: CrossBenchConfig, pca_base: Path, vamana_path: Path, index_prefix: str) -> tuple[int, int]:
+    import laser  # pylint: disable=import-outside-toplevel,import-error
+    from laser.io import read_fbin  # pylint: disable=import-outside-toplevel,import-error
 
-    base = read_fbin(pca_base, use_mmap=True)
-    N, D = base.shape
-    print(f"[index] building R{R}_MD{MAIN_DIM} N={N:,} D={D} threads={BUILD_THREADS}...")
+    base = read_fbin(str(pca_base), use_mmap=True)
+    n, d = base.shape
+    print(f"[index] building R{cfg.build.R}_MD{cfg.build.main_dim} N={n:,} D={d} threads={cfg.bench.build_threads}...")
     t0 = time.perf_counter()
     index = laser.Index(
         index_type="QG",
         metric="l2",
-        num_elements=N,
-        main_dimension=MAIN_DIM,
-        dimension=D,
-        degree_bound=R,
-        rotator_seed=ROTATOR_SEED,
+        num_elements=n,
+        main_dimension=cfg.build.main_dim,
+        dimension=d,
+        degree_bound=cfg.build.R,
+        rotator_seed=cfg.bench.seed,
         rotator_dump_path="",
     )
-    index.build_index(vamana_path, index_prefix, EF=EF_INDEXING, num_thread=BUILD_THREADS)
+    index.build_index(
+        str(vamana_path),
+        index_prefix,
+        EF=cfg.build.ef_indexing,
+        num_thread=cfg.bench.build_threads,
+    )
     print(f"[index] done in {time.perf_counter() - t0:.1f}s")
-    return N, D
+    return n, d
 
 
-def step_search(index_prefix: str, N: int, D: int, out_csv: Path) -> None:
-    import laser
-    from laser.io import read_fbin, read_ibin
+def step_search(cfg: CrossBenchConfig, index_prefix: str, n: int, d: int, out_csv: Path) -> None:
+    import laser  # pylint: disable=import-outside-toplevel,import-error
+    from laser.io import read_fbin, read_ibin  # pylint: disable=import-outside-toplevel,import-error
 
-    query = np.asarray(read_fbin(str(DATA / "gist_query.fbin")), dtype=np.float32)
-    gt = np.asarray(read_ibin(str(DATA / "gist_gt.ibin")), dtype=np.int32)
-    NQ = query.shape[0]
+    query = np.asarray(read_fbin(str(cfg.dataset.query_fbin(cfg.paths.data_dir))), dtype=np.float32)
+    gt = np.asarray(read_ibin(str(cfg.dataset.gt_ibin(cfg.paths.data_dir))), dtype=np.int32)
+    nq = query.shape[0]
 
     index = laser.Index(
         index_type="QG",
         metric="l2",
-        num_elements=N,
-        main_dimension=MAIN_DIM,
-        dimension=D,
-        degree_bound=R,
+        num_elements=n,
+        main_dimension=cfg.build.main_dim,
+        dimension=d,
+        degree_bound=cfg.build.R,
     )
-    index.load(index_prefix, DRAM_BUDGET)
-    print(f"[search] loaded index; NQ={NQ:,} K={K} beam={BEAM} warmup={WARMUP} runs={RUNS}")
+    index.load(index_prefix, cfg.bench.dram_budget_gb)
+    print(
+        f"[search] loaded index; NQ={nq:,} K={cfg.bench.k} beam={cfg.bench.beam} "
+        f"warmup={cfg.bench.warmup} runs={cfg.bench.runs}"
+    )
 
     rows: list[dict] = []
-    for ef in EFS:
-        index.set_params(ef_search=ef, num_threads=1, beam_width=BEAM)
+    for ef in cfg.bench.ef_sweep:
+        index.set_params(ef_search=ef, num_threads=cfg.bench.search_threads, beam_width=cfg.bench.beam)
 
-        for _ in range(WARMUP):
-            for i in range(NQ):
-                index.search(query[i], K)
+        for _ in range(cfg.bench.warmup):
+            for i in range(nq):
+                index.search(query[i], cfg.bench.k)
 
         total_time = 0.0
         latencies_us: list[float] = []
         results: list = []
-        for _ in range(RUNS):
+        for _ in range(cfg.bench.runs):
             results = []
-            for i in range(NQ):
+            for i in range(nq):
                 t0 = time.perf_counter()
-                pred = index.search(query[i], K)
+                pred = index.search(query[i], cfg.bench.k)
                 t1 = time.perf_counter()
                 results.append(pred)
                 latencies_us.append((t1 - t0) * 1e6)
                 total_time += t1 - t0
 
-        correct = sum(1 for i in range(NQ) for j in range(K) if gt[i][j] in set(results[i]))
-        recall = correct / (NQ * K)
-        qps = NQ * RUNS / total_time
+        correct = sum(1 for i in range(nq) for j in range(cfg.bench.k) if gt[i][j] in set(results[i]))
+        recall = correct / (nq * cfg.bench.k)
+        qps = nq * cfg.bench.runs / total_time
         mean_lat = float(np.mean(latencies_us))
         p99_lat = float(np.percentile(latencies_us, 99.9))
 
@@ -163,7 +150,7 @@ def step_search(index_prefix: str, N: int, D: int, out_csv: Path) -> None:
         print(f"  EF={ef:>4}  QPS={qps:>8.1f}  Recall={recall:.4f}  mean={mean_lat:.0f}us  p99.9={p99_lat:.0f}us")
 
     out_csv.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_csv, "w", newline="") as f:
+    with out_csv.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["ef", "qps", "recall_at_10", "mean_lat_us", "p99_9_lat_us"])
         w.writeheader()
         w.writerows(rows)
@@ -171,26 +158,39 @@ def step_search(index_prefix: str, N: int, D: int, out_csv: Path) -> None:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser()
-    p.add_argument("--vamana-path", required=True, type=Path, help="Pre-built Vamana .index file (DiskANN format)")
-    p.add_argument("--tag", required=True, help="Label for the Vamana source (used in output path)")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--config", required=True, type=Path, help="Path to cross-bench TOML config")
+    p.add_argument(
+        "--vamana-tag",
+        required=True,
+        help="Tag from config.vamana_sources (e.g. 'diskann', 'alayalite_l100')",
+    )
     args = p.parse_args()
 
-    artifacts = TMP / f"orig_{args.tag}"
-    artifacts.mkdir(parents=True, exist_ok=True)
+    cfg = CrossBenchConfig.from_toml(args.config)
+    source = cfg.find_vamana(args.vamana_tag)
+    vamana_path = cfg.vamana_path(source)
+    if not vamana_path.is_file():
+        raise FileNotFoundError(
+            f"Vamana graph not found at {vamana_path}. Run step1/step2 (builder={source.builder!r}) first."
+        )
 
-    pca_base = str(artifacts / "dsqg_gist_pca_base.fbin")
-    pca_params = str(artifacts / "dsqg_gist_pca.bin")
-    medoid_idx = str(artifacts / "dsqg_gist_medoids_indices")
-    medoid_vecs = str(artifacts / "dsqg_gist_medoids")
-    index_prefix = str(artifacts / "dsqg_gist")
+    base_fbin = cfg.dataset.base_fbin(cfg.paths.data_dir)
+    if not base_fbin.is_file():
+        raise FileNotFoundError(f"dataset base fbin not found: {base_fbin}")
 
-    step_pca(str(DATA / "gist_base.fbin"), pca_base, pca_params)
-    step_medoid(pca_base, medoid_idx, medoid_vecs)
-    N, D = step_index(pca_base, str(args.vamana_path), index_prefix)
+    cell_dir = cfg.cell_dir("orig", source.tag)
+    cell_dir.mkdir(parents=True, exist_ok=True)
+    pfx = cfg.cell_index_prefix("orig", source.tag)
+    pca_base = Path(f"{pfx}_pca_base.fbin")
+    pca_params = Path(f"{pfx}_pca.bin")
+    medoid_idx = Path(f"{pfx}_medoids_indices")
+    medoid_vecs = Path(f"{pfx}_medoids")
 
-    out_csv = TMP / "results" / f"orig_{args.tag}.csv"
-    step_search(index_prefix, N, D, out_csv)
+    step_pca(cfg, base_fbin, pca_base, pca_params)
+    step_medoid(cfg, pca_base, medoid_idx, medoid_vecs)
+    n, d = step_index(cfg, pca_base, vamana_path, pfx)
+    step_search(cfg, pfx, n, d, cfg.cell_csv("orig", source.tag))
 
 
 if __name__ == "__main__":

@@ -1,50 +1,71 @@
 #!/usr/bin/env python3
-"""Build AlayaLite Vamana graph for GIST-1M.
+"""LASER cross-bench step2: build AlayaLite Vamana graph.
 
-Run with (numactl --interleave=all pins memory across NUMA nodes, matching
-DiskANN build policy; 48 threads keeps build time under 5 minutes):
+Run under the AlayaLite venv (or anywhere ``alayalite.vamana`` is importable)::
 
-    numactl --interleave=all \\
-        uv run python experiments/laser_cross_bench/step2_build_vamana_alayalite.py
+    python step2_build_vamana_alayalite.py --config configs/gist1m.toml --vamana-tag alayalite_l100
 """
 
 from __future__ import annotations
 
+import argparse
+import sys
 import time
 from pathlib import Path
 
-DATA = Path("/md1/huangliang/alaya-dev/data/gist1m")
-TMP = Path("/md1/huangliang/alaya-dev/tmp/laser_cross_bench")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import CrossBenchConfig  # noqa: E402  pylint: disable=wrong-import-position
 
-R = 64
-L = 100
-ALPHA = 1.2
-THREADS = 48
-SEED = 42
-DRAM_GB = 32.0
+# Build-time DRAM budget for AlayaLite's Vamana builder (separate from search-time
+# DRAM cache budget, which is config.bench.dram_budget_gb). 32 GB is sufficient
+# for 1M-scale graphs; bump if you run on >10M-scale datasets.
+_VAMANA_BUILD_DRAM_GB = 32.0
 
 
 def main() -> None:
-    from alayalite import vamana
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--config", required=True, type=Path)
+    p.add_argument(
+        "--vamana-tag",
+        required=True,
+        help="Tag from config.vamana_sources where builder == 'alayalite'",
+    )
+    args = p.parse_args()
 
-    out_dir = TMP / "vamana_alayalite"
+    cfg = CrossBenchConfig.from_toml(args.config)
+    source = cfg.find_vamana(args.vamana_tag)
+    if source.builder != "alayalite":
+        raise ValueError(
+            f"vamana source {source.tag!r} has builder={source.builder!r}, expected 'alayalite'. "
+            "Use step1 for builder='diskann'."
+        )
+
+    base_fbin = cfg.dataset.base_fbin(cfg.paths.data_dir)
+    if not base_fbin.is_file():
+        raise FileNotFoundError(f"dataset base fbin not found: {base_fbin}")
+
+    from alayalite import vamana  # pylint: disable=import-outside-toplevel
+
+    out_dir = cfg.vamana_dir(source)
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "gist_vamana.index"
+    out_path = cfg.vamana_path(source)
 
-    print(f"[alayalite-vamana] building R={R} L={L} alpha={ALPHA} threads={THREADS} seed={SEED} → {out_path}")
+    print(
+        f"[alayalite-vamana] tag={source.tag} R={cfg.build.R} L={source.L} "
+        f"alpha={cfg.build.alpha} threads={cfg.bench.build_threads} seed={cfg.bench.seed} -> {out_path}"
+    )
     t0 = time.perf_counter()
     vamana.build_index(
-        data_path=str(DATA / "gist_base.fbin"),
+        data_path=str(base_fbin),
         output_path=str(out_path),
-        R=R,
-        L=L,
-        alpha=ALPHA,
-        seed=SEED,
-        num_threads=THREADS,
-        dram_budget_gb=DRAM_GB,
+        R=cfg.build.R,
+        L=source.L,
+        alpha=cfg.build.alpha,
+        seed=cfg.bench.seed,
+        num_threads=cfg.bench.build_threads,
+        dram_budget_gb=_VAMANA_BUILD_DRAM_GB,
     )
-    elapsed = time.perf_counter() - t0
-    print(f"[alayalite-vamana] done in {elapsed:.1f}s → {out_path}")
+    print(f"[alayalite-vamana] done in {time.perf_counter() - t0:.1f}s -> {out_path}")
 
 
 if __name__ == "__main__":

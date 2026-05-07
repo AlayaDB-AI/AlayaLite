@@ -1,40 +1,29 @@
 #!/usr/bin/env python3
-"""
-Aggregate 4 CSVs into 2x2 comparison tables.
+"""LASER cross-bench step5: aggregate cell CSVs into a markdown comparison table.
 
-Run after all four bench scripts complete:
-    python experiments/laser_cross_bench/step5_compare.py
+Auto-discovers ``<tmp_dir>/results/{orig,lite}_<tag>.csv`` for each
+vamana_source in the config. Cells whose CSV is missing are skipped
+(useful when you only ran a subset)::
 
-Reads:
-    $TMP/results/orig_diskann.csv
-    $TMP/results/orig_lite.csv
-    $TMP/results/lite_diskann.csv
-    $TMP/results/lite_lite.csv
-
-Writes:
-    $TMP/results/comparison.md
+    python step5_compare.py --config configs/gist1m.toml
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
+import sys
 from pathlib import Path
 
-TMP = Path("/md1/huangliang/alaya-dev/tmp/laser_cross_bench")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import CrossBenchConfig  # noqa: E402  pylint: disable=wrong-import-position
 
-COMBOS = [
-    ("orig_diskann", "Orig Laser", "DiskANN Vamana"),
-    ("orig_lite", "Orig Laser", "Lite Vamana"),
-    ("lite_diskann", "AlayaLite", "DiskANN Vamana"),
-    ("lite_lite", "AlayaLite", "Lite Vamana"),
-]
-SHORT = ["Orig+DiskANN", "Orig+Lite", "Lite+DiskANN", "Lite+Lite"]
+LASERS = ("orig", "lite")
 
 
-def load(name: str) -> dict[int, dict]:
-    path = TMP / "results" / f"{name}.csv"
+def _load(path: Path) -> dict[int, dict]:
     out: dict[int, dict] = {}
-    with open(path) as f:
+    with path.open() as f:
         for row in csv.DictReader(f):
             ef = int(row["ef"])
             out[ef] = {
@@ -46,65 +35,84 @@ def load(name: str) -> dict[int, dict]:
     return out
 
 
-def _table(data: dict[str, dict[int, dict]], efs: list[int], field: str, fmt: str, title: str) -> list[str]:
-    keys = [k for k, _, _ in COMBOS]
-    lines = [f"### {title}", ""]
-    header = f"{'EF':>5}  " + "  ".join(f"{h:>15}" for h in SHORT)
-    lines += [header, "-" * len(header)]
-    for ef in efs:
-        vals = "  ".join(f"{data[k][ef][field]:{fmt}}" for k in keys)
-        lines.append(f"{ef:>5}  {vals}")
-    return lines
-
-
-def _md_table(data: dict[str, dict[int, dict]], efs: list[int], field: str, fmt: str, title: str) -> list[str]:
-    keys = [k for k, _, _ in COMBOS]
+def _md_table(
+    data: dict[str, dict[int, dict]],
+    keys: list[str],
+    short: list[str],
+    efs: list[int],
+    field: str,
+    fmt: str,
+    title: str,
+) -> list[str]:
     lines = [
         f"### {title}",
         "",
-        "| EF | " + " | ".join(SHORT) + " |",
-        "|---:|" + "|".join("---:" for _ in COMBOS) + "|",
+        "| EF | " + " | ".join(short) + " |",
+        "|---:|" + "|".join("---:" for _ in keys) + "|",
     ]
     for ef in efs:
-        vals = " | ".join(f"{data[k][ef][field]:{fmt}}" for k in keys)
-        lines.append(f"| {ef} | {vals} |")
+        cells = []
+        for k in keys:
+            v = data.get(k, {}).get(ef)
+            cells.append(f"{v[field]:{fmt}}" if v is not None else "—")
+        lines.append(f"| {ef} | " + " | ".join(cells) + " |")
     return lines
 
 
 def main() -> None:
-    data = {key: load(key) for key, _, _ in COMBOS}
-    efs = sorted(next(iter(data.values())).keys())
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--config", required=True, type=Path)
+    p.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Output markdown path (default: <results_dir>/comparison.md)",
+    )
+    args = p.parse_args()
 
-    for lines in [
-        _table(data, efs, "qps", ">15.1f", "QPS"),
-        [""],
-        _table(data, efs, "recall", ">15.4f", "Recall@10"),
-        [""],
-        _table(data, efs, "mean_lat", ">15.1f", "Mean Latency (us)"),
-        [""],
-        _table(data, efs, "p99_lat", ">15.1f", "P99.9 Latency (us)"),
-    ]:
-        for line in lines:
-            print(line)
+    cfg = CrossBenchConfig.from_toml(args.config)
 
-    md_lines = ["# LASER 2x2 Cross-Experiment Results", ""]
-    md_lines += ["## Legend", "", "| Short | Library | Vamana Source |", "|---|---|---|"]
-    for (_key, lib, vamana), short in zip(COMBOS, SHORT):
-        md_lines.append(f"| {short} | {lib} | {vamana} |")
-    md_lines.append("")
+    keys: list[str] = []
+    short: list[str] = []
+    legend_rows: list[tuple[str, str, str]] = []
+    data: dict[str, dict[int, dict]] = {}
+    for source in cfg.vamana_sources:
+        for laser in LASERS:
+            csv_path = cfg.cell_csv(laser, source.tag)
+            if not csv_path.is_file():
+                print(f"[skip] missing csv: {csv_path}")
+                continue
+            key = f"{laser}_{source.tag}"
+            keys.append(key)
+            short_label = f"{laser}+{source.tag}"
+            short.append(short_label)
+            legend_rows.append((short_label, "Orig Laser" if laser == "orig" else "AlayaLite", source.tag))
+            data[key] = _load(csv_path)
+
+    if not data:
+        raise FileNotFoundError(f"no result CSVs found under {cfg.results_dir()} for any cell. Run step3/step4 first.")
+
+    efs = sorted({ef for cell in data.values() for ef in cell})
+
+    md = [f"# LASER Cross-Bench Results — {cfg.name}", ""]
+    md += ["## Legend", "", "| Short | Library | Vamana Source |", "|---|---|---|"]
+    for short_label, lib, vamana in legend_rows:
+        md.append(f"| {short_label} | {lib} | {vamana} |")
+    md.append("")
     for block in [
-        _md_table(data, efs, "qps", ".1f", "QPS"),
+        _md_table(data, keys, short, efs, "qps", ".1f", "QPS"),
         [""],
-        _md_table(data, efs, "recall", ".4f", "Recall@10"),
+        _md_table(data, keys, short, efs, "recall", ".4f", "Recall@10"),
         [""],
-        _md_table(data, efs, "mean_lat", ".1f", "Mean Latency (us)"),
+        _md_table(data, keys, short, efs, "mean_lat", ".1f", "Mean Latency (us)"),
         [""],
-        _md_table(data, efs, "p99_lat", ".1f", "P99.9 Latency (us)"),
+        _md_table(data, keys, short, efs, "p99_lat", ".1f", "P99.9 Latency (us)"),
     ]:
-        md_lines.extend(block)
+        md.extend(block)
 
-    out = TMP / "results" / "comparison.md"
-    out.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+    out = args.output or (cfg.results_dir() / "comparison.md")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(md) + "\n", encoding="utf-8")
     print(f"\nMarkdown written -> {out}")
 
 
