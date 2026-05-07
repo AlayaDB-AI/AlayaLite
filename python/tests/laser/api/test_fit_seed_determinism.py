@@ -65,26 +65,23 @@ def test_same_master_seed_is_deterministic_at_num_threads_1(tmp_path: Path) -> N
     left = tmp_path / "left"
     right = tmp_path / "right"
 
+    bp = laser.BuildParams(main_dim=128, R=64, disable_medoid=True)
     laser.Index.fit(
         vectors,
         output_dir=left,
         name="x",
-        main_dim=128,
-        R=64,
+        build_params=bp,
         num_threads=1,
         seed=42,
-        disable_medoid=True,
         auto_load=False,
     )
     laser.Index.fit(
         vectors,
         output_dir=right,
         name="x",
-        main_dim=128,
-        R=64,
+        build_params=bp,
         num_threads=1,
         seed=42,
-        disable_medoid=True,
         auto_load=False,
     )
 
@@ -98,26 +95,23 @@ def test_different_master_seed_changes_artifacts(tmp_path: Path) -> None:
     left = tmp_path / "left2"
     right = tmp_path / "right2"
 
+    bp = laser.BuildParams(main_dim=128, R=64, disable_medoid=True)
     laser.Index.fit(
         vectors,
         output_dir=left,
         name="x",
-        main_dim=128,
-        R=64,
+        build_params=bp,
         num_threads=1,
         seed=42,
-        disable_medoid=True,
         auto_load=False,
     )
     laser.Index.fit(
         vectors,
         output_dir=right,
         name="x",
-        main_dim=128,
-        R=64,
+        build_params=bp,
         num_threads=1,
         seed=43,
-        disable_medoid=True,
         auto_load=False,
     )
 

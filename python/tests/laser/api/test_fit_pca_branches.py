@@ -44,11 +44,9 @@ def test_fit_runs_pca_when_main_dim_less_than_raw_dim(tmp_path: Path) -> None:
         vectors,
         output_dir=tmp_path,
         name="pca_on",
-        main_dim=128,
-        R=64,
+        build_params=laser.BuildParams(main_dim=128, R=64, disable_medoid=True),
         seed=42,
         num_threads=1,
-        disable_medoid=True,
     )
 
     assert (tmp_path / "pca_on_pca_base.fbin").is_file()
@@ -63,11 +61,9 @@ def test_fit_skips_pca_when_main_dim_equals_raw_dim_and_warning_is_expected(tmp_
         vectors,
         output_dir=tmp_path,
         name="pca_off",
-        main_dim=128,
-        R=64,
+        build_params=laser.BuildParams(main_dim=128, R=64, disable_medoid=True),
         seed=42,
         num_threads=1,
-        disable_medoid=True,
     )
     captured = capfd.readouterr()
 

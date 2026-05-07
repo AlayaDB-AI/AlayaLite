@@ -53,11 +53,9 @@ def test_fit_autoload_search_with_ndarray_input(tmp_path: Path) -> None:
         vectors,
         output_dir=tmp_path,
         name="u_nd",
-        main_dim=128,
-        R=64,
+        build_params=laser.BuildParams(main_dim=128, R=64, disable_medoid=True),
         num_threads=1,
         seed=42,
-        disable_medoid=True,
     )
     hits = idx.search(vectors[0], 10)
     assert hits.shape == (10,)
@@ -75,11 +73,9 @@ def test_fit_autoload_search_with_fbin_input(tmp_path: Path) -> None:
         str(raw),
         output_dir=tmp_path,
         name="u_fbin",
-        main_dim=128,
-        R=64,
+        build_params=laser.BuildParams(main_dim=128, R=64, disable_medoid=True),
         num_threads=1,
         seed=42,
-        disable_medoid=True,
     )
     hits = idx.search(vectors[1], 10)
     assert hits.shape == (10,)

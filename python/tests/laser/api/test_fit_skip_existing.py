@@ -43,11 +43,9 @@ def test_skip_existing_skips_second_fit_and_false_rebuilds(tmp_path: Path) -> No
     kwargs = {
         "output_dir": tmp_path,
         "name": "skip",
-        "main_dim": 128,
-        "R": 64,
+        "build_params": laser.BuildParams(main_dim=128, R=64, disable_medoid=True),
         "num_threads": 1,
         "seed": 42,
-        "disable_medoid": True,
     }
     laser.Index.fit(vectors, skip_existing=True, **kwargs)
 
@@ -76,20 +74,26 @@ def test_skip_existing_rebuilds_pca_branch_when_main_dim_changes(tmp_path: Path)
     base_kwargs = {
         "output_dir": tmp_path,
         "name": "skip_md",
-        "R": 64,
         "num_threads": 1,
         "seed": 42,
-        "disable_medoid": True,
         "skip_existing": True,
     }
-    laser.Index.fit(vectors, main_dim=128, **base_kwargs)
+    laser.Index.fit(
+        vectors,
+        build_params=laser.BuildParams(main_dim=128, R=64, disable_medoid=True),
+        **base_kwargs,
+    )
     pca_base = tmp_path / "skip_md_pca_base.fbin"
     first_mtime = pca_base.stat().st_mtime_ns
     assert (tmp_path / "skip_md_pca.bin").is_file()
     assert (tmp_path / "skip_md_R64_MD128.index").is_file()
 
     time.sleep(1.1)
-    laser.Index.fit(vectors, main_dim=256, **base_kwargs)
+    laser.Index.fit(
+        vectors,
+        build_params=laser.BuildParams(main_dim=256, R=64, disable_medoid=True),
+        **base_kwargs,
+    )
     second_mtime = pca_base.stat().st_mtime_ns
 
     # With a main-dim change, fit emits the new main index shape and removes

@@ -47,11 +47,9 @@ def test_from_prefix_cross_process_and_missing_path(tmp_path: Path) -> None:
         vectors,
         output_dir=tmp_path,
         name="x",
-        main_dim=128,
-        R=64,
+        build_params=laser.BuildParams(main_dim=128, R=64, disable_medoid=True),
         num_threads=1,
         seed=42,
-        disable_medoid=True,
         auto_load=False,
     )
     with pytest.raises(RuntimeError, match="not loaded"):

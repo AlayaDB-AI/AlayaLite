@@ -43,9 +43,7 @@ def test_fit_writes_medoids_by_default(tmp_path: Path) -> None:
         vectors,
         output_dir=tmp_path,
         name="medoid_on",
-        main_dim=128,
-        R=64,
-        ep_num=16,
+        build_params=laser.BuildParams(main_dim=128, R=64, ep_num=16),
         num_threads=1,
         seed=42,
     )
@@ -62,12 +60,9 @@ def test_fit_disable_medoid_skips_files_but_search_still_works(tmp_path: Path) -
         vectors,
         output_dir=tmp_path,
         name="medoid_off",
-        main_dim=128,
-        R=64,
-        ep_num=16,
+        build_params=laser.BuildParams(main_dim=128, R=64, ep_num=16, disable_medoid=True),
         num_threads=1,
         seed=42,
-        disable_medoid=True,
     )
 
     assert not (tmp_path / "medoid_off_medoids").exists()

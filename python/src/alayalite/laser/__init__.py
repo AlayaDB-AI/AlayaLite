@@ -28,10 +28,47 @@ from ._idempotence import (
     validate_vamana_index,
 )
 from ._io import write_fbin
-from ._seeds import derive_subseeds
 
 PathLikeStr = Union[str, os.PathLike[str]]
 _INDEX_RE = re.compile(r"_R(?P<R>\d+)_MD(?P<md>\d+)\.index$")
+
+
+@dataclasses.dataclass(frozen=True)
+class BuildParams:
+    """LASER build-time hyperparameters.
+
+    Grouped to keep ``Index.fit`` signature flat at the call site. Adding a new
+    build knob means adding a field here, not extending ``fit``.
+
+    Fields
+    ------
+    metric : "l2"
+        Distance metric used by the underlying graph and quantizer.
+    main_dim : int | None
+        PCA target dimension. ``None`` means "no PCA"; the raw dimension is used.
+        Must be a power of two ``>= 128`` and ``<= raw_dim`` when set.
+    R : int
+        Vamana out-degree bound (also the LASER graph degree).
+    L : int
+        Vamana search-list size during graph construction.
+    alpha : float
+        Vamana RNG-prune slack factor.
+    ef_indexing : int
+        EF used during the LASER quantization pass over the Vamana graph.
+    ep_num : int
+        Number of medoid entry points generated for search seeding.
+    disable_medoid : bool
+        Skip medoid generation entirely (search uses the graph's start node).
+    """
+
+    metric: str = "l2"
+    main_dim: int | None = None
+    R: int = 64  # pylint: disable=invalid-name
+    L: int = 100  # pylint: disable=invalid-name
+    alpha: float = 1.2
+    ef_indexing: int = 200
+    ep_num: int = 300
+    disable_medoid: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -111,37 +148,45 @@ class Index:
     def fit(
         cls,
         vectors_or_fbin,
-        *,
         output_dir: PathLikeStr,
+        *,
         name: str = "laser",
-        metric: str = "l2",
-        main_dim: int | None = None,
-        R: int = 64,
-        L: int = 100,
-        alpha: float = 1.2,
-        ef_indexing: int = 200,
-        beam_width: int = 16,
-        num_threads: int = 0,
-        ep_num: int = 300,
+        build_params: BuildParams | None = None,
         seed: int = 42,
-        pca_seed: int | None = None,
-        medoid_seed: int | None = None,
-        vamana_seed: int | None = None,
-        rotator_seed: int | None = None,
+        num_threads: int = 0,
         dram_budget_gb: float = 1.0,
-        disable_medoid: bool = False,
         skip_existing: bool = True,
         auto_load: bool = True,
     ) -> Index:
         """Build a LASER index in one call and optionally return it search-ready.
 
+        Parameters
+        ----------
+        vectors_or_fbin
+            Either an in-memory ``float32`` ndarray of shape ``(n, raw_dim)`` or
+            a path to a DiskANN-style ``.fbin`` file.
+        output_dir
+            Directory used for all build artifacts (PCA, medoids, vamana, index).
+        name
+            Filename prefix inside ``output_dir`` (e.g. ``"laser"`` ->
+            ``laser_pca.bin``, ``laser_R64_MD256.index``).
+        build_params
+            All build-time hyperparameters. ``None`` uses ``BuildParams()`` defaults.
+        seed
+            Master RNG seed shared by every randomized build sub-step
+            (PCA sampling, medoid clustering, Vamana, LASER rotator).
+            Search-time settings live on the returned ``Index``; use
+            ``set_params(...)`` after ``fit``.
+
         Notes
         -----
-        When ``main_dim == raw_dim`` (or ``main_dim is None``), PCA is skipped and
-        ``<prefix>_pca.bin`` is intentionally absent. The C++ load path may print
-        ``Warning: PCA file not found: ...`` to stderr; this is expected behaviour.
+        When ``build_params.main_dim is None`` or equals the raw dimension, PCA is
+        skipped and ``<prefix>_pca.bin`` is intentionally absent. The C++ load
+        path may print ``Warning: PCA file not found: ...`` to stderr; this is
+        expected behaviour.
         """
-        metric = _canonical_metric(metric)
+        bp = build_params if build_params is not None else BuildParams()
+        metric = _canonical_metric(bp.metric)
         output = Path(output_dir)
         output.mkdir(parents=True, exist_ok=True)
         prefix = os.fspath(output / str(name))
@@ -164,14 +209,10 @@ class Index:
 
         if raw_dim < 128:
             raise ValueError(f"LASER requires raw_dim >= 128, got {raw_dim}")
-        resolved_main_dim = raw_dim if main_dim is None else int(main_dim)
+        resolved_main_dim = raw_dim if bp.main_dim is None else int(bp.main_dim)
         _validate_main_dim(resolved_main_dim, raw_dim)
 
-        sub = derive_subseeds(int(seed))
-        pca_seed = int(sub.pca if pca_seed is None else pca_seed)
-        medoid_seed = int(sub.medoid if medoid_seed is None else medoid_seed)
-        vamana_seed = int(sub.vamana if vamana_seed is None else vamana_seed)
-        rotator_seed = int(sub.rotator if rotator_seed is None else rotator_seed)
+        master_seed = int(seed)
 
         if vectors_arr is not None:
             if not (skip_existing and validate_pca_base(raw_fbin_path, n, raw_dim)):
@@ -192,7 +233,7 @@ class Index:
                     save_pca_params,
                 )
 
-                vectors, sample_vectors = sample_vectors_from_fbin(raw_fbin_path, seed=pca_seed)
+                vectors, sample_vectors = sample_vectors_from_fbin(raw_fbin_path, seed=master_seed)
                 pca = fit_incremental_pca(sample_vectors, n_components=raw_dim)
                 save_pca_params(pca, pca_params_path)
                 pca_transform_and_save(vectors, pca, pca_base_path)
@@ -203,7 +244,7 @@ class Index:
             if os.path.exists(pca_params_path):
                 os.remove(pca_params_path)
 
-        if not disable_medoid:
+        if not bp.disable_medoid:
             if not (skip_existing and validate_medoids(prefix)):
                 from alayalite.laser._medoid import generate_and_save_medoids  # pylint: disable=import-outside-toplevel
 
@@ -211,21 +252,21 @@ class Index:
                     pca_base_path,
                     f"{prefix}_medoids_indices",
                     f"{prefix}_medoids",
-                    int(ep_num),
-                    seed=medoid_seed,
+                    int(bp.ep_num),
+                    seed=master_seed,
                 )
 
         vamana_path = f"{prefix}_vamana_graph.index"
-        if not (skip_existing and validate_vamana_index(vamana_path, int(R))):
+        if not (skip_existing and validate_vamana_index(vamana_path, int(bp.R))):
             from alayalite import vamana as vamana_mod  # pylint: disable=import-outside-toplevel
 
             vamana_mod.build_index(
                 data_path=raw_fbin_path,
                 output_path=vamana_path,
-                R=int(R),
-                L=int(L),
-                alpha=float(alpha),
-                seed=vamana_seed,
+                R=int(bp.R),
+                L=int(bp.L),
+                alpha=float(bp.alpha),
+                seed=master_seed,
                 num_threads=int(num_threads),
                 dram_budget_gb=float(dram_budget_gb),
             )
@@ -236,25 +277,27 @@ class Index:
             num_elements=int(n),
             main_dimension=int(resolved_main_dim),
             dimension=int(raw_dim),
-            degree_bound=int(R),
-            rotator_seed=rotator_seed,
+            degree_bound=int(bp.R),
+            rotator_seed=master_seed,
             rotator_dump_path="",
         )
-        if not (skip_existing and validate_laser_index(prefix, int(R), int(resolved_main_dim), int(n))):
+        if not (skip_existing and validate_laser_index(prefix, int(bp.R), int(resolved_main_dim), int(n))):
             raw.build_index(
                 vamana_file=vamana_path,
                 data_file=prefix,
-                EF=int(ef_indexing),
+                EF=int(bp.ef_indexing),
                 num_thread=int(num_threads),
             )
 
         loaded = False
         if auto_load:
             raw.load(prefix, float(dram_budget_gb))
+            # Sane defaults so a freshly-built index is searchable without an
+            # explicit set_params() call. Override via Index.set_params(...).
             raw.set_params(
-                ef_search=int(ef_indexing),
+                ef_search=int(bp.ef_indexing),
                 num_threads=_effective_threads(int(num_threads)),
-                beam_width=int(beam_width),
+                beam_width=16,
             )
             loaded = True
 
@@ -263,7 +306,7 @@ class Index:
             n=int(n),
             raw_dim=int(raw_dim),
             main_dim=int(resolved_main_dim),
-            R=int(R),
+            R=int(bp.R),
             prefix=prefix,
         )
         return cls(raw=raw, prefix=prefix, params=params, loaded=loaded)
@@ -305,7 +348,6 @@ class Index:
             rotator_dump_path="",
         )
         raw.load(base, float(dram_budget_gb))
-        raw.set_params(ef_search=200, num_threads=_effective_threads(0), beam_width=16)
 
         params = _IndexParams(
             metric="l2",
@@ -350,4 +392,4 @@ class Index:
         )
 
 
-__all__ = ["Index"]
+__all__ = ["BuildParams", "Index"]
