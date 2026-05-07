@@ -163,12 +163,14 @@ def _ensure_input_vectors(path: Path, count: int, dim: int, seed: int) -> None:
 
 def _ensure_required_imports() -> tuple[object, object]:
     try:
-        from alayalite import laser, vamana  # pylint: disable=import-outside-toplevel
+        from alayalite import vamana  # pylint: disable=import-outside-toplevel
+        from alayalite.laser import RawIndex  # pylint: disable=import-outside-toplevel
     except ImportError as exc:
         first_error = exc
         _ensure_python_path()
         try:
-            from alayalite import laser, vamana  # pylint: disable=import-outside-toplevel
+            from alayalite import vamana  # pylint: disable=import-outside-toplevel
+            from alayalite.laser import RawIndex  # pylint: disable=import-outside-toplevel
         except ImportError as retry_exc:
             _die(
                 "requires the AlayaLite Python extension with LASER enabled. "
@@ -176,7 +178,7 @@ def _ensure_required_imports() -> tuple[object, object]:
                 "where `import alayalite.laser` succeeds. "
                 f"Original import error: {first_error}; retry after adding python/src: {retry_exc}"
             )
-    return laser, vamana
+    return RawIndex, vamana
 
 
 def _ensure_optional_imports() -> tuple[object, object, object]:
@@ -331,7 +333,7 @@ def _laser_required_valid(paths: dict[str, Path], count: int, main_dim: int) -> 
 
 
 def _ensure_laser_artifacts(
-    laser_module: object,
+    raw_index_cls: object,
     vamana_graph_path: Path,
     output_dir: Path,
     prefix: str,
@@ -349,7 +351,7 @@ def _ensure_laser_artifacts(
         return
 
     print(f"[laser-fixture] building native LASER artifacts with prefix={prefix}")
-    index = laser_module.Index(
+    index = raw_index_cls(
         index_type="QG",
         metric="l2",
         num_elements=count,
@@ -429,7 +431,7 @@ def main() -> int:
     medoid_vectors_path = output_dir / f"{prefix}_medoids"
     vamana_graph_path = output_dir / f"{prefix}_vamana_graph.index"
 
-    laser_module, vamana_module = _ensure_required_imports()
+    raw_index_cls, vamana_module = _ensure_required_imports()
     _ensure_input_vectors(input_path, args.count, args.dim, args.seed)
     _ensure_pca_artifacts(
         input_path,
@@ -461,7 +463,7 @@ def main() -> int:
         args.dram_budget_gb,
     )
     _ensure_laser_artifacts(
-        laser_module,
+        raw_index_cls,
         vamana_graph_path,
         output_dir,
         prefix,

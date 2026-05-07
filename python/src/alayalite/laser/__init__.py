@@ -392,4 +392,9 @@ class Index:
         )
 
 
-__all__ = ["BuildParams", "Index"]
+# Re-exported raw pybind class for callers that need step-by-step construction
+# (e.g. the disk-test LASER fixture). Use Index.fit() above for normal usage.
+RawIndex = _raw_laser_mod.Index
+
+
+__all__ = ["BuildParams", "Index", "RawIndex"]
