@@ -72,7 +72,7 @@ def test_pca_outputs_are_byte_identical_with_fixed_seed_and_single_thread(tmp_pa
 
 
 def test_force_single_thread_requires_all_alignment_seeds(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[4]
     spec = importlib.util.spec_from_file_location(
         "laser_example_main",
         repo_root / "examples" / "laser" / "main.py",

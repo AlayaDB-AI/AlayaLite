@@ -12,15 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-This module defines and exposes default configuration parameters for the AlayaLite library,
-such as default values for index build and search parameters.
-"""
+"""Tests for LASER seed derivation utilities."""
 
-from ._alayalitepy import defaults as _defaults
+from __future__ import annotations
 
-R = _defaults.R
-L = _defaults.L
-M = _defaults.M
-NUM_THREADS = _defaults.NUM_THREADS
-EF = _defaults.EF
+from alayalite.laser._seeds import derive_subseeds
+
+
+def test_derive_subseeds_is_stable_for_same_master_seed() -> None:
+    a = derive_subseeds(42)
+    b = derive_subseeds(42)
+    assert a == b
+
+
+def test_derive_subseeds_do_not_overlap_for_different_master_seeds() -> None:
+    a = derive_subseeds(1)
+    b = derive_subseeds(2)
+    assert set(a).isdisjoint(set(b))

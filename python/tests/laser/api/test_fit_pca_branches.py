@@ -1,0 +1,73 @@
+# Copyright 2025 AlayaDB.AI
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for Index.fit PCA and no-PCA code paths."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pytest
+from _laser_support import DISK_LASER_SUPPORTED  # noqa: E402
+
+pytestmark = pytest.mark.skipif(
+    not DISK_LASER_SUPPORTED,
+    reason="disk_laser is not supported on this build/platform",
+)
+
+
+def _vectors(n: int, dim: int, seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    return rng.normal(size=(n, dim)).astype(np.float32)
+
+
+def test_fit_runs_pca_when_main_dim_less_than_raw_dim(tmp_path: Path) -> None:
+    from alayalite import laser  # pylint: disable=import-outside-toplevel
+
+    vectors = _vectors(n=1024, dim=256, seed=11)
+    laser.Index.fit(
+        vectors,
+        output_dir=tmp_path,
+        name="pca_on",
+        main_dim=128,
+        R=64,
+        seed=42,
+        num_threads=1,
+        disable_medoid=True,
+    )
+
+    assert (tmp_path / "pca_on_pca_base.fbin").is_file()
+    assert (tmp_path / "pca_on_pca.bin").is_file()
+
+
+def test_fit_skips_pca_when_main_dim_equals_raw_dim_and_warning_is_expected(tmp_path: Path, capfd) -> None:
+    from alayalite import laser  # pylint: disable=import-outside-toplevel
+
+    vectors = _vectors(n=512, dim=128, seed=12)
+    laser.Index.fit(
+        vectors,
+        output_dir=tmp_path,
+        name="pca_off",
+        main_dim=128,
+        R=64,
+        seed=42,
+        num_threads=1,
+        disable_medoid=True,
+    )
+    captured = capfd.readouterr()
+
+    assert (tmp_path / "pca_off_pca_base.fbin").is_file()
+    assert not (tmp_path / "pca_off_pca.bin").exists()
+    assert "Warning: PCA file not found" in captured.err

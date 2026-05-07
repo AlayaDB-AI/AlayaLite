@@ -4,7 +4,7 @@ This page introduces the Python interfaces in AlayaLite, which include two layer
 
 **Collection**: Manages raw data and its relationship with indexes. Users can build their knowledge base by integrating our *Collection* into other tools like [Open WebUI](https://github.com/open-webui/open-webui) and [LangChain](https://github.com/langchain-ai/langchain), or building their own RAG application following [our tutorial](https://github.com/AlayaDB-AI/AlayaLite/blob/main/examples/rag/README.md).
 
-**Index**: Handles search, insert, and delete operations for indexes. Researchers and developers can modify it to enhance algorithms or mechanisms. We support ANN-Benchmark evaluation in [here](https://github.com/AlayaDB-AI/AlayaLite/blob/main/python/adapters/annbenchmark/alayalite).
+**Index**: Handles search, insert, and delete operations for indexes. Researchers and developers can modify it to enhance algorithms or mechanisms. We support ANN-Benchmark evaluation in [here](https://github.com/AlayaDB-AI/AlayaLite/blob/main/python/adapters/annbenchmark/alayalite). The adapter exposes both the in-memory `AlayaLite` path and a `disk_laser` path. The `disk_laser` adapter currently requires a LASER-enabled Linux build, supports `L2` / Euclidean only, and runs search through the current single-threaded binding surface.
 
 <p align="center">
     <img src="https://github.com/AlayaDB-AI/AlayaLite/blob/main/.assets/user-portrait.svg?raw=true" width=800 alt="AlayaDB Logo"></a>

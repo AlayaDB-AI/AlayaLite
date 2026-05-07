@@ -206,19 +206,6 @@ class IndexParams:
         )
 
 
-@classmethod
-class RAGParams:
-    """Parameters for configuring Retrieval-Augmented Generation (RAG) processes."""
-
-    chunker: str = "fix_size"  # [fix_size, semantic, sentence]
-    chunk_size: int = 1024
-    chunk_overlap: int = 0
-    semantic_model: str = "all-MiniLM-L6-v2"
-
-    embedder: str = "bge"  # [bge, m3e, multilingual, jina]
-    embedder_model_path: str = ""
-
-
 def load_schema(url) -> dict:
     if not os.path.exists(url):
         raise FileNotFoundError("The schema file does not exist!")

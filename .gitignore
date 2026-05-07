@@ -1,75 +1,78 @@
-CMakeLists.txt.user
-CMakeCache.txt
-CMakeFiles
-CMakeScripts
-Testing
-# Makefile
-cmake_install.cmake
-install_manifest.txt
-compile_commands.json
-CTestTestfile.cmake
-_deps
-CMakeUserPresets.json
-build
-build_asan
-build_tsan
-TEST*
-**/__pycache__
-.cache
-.vscode/*
-*.so
+# CMake / build artifacts
+/CMakeLists.txt.user
+/CMakeCache.txt
+/CMakeFiles/
+/CMakeScripts/
+/Testing/
+/TEST*
+/cmake_install.cmake
+/install_manifest.txt
+/compile_commands.json
+/CTestTestfile.cmake
+/_deps/
+/CMakeUserPresets.json
+/build/
+/build_asan/
+/build_tsan/
+/build-tidy
 
-# logs
-.claude
-.codex
-logs/
-results/
-openspec/
-
-# lint
-build-tidy
-
-#python extension module ignores
+# Python artifacts
+__pycache__/
 *.py[cod]
 *$py.class
-wheels/
-python/alayalite.egg-info/
-python/dist/
-
-**/*.egg-info
-wheelhouse/*
-**/*.whl
-dist/*
-venv*/**
+*.so
+*.egg-info/
+*.whl
+/wheels/
+/wheelhouse/
+/dist/
+/python/dist/
+/python/alayalite.egg-info/
+/.venv*/
+/venv*/
+/.pytest_cache/
+/.mypy_cache/
+/.ruff_cache/
+/.uv-cache/
+/.cache/
 *.swp
-**/__pycache__
 
-# data
-data/*
+# Editor / local workflow
+/.vscode/
+/.claude/
+/.codex/
+/.superpowers/
+/.worktree/
+/.worktrees/
+/openspec/
+/docs/superpowers/
+
+# Data / generated outputs
+/data/
+/logs/
+/results/
 
 # Laser reproduce configs: paths are machine-specific (dev-box hard-coded).
 # Only canonical examples + alignment-contract configs are tracked;
 # copy + edit locally for your own runs.
-examples/laser/configs/*.toml
-!examples/laser/configs/gist.toml
-!examples/laser/configs/synth_20k_768d_alayaP.toml
-!examples/laser/configs/synth_100k_512d_alayaP.toml
+/examples/laser/configs/*.toml
+!/examples/laser/configs/gist.toml
+!/examples/laser/configs/synth_20k_768d_alayaP.toml
+!/examples/laser/configs/synth_100k_512d_alayaP.toml
 
-# codecov
-.coverage
-coverage.xml
-coverage_c++.info
+# Coverage
+/.coverage
+/coverage.xml
+/coverage_c++.info
 
-# perf
-perf.data
-perf.data.old
-flamegraph.svg
+# Perf
+/perf.data
+/perf.data.old
+/flamegraph.svg
 
-# claude code
-CLAUDE.md
+# Tool memory files
+/CLAUDE.md
+/AGENTS.md
 
-# codex
-AGENTS.md
-.codex
-
-package-lock.json
+# Node
+/package-lock.json

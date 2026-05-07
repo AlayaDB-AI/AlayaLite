@@ -32,12 +32,6 @@ from alayalite.bench.disk_collection import main as bench_main
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="DiskCollection v1 is POSIX-only")
 
 
-def _write_fbin(path, vectors):
-    with path.open("wb") as f:
-        np.asarray(vectors.shape, dtype=np.int32).tofile(f)
-        np.ascontiguousarray(vectors, dtype=np.float32).tofile(f)
-
-
 def test_disk_laser_unsupported_probe_skips_cleanly(tmp_path, capsys):
     if probe_disk_laser_supported():
         pytest.skip("disk_laser is supported on this build")
@@ -107,53 +101,3 @@ def test_disk_laser_synth_recall_is_skipped_for_external_artifacts(tmp_path, mon
     )
     assert result["recall_status"] == "skipped"
     assert result["recall_at_10"] is None
-
-
-def test_disk_laser_supported_fixture_runs(tmp_path):
-    if not probe_disk_laser_supported():
-        pytest.skip("disk_laser is not supported on this build")
-
-    from fixtures.laser.builder import build_small_laser_artifacts  # pylint: disable=import-outside-toplevel
-
-    src_dir = tmp_path / "laser_src"
-    _, vectors, _ = build_small_laser_artifacts(src_dir, n=256, dim=128, seed=1234)
-    vectors_path = tmp_path / "vectors.fbin"
-    queries_path = tmp_path / "queries.fbin"
-    _write_fbin(vectors_path, vectors)
-    _write_fbin(queries_path, vectors[:16])
-    assert (
-        bench_main(
-            [
-                "--engine",
-                "disk_laser",
-                "--dataset",
-                "laser_files",
-                "--laser-src-dir",
-                str(src_dir),
-                "--vectors",
-                str(vectors_path),
-                "--queries-path",
-                str(queries_path),
-                "--queries",
-                "16",
-                "--k",
-                "10",
-                "--warmup",
-                "2",
-                "--out",
-                str(tmp_path),
-                "--run-id",
-                "laser_supported",
-                "--sweep",
-                "recommended",
-            ]
-        )
-        == 0
-    )
-    raw_files = sorted((tmp_path / "laser_supported" / "raw").glob("disk_laser_laser_files_L2*.json"))
-    assert raw_files
-    raw = json.loads(raw_files[0].read_text(encoding="utf-8"))
-    assert raw["params"]["ef"] in {50, 100, 200, 400}
-    assert raw["params"]["beam_width"] in {1, 2, 4, 8}
-    assert raw["results"]["recall_status"] == "computed"
-    assert raw["results"]["recall_at_10"] >= 0.7

@@ -19,3 +19,31 @@ float:
           fit_threads: 1 # only batch search
           search_threads: 1 # only batch search
         query_args: [[10, 20, 40, 60, 80, 120, 200, 400, 600, 800]]
+  - base_args: ['@metric', '@dimension']
+    constructor: AlayaLiteDiskLaser
+    disabled: false
+    docker_tag: ann-benchmarks-alayalite
+    module: ann_benchmarks.algorithms.alayalite
+    name: AlayaLiteDiskLaser
+    run_groups:
+      disk_laser:
+        args:
+          # Aligned with Laser/reproduce/configs/gist1m_seed_alayaV_origP.toml
+          # so adapter results map onto native seeded gist1m SUMMARY (run B).
+          R: 64
+          L: [200]
+          alpha: 1.2
+          seed: 42
+          beam_width: 16
+          fit_threads: 80
+          search_threads: 1
+          build_dram_budget_gb: 1.0
+          search_dram_budget_gb: 2.0
+          # Reuse the seeded 4-22 Vamana graph for byte-reproducible
+          # cross-version comparison against native B. Pre-4-23 budget_estimator
+          # logic produced 19 shards; today's unified formula picks 23.
+          # Pinning the input graph isolates timing-harness differences from
+          # Vamana shard-count differences. Set to "" (empty string) to fall
+          # back to building Vamana fresh under current code.
+          external_vamana_path: /md1/huangliang/alaya-dev/data/gist1m_seed_test/alaya_vamana/graph
+        query_args: [[30, 40, 50, 60, 80, 100, 130, 170, 220, 300, 400, 500]]
