@@ -47,13 +47,6 @@ def _generate_vectors(n: int, dim: int, seed: int) -> np.ndarray:
     return vectors
 
 
-def _write_fbin(path: Path, vectors: np.ndarray) -> None:
-    n, dim = vectors.shape
-    with path.open("wb") as f:
-        np.array([n, dim], dtype=np.int32).tofile(f)
-        vectors.astype(np.float32, copy=False).tofile(f)
-
-
 def build_small_laser_artifacts(
     target_dir: Path,
     *,
@@ -110,10 +103,9 @@ def build_small_laser_artifacts(
         # the modules are present; the except below stays for defence in
         # depth in case the runtime probe and the actual import disagree.
         from alayalite import laser as laser_module
-        from alayalite import vamana as vamana_module
     except ImportError as exc:
         raise RuntimeError(
-            "build_small_laser_artifacts requires alayalite.laser and alayalite.vamana, "
+            "build_small_laser_artifacts requires alayalite.laser, "
             "which are unavailable on this build. Skip via _laser_support.DISK_LASER_SUPPORTED "
             "before calling."
         ) from exc
@@ -122,38 +114,28 @@ def build_small_laser_artifacts(
     prefix = f"dsqg_{seg_basename}_R{R}_MD{main_dim}"
     qg_prefix = f"dsqg_{seg_basename}"
 
-    pca_base_path = target_dir / f"{qg_prefix}_pca_base.fbin"
-    vamana_graph_path = target_dir / f"{qg_prefix}_vamana_graph.index"
-
     vectors = _generate_vectors(n, dim, seed)
-    _write_fbin(pca_base_path, vectors)
-
-    vamana_module.build_index(
-        data_path=str(pca_base_path),
-        output_path=str(vamana_graph_path),
+    laser_module.Index.fit(
+        vectors,
+        output_dir=target_dir,
+        name=qg_prefix,
+        metric="l2",
+        main_dim=main_dim,
         R=R,
         L=max(R + 8, 100),
         alpha=1.2,
-        seed=seed,
+        ef_indexing=200,
         num_threads=1,
-        dram_budget_gb=1.0,
-    )
-
-    laser_index = laser_module.Index(
-        index_type="QG",
-        metric="l2",
-        num_elements=n,
-        main_dimension=main_dim,
-        dimension=dim,
-        degree_bound=R,
+        seed=seed,
+        pca_seed=seed,
+        medoid_seed=seed,
+        vamana_seed=seed,
         rotator_seed=seed,
-        rotator_dump_path="",
-    )
-    laser_index.build_index(
-        str(vamana_graph_path),
-        str(target_dir / qg_prefix),
-        EF=200,
-        num_thread=1,
+        ep_num=max(1, min(16, n)),
+        disable_medoid=True,
+        skip_existing=False,
+        auto_load=False,
+        dram_budget_gb=1.0,
     )
 
     required_paths = [
