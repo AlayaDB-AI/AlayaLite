@@ -561,17 +561,11 @@ def _run_native_path(dataset: DatasetSpec, params: dict, prefix: LaserPrefix) ->
             f"laser_compare: dataset has {dataset.queries.shape[0]} queries, fewer than --queries {timed_queries}"
         )
 
-    index = laser_module.Index(
-        index_type="QG",
-        metric="l2",
-        num_elements=int(prefix.N),
-        main_dimension=int(prefix.MD),
-        dimension=int(dataset.dim),
-        degree_bound=int(prefix.R),
-    )
-
     build_start = time.perf_counter()
-    index.load(str(prefix.base_prefix_path), dram_budget_gb)
+    index = laser_module.Index.from_prefix(
+        str(prefix.base_prefix_path),
+        dram_budget_gb=dram_budget_gb,
+    )
     build_wall_s = time.perf_counter() - build_start
     index.set_params(ef_search=ef, num_threads=num_threads, beam_width=beam_width)
 

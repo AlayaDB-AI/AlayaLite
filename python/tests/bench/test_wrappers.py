@@ -31,7 +31,7 @@ def _load_module(path: Path):
 
 
 def test_disk_laser_wrapper_forwards_legacy_input_flags(monkeypatch):
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     module = _load_module(repo_root / "python" / "benchmarks" / "disk_laser_smoke.py")
     captured = {}
 

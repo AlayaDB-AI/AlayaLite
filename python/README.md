@@ -6,6 +6,44 @@ This page introduces the Python interfaces in AlayaLite, which include two layer
 
 **Index**: Handles search, insert, and delete operations for indexes. Researchers and developers can modify it to enhance algorithms or mechanisms. We support ANN-Benchmark evaluation in [here](https://github.com/AlayaDB-AI/AlayaLite/blob/main/python/adapters/annbenchmark/alayalite). The adapter exposes both the in-memory `AlayaLite` path and a `disk_laser` path. The `disk_laser` adapter currently requires a LASER-enabled Linux build, supports `L2` / Euclidean only, and runs search through the current single-threaded binding surface.
 
+## LASER Unified Build API
+
+For the LASER on-disk QG path, use `alayalite.laser.Index.fit(...)` as the
+single entrypoint for build + optional load:
+
+```python
+import numpy as np
+from alayalite import laser
+
+vectors = np.random.default_rng(42).normal(size=(10000, 128)).astype(np.float32)
+
+idx = laser.Index.fit(
+    vectors,
+    output_dir="/tmp/laser_idx",
+    name="demo",
+    metric="l2",
+    main_dim=128,
+    R=64,
+    ef_indexing=200,
+    num_threads=8,
+    seed=42,
+    auto_load=True,  # default
+)
+
+hits = idx.search(vectors[0], 10)
+```
+
+If build and search happen in different processes, use `auto_load=False` on
+build and reopen with `from_prefix`:
+
+```python
+from alayalite import laser
+
+idx = laser.Index.from_prefix("/tmp/laser_idx/demo", dram_budget_gb=1.0)
+idx.set_params(ef_search=200, num_threads=8, beam_width=16)
+hits = idx.batch_search(queries, 10)
+```
+
 <p align="center">
     <img src="https://github.com/AlayaDB-AI/AlayaLite/blob/main/.assets/user-portrait.svg?raw=true" width=800 alt="AlayaDB Logo"></a>
 </p>

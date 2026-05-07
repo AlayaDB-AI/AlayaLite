@@ -49,7 +49,7 @@ def _read_manifest(path):
 
 
 def _pythonpath_env(**overrides):
-    repo_root = Path(__file__).resolve().parents[2]
+    repo_root = Path(__file__).resolve().parents[3]
     env = os.environ.copy()
     existing = env.get("PYTHONPATH")
     pythonpath = str(repo_root / "python" / "src")

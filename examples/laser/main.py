@@ -1,5 +1,10 @@
 """
-Laser Reproduce Pipeline
+Laser CLI wrapper around ``alayalite.laser.Index.fit``.
+
+This script used to inline the full PCA/medoid/Vamana/QG pipeline.
+It now preserves the same CLI step names for compatibility, but all build
+steps delegate to the unified Python API. New callers should prefer direct
+use of ``alayalite.laser.Index.fit``.
 
 Usage:
     uv run examples/laser/main.py -c examples/laser/configs/gist.toml all
@@ -33,7 +38,6 @@ from alayalite.laser.pretty import (  # pylint: disable=wrong-import-position
     separator,
     step_header,
     success,
-    warn,
 )
 
 STEPS = ["vamana", "pca", "medoid", "index", "search"]
@@ -245,6 +249,36 @@ def data_dir(cfg):
 # ── Steps ──
 
 
+def _fit_unified(cfg, *, auto_load: bool = False):
+    # pylint: disable=import-outside-toplevel
+    from alayalite import laser
+
+    ds_name = cfg["name"]
+    return laser.Index.fit(
+        cfg["base"],
+        output_dir=data_dir(cfg),
+        name=f"dsqg_{ds_name}",
+        metric=cfg["metric"],
+        main_dim=cfg["main_dimension"],
+        R=cfg["degree"],
+        L=cfg["build_vamana_L"],
+        alpha=cfg["build_vamana_alpha"],
+        ef_indexing=cfg["ef_indexing"],
+        beam_width=cfg["beam_width"],
+        num_threads=cfg["build_threads"],
+        ep_num=cfg["ep_num"],
+        seed=42 if cfg["seed"] is None else int(cfg["seed"]),
+        pca_seed=cfg["pca_seed"],
+        medoid_seed=cfg["medoid_seed"],
+        vamana_seed=cfg["build_vamana_seed"],
+        rotator_seed=cfg["rotator_seed"],
+        dram_budget_gb=cfg["dram_budget"],
+        disable_medoid=False,
+        skip_existing=True,
+        auto_load=auto_load,
+    )
+
+
 # DiskANN single-file .index header: 24 bytes total.
 #   offset 0..7   uint64  expected_file_size
 #   offset 8..11  uint32  max_observed_degree  (= R)
@@ -273,200 +307,35 @@ def _read_vamana_header(path):
 
 
 def step_vamana(cfg):
-    from alayalite import vamana  # pylint: disable=import-outside-toplevel
-
     name = cfg["name"]
-    degree = cfg["degree"]
-    target_path = cfg["vamana"]
-
-    # Idempotence: skip if the target file exists with a valid DiskANN
-    # header matching the expected degree. This preserves the external-
-    # DiskANN trajectory (gist_diskann.toml) where the .index file is
-    # pre-built by upstream DiskANN and must not be overwritten.
-    if os.path.exists(target_path):
-        parsed = _read_vamana_header(target_path)
-        if parsed is not None:
-            file_size, expected_size, max_degree, _, frozen_pts = parsed
-            if file_size == expected_size and max_degree == degree and frozen_pts == 0:
-                warn(
-                    name,
-                    f"Vamana graph already valid at {target_path} "
-                    f"(R={max_degree}, {file_size:,} bytes). Skipping build.",
-                )
-                return
-            warn(
-                name,
-                f"Vamana graph at {target_path} is stale "
-                f"(expected R={degree}, frozen=0; got R={max_degree}, "
-                f"frozen={frozen_pts}, size={file_size}/{expected_size}). "
-                f"Rebuilding.",
-            )
-        else:
-            warn(
-                name,
-                f"Vamana graph at {target_path} has a malformed header. Rebuilding.",
-            )
-
-    # target_path may be a plain filename (relative to cwd) with no parent
-    # component; os.makedirs("", ...) raises FileNotFoundError, so gate on
-    # a non-empty dirname.
-    parent = os.path.dirname(target_path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    info(
-        name,
-        f"Building Vamana graph R{degree} L{cfg['build_vamana_L']} "  # pylint: disable=inconsistent-quotes
-        f"α={cfg['build_vamana_alpha']} seed={cfg['build_vamana_seed']} "  # pylint: disable=inconsistent-quotes
-        f"threads={cfg['build_vamana_num_threads']} "  # pylint: disable=inconsistent-quotes
-        f"budget={cfg['build_vamana_dram_budget_gb']}GiB → {target_path}",  # pylint: disable=inconsistent-quotes
-    )
+    info(name, "Unified API: building/validating artifacts via Index.fit(...)")
     t1 = time()
-    try:
-        vamana.build_index(
-            data_path=cfg["base"],
-            output_path=target_path,
-            R=degree,
-            L=cfg["build_vamana_L"],
-            alpha=cfg["build_vamana_alpha"],
-            seed=cfg["build_vamana_seed"],
-            num_threads=cfg["build_vamana_num_threads"],
-            dram_budget_gb=cfg["build_vamana_dram_budget_gb"],
-        )
-    except MemoryError as e:
-        # Surface a clearer hint for the partition-budget path's OOM case.
-        raise MemoryError(
-            f"Vamana build ran out of memory. Consider lowering "
-            f"[build_vamana].dram_budget_gb (currently "
-            f"{cfg['build_vamana_dram_budget_gb']}) to force a larger "  # pylint: disable=inconsistent-quotes
-            f"number of shards. Underlying error: {e}"
-        ) from e
-    success(name, f"Vamana graph done in {time() - t1:.1f}s → {target_path}")
+    _fit_unified(cfg, auto_load=False)
+    success(name, f"Unified fit pipeline done in {time() - t1:.1f}s")
 
 
 def step_pca(cfg):
-    # pylint: disable=import-outside-toplevel
-    from alayalite.laser.io import read_fbin
-    from alayalite.laser.pca import (
-        fit_incremental_pca,
-        load_pca_params,
-        pca_transform_and_save,
-        sample_vectors_from_fbin,
-        save_pca_params,
-    )
-
     name = cfg["name"]
-    ddir = data_dir(cfg)
-    pca_base_path = f"{ddir}/dsqg_{name}_pca_base.fbin"
-    pca_params_path = f"{ddir}/dsqg_{name}_pca.bin"
-
-    # Check if PCA transform is already complete
-    if os.path.exists(pca_base_path):
-        file_size = os.path.getsize(pca_base_path)
-        if file_size >= 8:
-            with open(pca_base_path, "rb") as f:
-                header_arr = np.fromfile(f, dtype=np.int32, count=2)
-            expected_size = 8 + int(header_arr[0]) * int(header_arr[1]) * 4
-            if file_size >= expected_size:
-                warn(name, "PCA files already exist. Skipping.")
-                return
-        # Incomplete file - resume if PCA params are saved
-        if os.path.exists(pca_params_path):
-            info(name, f"Incomplete PCA base detected ({file_size:,} bytes). Resuming...")
-            vectors = read_fbin(cfg["base"])
-            pca = load_pca_params(pca_params_path)
-            t1 = time()
-            pca_transform_and_save(vectors, pca, pca_base_path)
-            success(name, f"PCA resume done in {time() - t1:.1f}s -> {pca_base_path}")
-            return
-
-    os.makedirs(ddir, exist_ok=True)
-    info(name, f"Loading base vectors from {cfg['base']}")  # pylint: disable=inconsistent-quotes
-    # seed=None falls through to numpy's global RNG (non-deterministic) —
-    # reproducible runs must set pca_seed in the TOML.
-    vectors, sample_vecs = sample_vectors_from_fbin(cfg["base"], seed=cfg["pca_seed"])
-    _, d = vectors.shape
-    info(name, f"Vectors: {vectors.shape[0]:,} x {d}d, samples: {sample_vecs.shape[0]:,}")
-
+    info(name, "Unified API: building/validating artifacts via Index.fit(...)")
     t1 = time()
-    pca = fit_incremental_pca(sample_vecs, n_components=d)
-    save_pca_params(pca, pca_params_path)
-    pca_transform_and_save(vectors, pca, pca_base_path)
-    success(name, f"PCA done in {time() - t1:.1f}s -> {pca_base_path}")
+    _fit_unified(cfg, auto_load=False)
+    success(name, f"Unified fit pipeline done in {time() - t1:.1f}s")
 
 
 def step_medoid(cfg):
-    from alayalite.laser.medoid import generate_and_save_medoids  # pylint: disable=import-outside-toplevel
-
     name = cfg["name"]
-    ddir = data_dir(cfg)
-    base_path = f"{ddir}/dsqg_{name}_pca_base.fbin"
-
-    if not os.path.exists(base_path):
-        warn(name, "PCA base not found. Run 'pca' step first.")
-        return
-
-    indices_path = f"{ddir}/dsqg_{name}_medoids_indices"
-    vectors_path = f"{ddir}/dsqg_{name}_medoids"
-
-    if os.path.exists(indices_path) and os.path.exists(vectors_path):
-        warn(name, "Medoids already exist. Skipping.")
-        return
-
-    info(name, f"Generating {cfg['ep_num']} medoids...")  # pylint: disable=inconsistent-quotes
+    info(name, "Unified API: building/validating artifacts via Index.fit(...)")
     t1 = time()
-    generate_and_save_medoids(
-        base_path,
-        indices_path,
-        vectors_path,
-        cfg["ep_num"],
-        seed=cfg["medoid_seed"],
-    )
-    success(name, f"Medoid done in {time() - t1:.1f}s")
+    _fit_unified(cfg, auto_load=False)
+    success(name, f"Unified fit pipeline done in {time() - t1:.1f}s")
 
 
 def step_index(cfg):
-    # pylint: disable=import-outside-toplevel
-    from alayalite import laser
-    from alayalite.laser.io import read_fbin
-
     name = cfg["name"]
-    ddir = data_dir(cfg)
-    degree = cfg["degree"]
-    md = cfg["main_dimension"]
-
-    build_threads = cfg["build_threads"]
-    ef_indexing = cfg["ef_indexing"]
-
-    info(
-        name,
-        f"Building index R{degree}_MD{md} (threads={build_threads}, ef={ef_indexing})...",
-    )
-    base = read_fbin(f"{ddir}/dsqg_{name}_pca_base.fbin", use_mmap=True)
-    N, D = base.shape  # pylint: disable=invalid-name
-    info(name, f"Vectors: {N:,} x {D}d")
-
-    rotator_seed = cfg["rotator_seed"]
-    rotator_dump_path = f"{ddir}/dsqg_{name}_rotator_signs.bin" if cfg["dump_rotator"] else ""
-    if rotator_seed or rotator_dump_path:
-        info(
-            name,
-            f"alignment-mode: rotator_seed={rotator_seed}  dump_path={rotator_dump_path or '(off)'}",  # pylint: disable=inconsistent-quotes
-        )
-
+    info(name, "Unified API: building/validating artifacts via Index.fit(...)")
     t1 = time()
-    index = laser.Index(
-        index_type="QG",
-        metric=cfg["metric"],
-        num_elements=N,
-        main_dimension=md,
-        dimension=D,
-        degree_bound=degree,
-        rotator_seed=rotator_seed,
-        rotator_dump_path=rotator_dump_path,
-    )
-    index_path = f"{ddir}/dsqg_{name}"
-    index.build_index(cfg["vamana"], index_path, EF=ef_indexing, num_thread=build_threads)
-    success(name, f"Index R{degree}_MD{md} done in {time() - t1:.1f}s")
+    _fit_unified(cfg, auto_load=False)
+    success(name, f"Unified fit pipeline done in {time() - t1:.1f}s")
 
 
 def _find_efs(index, query, gt, nq, topk):
@@ -520,26 +389,18 @@ def step_search(cfg):
     single_search = num_threads == 1
 
     info(name, "Loading data...")
-    base = read_fbin(f"{ddir}/dsqg_{name}_pca_base.fbin")
     query = read_fbin(cfg["query"])
     gt = read_ibin(cfg["gt"])
 
     NQ = query.shape[0]  # pylint: disable=invalid-name
-    N, D = base.shape  # pylint: disable=invalid-name
-    info(name, f"Base: {N:,} x {D}d, Queries: {NQ:,}, GT: {gt.shape}")
+    info(name, f"Queries: {NQ:,}, GT: {gt.shape}")
 
-    info(name, f"Loading index R{degree}_MD{md}...")
+    info(name, f"Loading index R{degree}_MD{md} from prefix...")
     m1 = get_memory_usage()
-    index = laser.Index(
-        index_type="QG",
-        metric=cfg["metric"],
-        num_elements=N,
-        main_dimension=md,
-        dimension=D,
-        degree_bound=degree,
+    index = laser.Index.from_prefix(
+        f"{ddir}/dsqg_{name}",
+        dram_budget_gb=cfg["dram_budget"],
     )
-    index_path = f"{ddir}/dsqg_{name}"
-    index.load(index_path, cfg["dram_budget"])
     memory = get_memory_usage() - m1
     info(name, f"Index loaded, memory: {memory:.1f} MB")
 
