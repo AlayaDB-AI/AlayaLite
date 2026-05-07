@@ -50,7 +50,7 @@ EFS = [80, 90, 100, 110, 130, 150, 200, 250, 300, 400, 500]
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--vamana-path", required=True, type=Path, help="Pre-built Vamana .index file (DiskANN format)")
-    p.add_argument("--tag", required=True, choices=["diskann", "lite"], help="Label for the Vamana source")
+    p.add_argument("--tag", required=True, help="Label for the Vamana source (used in output path)")
     args = p.parse_args()
 
     from alayalite import laser
