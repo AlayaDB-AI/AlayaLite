@@ -64,7 +64,7 @@ class BuildParams:
     metric: str = "l2"
     main_dim: int | None = None
     R: int = 64  # pylint: disable=invalid-name
-    L: int = 100  # pylint: disable=invalid-name
+    L: int = 200  # pylint: disable=invalid-name
     alpha: float = 1.2
     ef_indexing: int = 200
     ep_num: int = 300
