@@ -173,7 +173,7 @@ def step_search(index_prefix: str, N: int, D: int, out_csv: Path) -> None:
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--vamana-path", required=True, type=Path, help="Pre-built Vamana .index file (DiskANN format)")
-    p.add_argument("--tag", required=True, choices=["diskann", "lite"], help="Label for the Vamana source")
+    p.add_argument("--tag", required=True, help="Label for the Vamana source (used in output path)")
     args = p.parse_args()
 
     artifacts = TMP / f"orig_{args.tag}"
