@@ -64,7 +64,7 @@ struct BuildVamanaParams {
   std::string_view data_path{};
   std::string_view output_path{};
   uint32_t R = 64;
-  uint32_t L = 100;
+  uint32_t L = 200;
   float alpha = 1.2F;
   uint32_t num_threads = 0;  // 0 → omp_get_num_procs() at call time
   uint64_t seed = 1234;
@@ -108,7 +108,7 @@ struct VamanaNumericDefaults {
 };
 inline constexpr VamanaNumericDefaults kFrozenDefaults{
     .R = 64,
-    .L = 100,
+    .L = 200,
     .alpha = 1.2F,
     .num_threads = 0,
     .seed = 1234,

@@ -30,7 +30,7 @@ vamana = "/md1/huangliang/alaya-dev/build_graph/synth_20k_768d/alaya/R64_L100_a1
 output = "/md1/huangliang/alaya-dev/build_graph/synth_20k_768d/laser_port_alayaP"
 
 [build_vamana]
-L = 100
+L = 200
 alpha = 1.2
 seed = 1234
 num_threads = 1

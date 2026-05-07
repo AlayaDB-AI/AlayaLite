@@ -275,7 +275,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--beam-width", dest="beam_width", type=int, default=4)
     parser.add_argument("--max-pending-bytes", type=_parse_max_pending_bytes, default=None)
     # Vamana build parameters. Defaults match the deleted disk_vamana_smoke.py
-    # (R=64, L=100, alpha=1.2, seed=42) so historical Vamana numbers are
+    # (R=64, L=200, alpha=1.2, seed=42) so historical Vamana numbers are
     # cross-comparable.
     parser.add_argument(
         "--vamana-R", dest="vamana_R", type=int, default=64, help="disk_vamana: per-vertex neighbour cap (default 64)."

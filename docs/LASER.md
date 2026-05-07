@@ -89,7 +89,7 @@ vamana.build_index(
     data_path="/path/to/base.fbin",
     output_path="/path/to/graph.index",
     R=64,                        # matches Laser's degree_bound below
-    L=100,
+    L=200,
     alpha=1.2,
     seed=1234,
     num_threads=0,               # 0 → omp_get_num_procs()
@@ -127,28 +127,26 @@ k = 10
 ids = index.batch_search(queries, k)   # (NQ, k) uint32
 ```
 
-Helper modules for the full build-then-search pipeline live under
-`alayalite.laser.{io, pca, medoid, groundtruth, eval, preprocess,
-beam_size, memory, pretty}` (ported from `Laser/src/laser/*.py`). The
-integrated `examples/laser/main.py` wires all five steps — `vamana →
-pca → medoid → index → search` — into a single invocation; the separate
-Python API above exists for users who want finer control or who are
-integrating Laser into a larger pipeline.
+The unified `alayalite.laser.Index.fit(...)` runs the full
+PCA / medoid / Vamana / QG pipeline in one call; `examples/laser/main.py`
+wraps it behind two CLI steps (`build` and `search`). Direct Python API
+above remains for callers who want to integrate Laser into a larger
+pipeline.
 
 ## CLI
 
 The paper-reproduction pipeline sits at `examples/laser/`:
 
 ```bash
-# All five steps: Vamana build → PCA fit → medoid pick → Laser index build → EF sweep search.
+# Both steps: build → EF sweep search.
 uv run examples/laser/main.py -c examples/laser/configs/gist.toml all
 
 # Or just search (assumes an existing index under the config's output dir).
 uv run examples/laser/main.py -c examples/laser/configs/gist.toml search \\
     --threads 1 --efs 100 200 300
 
-# Or a subset — steps run in the order you type them on the command line.
-uv run examples/laser/main.py -c examples/laser/configs/gist.toml vamana pca
+# Build only (no search).
+uv run examples/laser/main.py -c examples/laser/configs/gist.toml build
 ```
 
 Bundled configs: `gist.toml` (gist1m + AlayaV Vamana), `gist_diskann.toml`
@@ -176,7 +174,7 @@ from alayalite import vamana
 vamana.build_index(
     data_path="/path/to/base.fbin",
     output_path="/path/to/graph.index",
-    R=64, L=100, alpha=1.2, seed=1234,
+    R=64, L=200, alpha=1.2, seed=1234,
     num_threads=0, dram_budget_gb=32.0,
 )
 ```
@@ -207,7 +205,7 @@ alignment research against DiskANN's `search_memory_index`.
 
 ```toml
 [build_vamana]             # all fields optional; defaults from kDefaultVamanaBuildParams
-L = 100
+L = 200
 alpha = 1.2
 seed = 1234
 num_threads = 0            # 0 → omp_get_num_procs() at call time
@@ -239,7 +237,7 @@ The single-shard Vamana build is inherently non-deterministic at
 `num_threads > 1`: OpenMP's `schedule(dynamic)` assigns nodes to threads
 in a wall-clock-dependent order, so the candidate pool ordering inside
 `search_for_point_and_prune` is not run-reproducible. Recall at `R=64
-L=100 α=1.2` drifts by up to ±0.3pp run-to-run on the same data; this
+L=200 α=1.2` drifts by up to ±0.3pp run-to-run on the same data; this
 is the builder's native variance, not a regression.
 
 `num_threads=1` collapses this axis and is what Gate G1 pins.

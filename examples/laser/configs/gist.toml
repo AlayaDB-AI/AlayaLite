@@ -37,7 +37,7 @@ output = "/path/to/build_graph/gist1m/laser_port"
 # Optional Vamana build parameters. Defaults come from
 # `alaya::vamana::kDefaultVamanaBuildParams` in
 # include/index/graph/vamana/build_dispatch.hpp:
-#   L = 100, alpha = 1.2, seed = 1234, num_threads = 0 (= omp_get_num_procs),
+#   L = 200, alpha = 1.2, seed = 1234, num_threads = 0 (= omp_get_num_procs),
 #   dram_budget_gb = 32.0
 #
 # R is NOT listed here — it is read from [dataset].degree to enforce the
@@ -49,7 +49,7 @@ output = "/path/to/build_graph/gist1m/laser_port"
 # node with `numactl --cpunodebind=0 --membind=0` produces slightly lower
 # but more reproducible recall. See docs/LASER.md for the full table.
 # [build_vamana]
-# L = 100
+# L = 200
 # alpha = 1.2
 # seed = 1234
 # num_threads = 0

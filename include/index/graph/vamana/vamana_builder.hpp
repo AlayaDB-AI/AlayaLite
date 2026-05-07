@@ -42,7 +42,7 @@ inline constexpr float GRAPH_SLACK_FACTOR = 1.3f;
 
 struct VamanaBuildParams {
   uint32_t R = 64;           // graph degree bound
-  uint32_t L = 100;          // build-time beam width
+  uint32_t L = 200;          // build-time beam width
   float alpha = 1.2f;        // α-RNG pruning parameter
   uint32_t num_threads = 0;  // 0 → omp_get_num_procs()
   uint32_t maxc = 750;       // occlude_list pool cap

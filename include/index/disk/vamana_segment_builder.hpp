@@ -49,7 +49,7 @@ namespace alaya::disk {
 // `VamanaSegmentBuildParams` produces the same graph as `VamanaBuilder{}`.
 struct VamanaSegmentBuildParams {
   uint32_t R = 64;
-  uint32_t L = 100;
+  uint32_t L = 200;
   float alpha = 1.2F;
   uint32_t num_threads = 0;  // 0 → omp_get_num_procs()
   uint64_t seed = 1234;

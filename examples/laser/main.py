@@ -1,10 +1,9 @@
 """
 Laser CLI wrapper around ``alayalite.laser.Index.fit``.
 
-This script used to inline the full PCA/medoid/Vamana/QG pipeline.
-It now preserves the same CLI step names for compatibility, but all build
-steps delegate to the unified Python API. New callers should prefer direct
-use of ``alayalite.laser.Index.fit``.
+Two steps:
+- ``build``  — runs the full PCA/medoid/Vamana/QG pipeline via ``Index.fit``.
+- ``search`` — loads the built index and runs an EF sweep.
 
 Usage:
     uv run examples/laser/main.py -c examples/laser/configs/gist.toml all
@@ -92,7 +91,7 @@ def get_memory_usage():
     return psutil.Process().memory_info().rss / 1024 / 1024
 
 
-STEPS = ["vamana", "pca", "medoid", "index", "search"]
+STEPS = ["build", "search"]
 
 # DEFAULTS for all optional fields. The `build_vamana_*` entries mirror
 # `alaya::vamana::kDefaultVamanaBuildParams` in
@@ -108,7 +107,7 @@ DEFAULTS = {
     "ef_indexing": 200,
     "warmup": 10,
     "runs": 30,
-    "build_vamana_L": 100,
+    "build_vamana_L": 200,
     "build_vamana_alpha": 1.2,
     "build_vamana_seed": 1234,
     "build_vamana_num_threads": 0,
@@ -321,7 +320,7 @@ def _fit_unified(cfg, *, auto_load: bool = False):
         ),
         num_threads=cfg["build_threads"],
         seed=42 if cfg["seed"] is None else int(cfg["seed"]),
-        dram_budget_gb=cfg["dram_budget"],
+        dram_budget_gb=cfg["build_vamana_dram_budget_gb"],
         skip_existing=True,
         auto_load=auto_load,
     )
@@ -354,36 +353,12 @@ def _read_vamana_header(path):
     return file_size, expected_size, max_degree, start, frozen_pts
 
 
-def step_vamana(cfg):
+def step_build(cfg):
     name = cfg["name"]
-    info(name, "Unified API: building/validating artifacts via Index.fit(...)")
+    info(name, "Building/validating LASER artifacts via Index.fit(...)")
     t1 = time()
     _fit_unified(cfg, auto_load=False)
-    success(name, f"Unified fit pipeline done in {time() - t1:.1f}s")
-
-
-def step_pca(cfg):
-    name = cfg["name"]
-    info(name, "Unified API: building/validating artifacts via Index.fit(...)")
-    t1 = time()
-    _fit_unified(cfg, auto_load=False)
-    success(name, f"Unified fit pipeline done in {time() - t1:.1f}s")
-
-
-def step_medoid(cfg):
-    name = cfg["name"]
-    info(name, "Unified API: building/validating artifacts via Index.fit(...)")
-    t1 = time()
-    _fit_unified(cfg, auto_load=False)
-    success(name, f"Unified fit pipeline done in {time() - t1:.1f}s")
-
-
-def step_index(cfg):
-    name = cfg["name"]
-    info(name, "Unified API: building/validating artifacts via Index.fit(...)")
-    t1 = time()
-    _fit_unified(cfg, auto_load=False)
-    success(name, f"Unified fit pipeline done in {time() - t1:.1f}s")
+    success(name, f"Build done in {time() - t1:.1f}s")
 
 
 def _find_efs(index, query, gt, nq, topk):
@@ -532,10 +507,7 @@ def step_search(cfg):
 
 
 STEP_FUNCS = {
-    "vamana": step_vamana,
-    "pca": step_pca,
-    "medoid": step_medoid,
-    "index": step_index,
+    "build": step_build,
     "search": step_search,
 }
 

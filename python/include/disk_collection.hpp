@@ -221,7 +221,7 @@ class PyDiskCollection {
                    const std::string &index_type,
                    size_t max_pending_bytes = DiskCollection::kDefaultMaxPendingBytes,
                    int64_t vamana_R = 64,
-                   int64_t vamana_L = 100,
+                   int64_t vamana_L = 200,
                    double vamana_alpha = 1.2,
                    int64_t vamana_seed = 1234,
                    int64_t vamana_num_threads = 0) {

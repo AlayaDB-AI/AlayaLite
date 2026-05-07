@@ -78,7 +78,7 @@ def _build_manual_pipeline(root: Path, name: str, vectors: np.ndarray, *, seed: 
         data_path=str(raw_path),
         output_path=str(graph),
         R=64,
-        L=100,
+        L=200,
         alpha=1.2,
         seed=seed,
         num_threads=1,
@@ -113,7 +113,7 @@ def test_unified_fit_is_byte_equal_to_manual_pipeline_at_single_thread(tmp_path:
         build_params=laser.BuildParams(
             main_dim=128,
             R=64,
-            L=100,
+            L=200,
             alpha=1.2,
             ef_indexing=200,
             disable_medoid=True,
