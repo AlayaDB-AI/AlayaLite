@@ -1,4 +1,4 @@
-# CMake / build artifacts
+# Build artifacts
 /CMakeLists.txt.user
 /CMakeCache.txt
 /CMakeFiles/
@@ -35,9 +35,24 @@ __pycache__/
 /.ruff_cache/
 /.uv-cache/
 /.cache/
-*.swp
 
-# Editor / local workflow
+# Research / experiments (machine-local exploratory scripts)
+/experiments/
+
+# Data / generated outputs
+/data/
+/logs/
+/results/
+
+# Config overrides (Laser reproduce configs: paths are machine-specific)
+# Only canonical examples + alignment-contract configs are tracked;
+# copy + edit locally for your own runs.
+/examples/laser/configs/*.toml
+!/examples/laser/configs/gist.toml
+!/examples/laser/configs/synth_20k_768d_alayaP.toml
+!/examples/laser/configs/synth_100k_512d_alayaP.toml
+
+# Dev tooling
 /.vscode/
 /.claude/
 /.codex/
@@ -46,33 +61,19 @@ __pycache__/
 /.worktrees/
 /openspec/
 /docs/superpowers/
+*.swp
 
-# Data / generated outputs
-/data/
-/logs/
-/results/
-
-# Laser reproduce configs: paths are machine-specific (dev-box hard-coded).
-# Only canonical examples + alignment-contract configs are tracked;
-# copy + edit locally for your own runs.
-/examples/laser/configs/*.toml
-!/examples/laser/configs/gist.toml
-!/examples/laser/configs/synth_20k_768d_alayaP.toml
-!/examples/laser/configs/synth_100k_512d_alayaP.toml
-
-# Coverage
+# Profiling & coverage
+/perf.data
+/perf.data.old
+/flamegraph.svg
 /.coverage
 /coverage.xml
 /coverage_c++.info
 
-# Perf
-/perf.data
-/perf.data.old
-/flamegraph.svg
+# Package managers
+/package-lock.json
 
 # Tool memory files
 /CLAUDE.md
 /AGENTS.md
-
-# Node
-/package-lock.json
