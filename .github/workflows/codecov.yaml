@@ -53,7 +53,7 @@ jobs:
       uses: astral-sh/setup-uv@v5
 
     - name: Install dependencies
-      run: pip install pytest pytest-cov conan && sudo apt-get install -y lcov
+      run: pip install pytest pytest-cov conan && sudo apt-get install -y lcov libaio-dev
 
     - name: Run python code coverage
       run: |
@@ -91,7 +91,7 @@ jobs:
       uses: astral-sh/setup-uv@v5
 
     - name: Install dependencies
-      run: pip install pytest pytest-cov conan && sudo apt-get install -y lcov
+      run: pip install pytest pytest-cov conan && sudo apt-get install -y lcov libaio-dev
 
     - name: Run c++ code coverage
       run: bash scripts/ci/codecov/gnu_codecoverage.sh

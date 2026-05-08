@@ -49,12 +49,11 @@ jobs       :
     timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
-    - uses: astral-sh/ruff-action@v3
 
-    - name: Format code with Ruff
+    - name: Check formatting with Ruff
       uses: astral-sh/ruff-action@v3
       with:
-        args: format
+        args: format --check --diff
 
     - name: Lint code with Ruff
       uses: astral-sh/ruff-action@v3
@@ -93,6 +92,9 @@ jobs       :
     - name: Install uv
       uses: astral-sh/setup-uv@v5
 
+    - name: Install system dependencies
+      run: sudo apt-get install -y libaio-dev
+
     - name: Run Python unit/mock tests
       run: |
         uv sync --dev
@@ -100,7 +102,7 @@ jobs       :
 
   py-integration-test:
     runs-on: [self-hosted, laser]
-    if: github.event_name == 'workflow_dispatch' && inputs.run_integration == 'true'
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration
     timeout-minutes: 60
     steps:
     - uses: actions/checkout@v4
