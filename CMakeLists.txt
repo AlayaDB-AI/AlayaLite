@@ -59,13 +59,7 @@ else()
     list(APPEND ALAYA_SIMD_COMPILE_OPTIONS -mavx2 -mfma)
   endif()
 
-  add_compile_options(
-    -Wall
-    -Ofast
-    ${ALAYA_SIMD_COMPILE_OPTIONS}
-    -funroll-loops
-    -fopenmp
-  )
+  add_compile_options(-Wall -Ofast ${ALAYA_SIMD_COMPILE_OPTIONS} -funroll-loops)
 endif()
 
 # ============================================================================
