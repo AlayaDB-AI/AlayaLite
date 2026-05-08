@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import os
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -125,10 +124,9 @@ class AlayaLiteDiskLaser(BaseANN):
     ``Laser/reproduce/main.py`` internally: PCA rotation, medoid generation,
     Vamana graph construction, and QG build are all driven by a single call.
 
-    When ``external_vamana_path`` is set, the graph is copied to the expected
-    ``<prefix>_vamana_graph.index`` location before the call so that
-    ``Index.fit(skip_existing=True)`` skips the Vamana build step entirely,
-    enabling byte-reproducible cross-version comparisons.
+    ann-benchmarks provides search-time resource knobs in ``set_query_arguments``.
+    The adapter therefore builds with ``auto_load=False`` and loads the built
+    prefix later via ``Index.from_prefix(...)``.
     """
 
     def __init__(self, metric, dim, method_param):
@@ -156,6 +154,7 @@ class AlayaLiteDiskLaser(BaseANN):
         self.work_root = Path(method_param.get("work_root", "alaya_disk_laser_indices"))
         self.work_root.mkdir(parents=True, exist_ok=True)
 
+        self._built_prefix = None
         self.laser_index = None
         self.res = None
         self.ef = 100
@@ -174,20 +173,15 @@ class AlayaLiteDiskLaser(BaseANN):
                 f"disk_laser adapter needs n_samples ({vectors.shape[0]}) >= raw_dim ({self.raw_dim}) for PCA"
             )
 
+        if self.external_vamana_path is not None:
+            raise ValueError(
+                "disk_laser adapter: external_vamana_path is not supported with the unified Index.fit() API"
+            )
+
         work_dir = Path(tempfile.mkdtemp(prefix="annbenchmark_disk_laser_", dir=self.work_root))
         name = "dsqg_seg_00000001"
 
-        if self.external_vamana_path is not None:
-            ext_path = Path(self.external_vamana_path)
-            if not ext_path.is_file():
-                raise FileNotFoundError(
-                    f"disk_laser adapter: external_vamana_path is not a file: {self.external_vamana_path}"
-                )
-            # Copy to the path that Index.fit() generates for Vamana output so
-            # validate_vamana_index() triggers skip_existing and bypasses rebuild.
-            shutil.copy2(ext_path, work_dir / f"{name}_vamana_graph.index")
-
-        self.laser_index = laser.Index.fit(
+        laser.Index.fit(
             vectors,
             output_dir=work_dir,
             name=name,
@@ -203,13 +197,16 @@ class AlayaLiteDiskLaser(BaseANN):
             seed=self.seed,
             num_threads=self.fit_threads,
             dram_budget_gb=self.build_dram_budget_gb,
-            skip_existing=True,
-            auto_load=True,
+            skip_existing=False,
+            auto_load=False,
         )
-        self.laser_index.set_params(self.ef, self.search_threads, self.beam_width)
+        self._built_prefix = str(work_dir / name)
+        self.laser_index = None
 
     def set_query_arguments(self, ef):
         self.ef = int(ef)
+        if self._built_prefix is not None and self.laser_index is None:
+            self.laser_index = laser.Index.from_prefix(self._built_prefix, dram_budget_gb=self.search_dram_budget_gb)
         if self.laser_index is not None:
             self.laser_index.set_params(self.ef, self.search_threads, self.beam_width)
 
