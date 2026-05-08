@@ -48,6 +48,9 @@ jobs:
       uses: astral-sh/setup-uv@v5
       with:
         enable-cache: true
+        # Linux cibuildwheel uses a Docker-mounted uv cache; setup-uv's
+        # post-job prune can fail after successful wheel/artifact steps.
+        prune-cache: ${{ runner.os != 'Linux' }}
         cache-dependency-glob: uv.lock
         cache-local-path: ${{ runner.os == 'Linux' && '/home/runner/.cache/uv' || '' }}
 
