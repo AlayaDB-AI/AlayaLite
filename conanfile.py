@@ -40,8 +40,9 @@ class AlayaLiteConan(ConanFile):
             if self.settings.compiler in ["clang", "apple-clang"]:
                 self.requires("llvm-openmp/17.0.6")
         # GCC: assume libgomp is system-provided
-        elif self.settings.os == "Macos":
-            self.requires("llvm-openmp/17.0.6")
+        # macOS wheel builds use Homebrew libomp from cibuildwheel before-all.
+        # ConanCenter's llvm-openmp/17 runtime lacks symbols emitted by the
+        # hosted AppleClang 17 OpenMP lowering path.
 
     def configure(self):
         # Static link all dependencies
