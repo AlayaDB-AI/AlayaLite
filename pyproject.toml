@@ -103,7 +103,7 @@ before-all = "yum -y install libaio-devel perl-IPC-Cmd perl-Digest-SHA perl-Time
 
 [tool.cibuildwheel.macos]
 before-all = "brew install libomp"
-environment = { MACOSX_DEPLOYMENT_TARGET = "14.0" }
+environment = { MACOSX_DEPLOYMENT_TARGET = "15.0" }
 repair-wheel-command = "delocate-listdeps {wheel} && delocate-wheel -w {dest_dir} -v {wheel}"
 
 [tool.cibuildwheel.windows]
