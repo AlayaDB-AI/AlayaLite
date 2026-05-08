@@ -93,7 +93,7 @@ build-frontend = "build[uv]"
 skip = ["*-musllinux*", "*-manylinux_i686"]
 before-build = "python {project}/scripts/conan_build/conan_install.py --project-dir {project}"
 container-engine = "docker; create_args: -v ~/.conan2:/root/.conan2"
-test-requires = ["pytest", "pytest-asyncio", "httpx", "fastapi"]
+test-requires = ["pytest", "pytest-asyncio", "httpx", "fastapi", "pyyaml"]
 test-command = "pytest {project} -v"
 
 [tool.cibuildwheel.linux]
