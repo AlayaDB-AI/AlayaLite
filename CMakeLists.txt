@@ -31,14 +31,16 @@ if(BUILD_PYTHON
   )
 endif()
 
-# Laser on-disk QG index module. Linux-only because it depends on libaio (kernel io_submit / io_getevents). Non-Linux
-# builds skip it silently.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+# Laser on-disk QG index module. It depends on Linux libaio and the current ported QG scanner includes x86 SIMD headers.
+# Non-Linux or non-x86_64 builds skip it silently by default.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   set(ALAYA_ENABLE_LASER_DEFAULT ON)
 else()
   set(ALAYA_ENABLE_LASER_DEFAULT OFF)
 endif()
-option(ALAYA_ENABLE_LASER "Build the Laser disk-index module (requires Linux + libaio)" ${ALAYA_ENABLE_LASER_DEFAULT})
+option(ALAYA_ENABLE_LASER "Build the Laser disk-index module (requires Linux x86_64 + libaio)"
+       ${ALAYA_ENABLE_LASER_DEFAULT}
+)
 
 # ============================================================================
 # 1. C++ STANDARD AND COMPILER CONFIGURATION
@@ -101,6 +103,11 @@ endif()
 if(ALAYA_ENABLE_LASER)
   if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(FATAL_ERROR "ALAYA_ENABLE_LASER=ON but this is not Linux. "
+                        "Configure with -DALAYA_ENABLE_LASER=OFF to skip the Laser module."
+    )
+  endif()
+  if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    message(FATAL_ERROR "ALAYA_ENABLE_LASER=ON but the current Laser QG scanner requires x86_64 SIMD headers. "
                         "Configure with -DALAYA_ENABLE_LASER=OFF to skip the Laser module."
     )
   endif()

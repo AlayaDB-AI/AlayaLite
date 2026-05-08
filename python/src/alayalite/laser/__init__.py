@@ -32,7 +32,10 @@ from typing import Union
 
 import numpy as np
 
-from alayalite._alayalitepy import laser as _raw_laser_mod  # type: ignore[attr-defined]
+try:
+    from alayalite._alayalitepy import laser as _raw_laser_mod  # type: ignore[attr-defined]
+except (AttributeError, ImportError):
+    _raw_laser_mod = None
 
 from ._idempotence import (
     validate_laser_index,
@@ -93,6 +96,12 @@ class _IndexParams:
     main_dim: int
     R: int  # pylint: disable=invalid-name
     prefix: str
+
+
+def _require_raw_laser():
+    if _raw_laser_mod is None:
+        raise RuntimeError("alayalite.laser native bindings are not available in this build")
+    return _raw_laser_mod
 
 
 def _canonical_metric(metric: str) -> str:
@@ -285,7 +294,8 @@ class Index:
                 dram_budget_gb=float(dram_budget_gb),
             )
 
-        raw = _raw_laser_mod.Index(
+        raw_laser_mod = _require_raw_laser()
+        raw = raw_laser_mod.Index(
             index_type="QG",
             metric=metric,
             num_elements=int(n),
@@ -351,7 +361,8 @@ class Index:
             if base_n == n and base_dim >= file_main_dim:
                 raw_dim = base_dim
 
-        raw = _raw_laser_mod.Index(
+        raw_laser_mod = _require_raw_laser()
+        raw = raw_laser_mod.Index(
             index_type="QG",
             metric="l2",
             num_elements=int(n),
@@ -408,7 +419,7 @@ class Index:
 
 # Re-exported raw pybind class for callers that need step-by-step construction
 # (e.g. the disk-test LASER fixture). Use Index.fit() above for normal usage.
-RawIndex = _raw_laser_mod.Index
+RawIndex = _raw_laser_mod.Index if _raw_laser_mod is not None else None
 
 
 __all__ = ["BuildParams", "Index", "RawIndex"]
