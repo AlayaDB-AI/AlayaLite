@@ -61,18 +61,18 @@ jobs:
       uses: hendrikmuhs/ccache-action@v1
       with:
         key: >-
-          codecov-python-${{ runner.os }}-${{ runner.arch }}-Release-${{ hashFiles('CMakeLists.txt',
+          codecov-python-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-${{ hashFiles('CMakeLists.txt',
           'python/CMakeLists.txt', 'conanfile.py', 'scripts/conan_build/conan_install.py',
           'scripts/conan_build/conan_profile*', 'cmake/**/*.cmake') }}
         restore-keys: |
-          codecov-python-${{ runner.os }}-${{ runner.arch }}-Release-
+          codecov-python-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-
 
     - name: Install system dependencies
       run: sudo apt-get install -y libaio-dev
 
     - name: Build Python coverage environment
       run: |
-        export CMAKE_ARGS="-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+        export CMAKE_ARGS="-DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DALAYA_NATIVE_ARCH=OFF"
         uv sync --dev --locked
 
     - name: Save Conan cache
@@ -127,11 +127,11 @@ jobs:
       uses: hendrikmuhs/ccache-action@v1
       with:
         key: >-
-          codecov-cpp-${{ runner.os }}-${{ runner.arch }}-Debug-${{ hashFiles('CMakeLists.txt',
+          codecov-cpp-portable-v2-${{ runner.os }}-${{ runner.arch }}-Debug-${{ hashFiles('CMakeLists.txt',
           'tests/CMakeLists.txt', 'conanfile.py', 'scripts/conan_build/conan_install.py',
           'scripts/conan_build/conan_profile*', 'cmake/**/*.cmake', 'scripts/ci/codecov/gnu_codecoverage.sh') }}
         restore-keys: |
-          codecov-cpp-${{ runner.os }}-${{ runner.arch }}-Debug-
+          codecov-cpp-portable-v2-${{ runner.os }}-${{ runner.arch }}-Debug-
 
     - name: Install system dependencies
       run: sudo apt-get install -y lcov libaio-dev

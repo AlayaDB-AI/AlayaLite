@@ -103,18 +103,18 @@ jobs       :
       uses: hendrikmuhs/ccache-action@v1
       with:
         key: >-
-          py-unit-${{ runner.os }}-${{ runner.arch }}-Release-${{ hashFiles('CMakeLists.txt',
+          py-unit-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-${{ hashFiles('CMakeLists.txt',
           'python/CMakeLists.txt', 'conanfile.py', 'scripts/conan_build/conan_install.py',
           'scripts/conan_build/conan_profile*', 'cmake/**/*.cmake') }}
         restore-keys: |
-          py-unit-${{ runner.os }}-${{ runner.arch }}-Release-
+          py-unit-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-
 
     - name: Install system dependencies
       run: sudo apt-get install -y libaio-dev
 
     - name: Build Python test environment
       run: |
-        export CMAKE_ARGS="-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+        export CMAKE_ARGS="-DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DALAYA_NATIVE_ARCH=OFF"
         uv sync --dev --locked
 
     - name: Save Conan cache

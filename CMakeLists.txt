@@ -19,6 +19,17 @@ include(cmake/Codecov.cmake)
 option(ENABLE_COVERAGE "Enable code coverage instrumentation" OFF)
 option(BUILD_PYTHON "Build Python extension module" ON)
 option(BUILD_TESTING "Build tests" OFF)
+option(ALAYA_NATIVE_ARCH "Compile with -march=native for host-specific builds" OFF)
+option(ALAYA_ALLOW_NATIVE_PACKAGE "Allow BUILD_PYTHON with host-specific -march=native" OFF)
+
+if(BUILD_PYTHON
+   AND ALAYA_NATIVE_ARCH
+   AND NOT ALAYA_ALLOW_NATIVE_PACKAGE
+)
+  message(FATAL_ERROR "ALAYA_NATIVE_ARCH=ON makes Python package builds host-specific and unsafe to distribute. "
+                      "Use -DALAYA_ALLOW_NATIVE_PACKAGE=ON only for local, non-distributable builds."
+  )
+endif()
 
 # Laser on-disk QG index module. Linux-only because it depends on libaio (kernel io_submit / io_getevents). Non-Linux
 # builds skip it silently.
@@ -41,10 +52,17 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
   add_compile_options(/EHsc /utf-8 /O2)
 else()
+  set(ALAYA_SIMD_COMPILE_OPTIONS)
+  if(ALAYA_NATIVE_ARCH)
+    list(APPEND ALAYA_SIMD_COMPILE_OPTIONS -march=native)
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+    list(APPEND ALAYA_SIMD_COMPILE_OPTIONS -mavx2 -mfma)
+  endif()
+
   add_compile_options(
     -Wall
     -Ofast
-    -march=native
+    ${ALAYA_SIMD_COMPILE_OPTIONS}
     -funroll-loops
     -fopenmp
   )
@@ -124,13 +142,11 @@ if(ALAYA_ENABLE_LASER)
               spdlog::spdlog_header_only
   )
   target_compile_features(alaya_laser INTERFACE cxx_std_20)
-  # NOTE: Laser's FastScan / L2 kernels dispatch on __AVX2__ / __AVX512F__ and therefore require SIMD compile flags at
-  # the TU that instantiates them. Those flags (and EIGEN_DONT_PARALLELIZE, needed so Eigen's thread pool doesn't
-  # contend with Laser's OpenMP) are applied PRIVATE on the two actual consumers (python/CMakeLists.txt and
-  # tests/laser/CMakeLists.txt) instead of on this INTERFACE, to avoid polluting every downstream that links
-  # alaya_laser. _ALAYA_LASER_CONSUMER_OPTIONS lists the flags each consumer must apply itself.
+  # NOTE: Laser's FastScan / L2 kernels still depend on compile-time SIMD macros in a few headers. Portable package
+  # builds intentionally omit host-specific flags here; native flags are reserved for explicitly host-bound local builds
+  # until those kernels are migrated to function-level runtime dispatch.
   set(_ALAYA_LASER_CONSUMER_OPTIONS
-      -march=native -ftree-vectorize -DEIGEN_DONT_PARALLELIZE
+      ${ALAYA_SIMD_COMPILE_OPTIONS} -ftree-vectorize -DEIGEN_DONT_PARALLELIZE
       CACHE INTERNAL "Compile options a Laser-consuming target must apply PRIVATEly"
   )
 endif()

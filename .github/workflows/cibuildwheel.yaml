@@ -29,6 +29,7 @@ jobs:
 
     env:
       CONAN_NON_INTERACTIVE: 1
+      CMAKE_ARGS: -DALAYA_NATIVE_ARCH=OFF -DBUILD_TOOLS=OFF
       # CI specific config: mount Conan and uv cache in Linux Docker
       CIBW_CONTAINER_ENGINE: 'docker; create_args: -v /home/runner/.conan2:/root/.conan2 -v /home/runner/.cache/uv:/root/.cache/uv'
       CIBW_ARCHS_LINUX: ${{ matrix.arch }}

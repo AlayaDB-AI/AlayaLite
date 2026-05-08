@@ -23,6 +23,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOWS = ROOT / ".github" / "workflows"
 CONAN_CACHE_ACTION = ROOT / ".github" / "actions" / "cache-restore" / "action.yaml"
+CMAKE_LISTS = ROOT / "CMakeLists.txt"
 
 
 def _yaml(path: Path) -> dict:
@@ -120,3 +121,53 @@ def test_cpp_heavy_jobs_enable_ccache() -> None:
     assert _uses(cpp_steps, "hendrikmuhs/ccache-action@v1")
     assert "CMAKE_CXX_COMPILER_LAUNCHER=ccache" in _named_step(unit_steps, "Build Python test environment")["run"]
     assert "CMAKE_CXX_COMPILER_LAUNCHER=ccache" in _named_step(cpp_steps, "Run c++ code coverage")["run"]
+
+
+def test_ccache_builds_disable_native_arch() -> None:
+    """Do not cache -march=native objects across heterogeneous GitHub runners."""
+
+    unit_steps = _steps("code-checker.yaml", "py-unit-test")
+    coverage_steps = _steps("codecov.yaml", "codecov-python")
+    wheel_env = _yaml(WORKFLOWS / "cibuildwheel.yaml")["jobs"]["build_wheels"]["env"]
+    codecov_script = (ROOT / "scripts" / "ci" / "codecov" / "gnu_codecoverage.sh").read_text(encoding="utf-8")
+
+    assert "-DALAYA_NATIVE_ARCH=OFF" in _named_step(unit_steps, "Build Python test environment")["run"]
+    assert "-DALAYA_NATIVE_ARCH=OFF" in _named_step(coverage_steps, "Build Python coverage environment")["run"]
+    assert "-DALAYA_NATIVE_ARCH=OFF" in wheel_env["CMAKE_ARGS"]
+    assert "-DALAYA_NATIVE_ARCH=OFF" in codecov_script
+
+
+def test_cibuildwheel_builds_portable_package_targets() -> None:
+    wheel_env = _yaml(WORKFLOWS / "cibuildwheel.yaml")["jobs"]["build_wheels"]["env"]
+    cmake_args = wheel_env["CMAKE_ARGS"]
+
+    assert "-DALAYA_NATIVE_ARCH=OFF" in cmake_args
+    assert "-DBUILD_TOOLS=OFF" in cmake_args
+
+
+def test_ccache_keys_are_versioned_for_portable_isa_reset() -> None:
+    ccache_steps = [
+        _uses(_steps("code-checker.yaml", "py-unit-test"), "hendrikmuhs/ccache-action@v1")[0],
+        _uses(_steps("codecov.yaml", "codecov-python"), "hendrikmuhs/ccache-action@v1")[0],
+        _uses(_steps("codecov.yaml", "codecov-cpp"), "hendrikmuhs/ccache-action@v1")[0],
+    ]
+
+    assert all("portable-v2" in step["with"]["key"] for step in ccache_steps)
+    assert all("portable-v2" in step["with"]["restore-keys"] for step in ccache_steps)
+
+
+def test_cmake_defaults_to_portable_native_arch_and_guards_packages() -> None:
+    cmake_text = CMAKE_LISTS.read_text(encoding="utf-8")
+
+    assert 'option(ALAYA_NATIVE_ARCH "Compile with -march=native for host-specific builds" OFF)' in cmake_text
+    assert "option(ALAYA_ALLOW_NATIVE_PACKAGE" in cmake_text
+    assert "if(BUILD_PYTHON" in cmake_text
+    assert "AND ALAYA_NATIVE_ARCH" in cmake_text
+    assert "AND NOT ALAYA_ALLOW_NATIVE_PACKAGE" in cmake_text
+
+
+def test_portable_cmake_uses_avx2_baseline_without_native_or_avx512() -> None:
+    cmake_text = CMAKE_LISTS.read_text(encoding="utf-8")
+
+    assert "list(APPEND ALAYA_SIMD_COMPILE_OPTIONS -mavx2 -mfma)" in cmake_text
+    assert "list(APPEND ALAYA_SIMD_COMPILE_OPTIONS -mavx512" not in cmake_text
