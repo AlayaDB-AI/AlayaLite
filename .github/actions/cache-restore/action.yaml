@@ -1,26 +1,50 @@
 ---
 name       : alayalite cache
 description: |
-  Restore Conan dependency cache (~/.conan2) for AlayaLite C++ builds. The
-  cache key is keyed on build type plus the files that drive the Conan
-  dependency graph, so changes to cmake/ConanSetup.cmake (which decides
-  whether/how Conan runs) correctly invalidate the cache.
+  Restore or save the Conan dependency cache (~/.conan2) for AlayaLite C++
+  builds. The cache key is keyed on target architecture, build type, and the
+  files that drive the Conan dependency graph.
 
 inputs     :
+  mode:
+    description: Cache operation to run (restore or save).
+    required: false
+    default: restore
   build-type:
     description: CMAKE_BUILD_TYPE (Debug, Release, etc.)
     required: false
     default: Release
+  target-arch:
+    description: Target architecture for Conan/cibuildwheel cache isolation.
+    required: true
+
+outputs    :
+  cache-hit:
+    description: Whether the restore operation found an exact cache hit.
+    value: ${{ steps.restore-conan-cache.outputs.cache-hit }}
 
 runs       :
   using: composite
   steps:
   - name: Restore Conan cache
-    uses: actions/cache@v4
+    id: restore-conan-cache
+    if: ${{ inputs.mode == 'restore' }}
+    uses: actions/cache/restore@v5
     with:
       path: ~/.conan2
-      key: conan-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-type }}-${{ hashFiles('conanfile.py', 
-        'scripts/conan_build/conan_profile*', 'cmake/ConanSetup.cmake') }}
+      key: >-
+        conan-v2-${{ runner.os }}-${{ inputs.target-arch }}-${{ inputs.build-type }}-${{ hashFiles('conanfile.py',
+        'scripts/conan_build/conan_install.py', 'scripts/conan_build/conan_profile*', 'cmake/ConanSetup.cmake',
+        'pyproject.toml') }}
       restore-keys: |
-        conan-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-type }}-
-        conan-${{ runner.os }}-${{ runner.arch }}-
+        conan-v2-${{ runner.os }}-${{ inputs.target-arch }}-${{ inputs.build-type }}-
+
+  - name: Save Conan cache
+    if: ${{ inputs.mode == 'save' }}
+    uses: actions/cache/save@v5
+    with:
+      path: ~/.conan2
+      key: >-
+        conan-v2-${{ runner.os }}-${{ inputs.target-arch }}-${{ inputs.build-type }}-${{ hashFiles('conanfile.py',
+        'scripts/conan_build/conan_install.py', 'scripts/conan_build/conan_profile*', 'cmake/ConanSetup.cmake',
+        'pyproject.toml') }}

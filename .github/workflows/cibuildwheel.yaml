@@ -30,7 +30,7 @@ jobs:
     env:
       CONAN_NON_INTERACTIVE: 1
       # CI specific config: mount Conan and uv cache in Linux Docker
-      CIBW_CONTAINER_ENGINE: 'docker; create_args: -v /home/runner/.conan2:/root/.conan2'
+      CIBW_CONTAINER_ENGINE: 'docker; create_args: -v /home/runner/.conan2:/root/.conan2 -v /home/runner/.cache/uv:/root/.cache/uv'
       CIBW_ARCHS_LINUX: ${{ matrix.arch }}
       CIBW_ARCHS_MACOS: ${{ matrix.arch }}
       CIBW_ARCHS_WINDOWS: ${{ matrix.arch }}
@@ -41,13 +41,28 @@ jobs:
     - name: Set up uv
       uses: astral-sh/setup-uv@v5
       with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
         cache-local-path: ${{ runner.os == 'Linux' && '/home/runner/.cache/uv' || '' }}
 
     - name: Restore Conan cache
+      id: conan-cache
       uses: ./.github/actions/cache-restore
+      with:
+        build-type: Release
+        target-arch: ${{ matrix.arch }}
 
     - name: Build wheels
       uses: pypa/cibuildwheel@v3.3
+
+    - name: Save Conan cache
+      if: steps.conan-cache.outputs.cache-hit != 'true'
+      continue-on-error: true
+      uses: ./.github/actions/cache-restore
+      with:
+        mode: save
+        build-type: Release
+        target-arch: ${{ matrix.arch }}
 
     - uses: actions/upload-artifact@v4
       with:

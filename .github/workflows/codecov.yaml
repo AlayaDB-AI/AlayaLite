@@ -44,20 +44,48 @@ jobs:
       with:
         fetch-depth: 2
 
-    - name: Restore Caches
+    - name: Restore Conan cache
+      id: conan-cache
       uses: ./.github/actions/cache-restore
       with:
-        build-type: Debug
+        build-type: Release
+        target-arch: ${{ runner.arch }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
 
-    - name: Install dependencies
-      run: pip install pytest pytest-cov conan && sudo apt-get install -y lcov libaio-dev
+    - name: Restore compiler cache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: >-
+          codecov-python-${{ runner.os }}-${{ runner.arch }}-Release-${{ hashFiles('CMakeLists.txt',
+          'python/CMakeLists.txt', 'conanfile.py', 'scripts/conan_build/conan_install.py',
+          'scripts/conan_build/conan_profile*', 'cmake/**/*.cmake') }}
+        restore-keys: |
+          codecov-python-${{ runner.os }}-${{ runner.arch }}-Release-
+
+    - name: Install system dependencies
+      run: sudo apt-get install -y libaio-dev
+
+    - name: Build Python coverage environment
+      run: |
+        export CMAKE_ARGS="-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
+        uv sync --dev --locked
+
+    - name: Save Conan cache
+      if: steps.conan-cache.outputs.cache-hit != 'true'
+      continue-on-error: true
+      uses: ./.github/actions/cache-restore
+      with:
+        mode: save
+        build-type: Release
+        target-arch: ${{ runner.arch }}
 
     - name: Run python code coverage
       run: |
-        uv sync --dev
         uv run pytest --cov --cov-branch --cov-report=xml
 
     - name: Upload Python coverage to Codecov
@@ -82,19 +110,43 @@ jobs:
       with:
         fetch-depth: 2
 
-    - name: Restore Caches
+    - name: Restore Conan cache
+      id: conan-cache
       uses: ./.github/actions/cache-restore
       with:
         build-type: Debug
+        target-arch: ${{ runner.arch }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
 
-    - name: Install dependencies
-      run: pip install pytest pytest-cov conan && sudo apt-get install -y lcov libaio-dev
+    - name: Restore compiler cache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: >-
+          codecov-cpp-${{ runner.os }}-${{ runner.arch }}-Debug-${{ hashFiles('CMakeLists.txt',
+          'tests/CMakeLists.txt', 'conanfile.py', 'scripts/conan_build/conan_install.py',
+          'scripts/conan_build/conan_profile*', 'cmake/**/*.cmake', 'scripts/ci/codecov/gnu_codecoverage.sh') }}
+        restore-keys: |
+          codecov-cpp-${{ runner.os }}-${{ runner.arch }}-Debug-
+
+    - name: Install system dependencies
+      run: sudo apt-get install -y lcov libaio-dev
 
     - name: Run c++ code coverage
-      run: bash scripts/ci/codecov/gnu_codecoverage.sh
+      run: CMAKE_CXX_COMPILER_LAUNCHER=ccache bash scripts/ci/codecov/gnu_codecoverage.sh
+
+    - name: Save Conan cache
+      if: steps.conan-cache.outputs.cache-hit != 'true'
+      continue-on-error: true
+      uses: ./.github/actions/cache-restore
+      with:
+        mode: save
+        build-type: Debug
+        target-arch: ${{ runner.arch }}
 
     - name: Upload C++ coverage to Codecov
       uses: codecov/codecov-action@v5
