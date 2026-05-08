@@ -55,11 +55,11 @@ class AlayaLiteConan(ConanFile):
         self.options["rocksdb"].with_lz4 = True
         self.options["rocksdb"].with_zstd = True
 
-        if self.settings.os == "Linux":
-            self.options["libcoro"].feature_networking = False
-            self.options["libcoro"].feature_tls = False
-            self.options["libcoro"].build_examples = False
-            self.options["libcoro"].build_tests = False
+        # The project uses libcoro task/mutex primitives, not its networking/TLS
+        # layer. ConanCenter's libcoro networking option pulls in epoll-only
+        # sources that do not build on macOS.
+        self.options["libcoro"].with_networking = False
+        self.options["libcoro"].with_ssl = False
 
     def generate(self):
         tc = CMakeToolchain(self)
