@@ -99,7 +99,7 @@ test-command = "pytest {project} -v"
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"
 manylinux-aarch64-image = "manylinux_2_28"
-before-all = "yum -y install perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece"
+before-all = "yum -y install libaio-devel perl-IPC-Cmd perl-Digest-SHA perl-Time-Piece"
 
 [tool.cibuildwheel.macos]
 before-all = "brew install libomp"

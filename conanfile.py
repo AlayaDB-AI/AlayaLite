@@ -38,10 +38,10 @@ class AlayaLiteConan(ConanFile):
         # OpenMP support
         if self.settings.os == "Linux":
             if self.settings.compiler in ["clang", "apple-clang"]:
-                self.requires("libomp/18.1.8")
+                self.requires("llvm-openmp/17.0.6")
         # GCC: assume libgomp is system-provided
         elif self.settings.os == "Macos":
-            self.requires("libomp/18.1.8")
+            self.requires("llvm-openmp/17.0.6")
 
     def configure(self):
         # Static link all dependencies
