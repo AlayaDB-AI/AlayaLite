@@ -173,11 +173,6 @@ if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
 
-option(BUILD_TOOLS "Build standalone C++ CLI tools under tools/" ON)
-if(BUILD_TOOLS)
-  add_subdirectory(tools/build_vamana_index)
-endif()
-
 if(BUILD_PYTHON)
   add_subdirectory(python)
 endif()
