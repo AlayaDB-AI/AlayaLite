@@ -4,7 +4,7 @@ build_type=Release
 compiler=apple-clang
 compiler.cppstd=20
 compiler.libcxx=libc++
-compiler.version=15
+compiler.version=17
 os=Macos
 
 [conf]
