@@ -1,24 +1,26 @@
 ---
 name       : alayalite cache
-description: Cache Conan data with build type support
+description: |
+  Restore Conan dependency cache (~/.conan2) for AlayaLite C++ builds. The
+  cache key is keyed on build type plus the files that drive the Conan
+  dependency graph, so changes to cmake/ConanSetup.cmake (which decides
+  whether/how Conan runs) correctly invalidate the cache.
+
 inputs     :
   build-type:
     description: CMAKE_BUILD_TYPE (Debug, Release, etc.)
     required: false
     default: Release
+
 runs       :
   using: composite
   steps:
-  - name: Ensure Conan directory exists
-    shell: bash
-    run: mkdir -p ~/.conan2
-
-  - name: Cache Conan data
+  - name: Restore Conan cache
     uses: actions/cache@v4
     with:
       path: ~/.conan2
-      key: conan-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-type }}-${{ hashFiles('**/conanfile.py', 
-        '**/conan_profile*') }} # NOLINT
+      key: conan-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-type }}-${{ hashFiles('conanfile.py', 
+        'scripts/conan_build/conan_profile*', 'cmake/ConanSetup.cmake') }}
       restore-keys: |
         conan-${{ runner.os }}-${{ runner.arch }}-${{ inputs.build-type }}-
         conan-${{ runner.os }}-${{ runner.arch }}-
