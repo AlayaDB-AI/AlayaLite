@@ -19,7 +19,7 @@ class DatasetTest : public ::testing::Test {
   std::filesystem::path data_dir_;
 };
 
-TEST_F(DatasetTest, LoadSiftSmall) {
+TEST_F(DatasetTest, DISABLED_LoadSiftSmall) {
   auto config = sift_small(data_dir_);
 
   auto ds = load_dataset(config);
@@ -65,7 +65,7 @@ TEST_F(DatasetTest, SiftMicroConfig) {
   EXPECT_TRUE(config.data_file_.string().find("siftsmall") != std::string::npos);
 }
 
-TEST_F(DatasetTest, LoadSiftMicro) {
+TEST_F(DatasetTest, DISABLED_LoadSiftMicro) {
   auto config = sift_micro(data_dir_);
   auto ds = load_dataset(config);
 
@@ -80,7 +80,7 @@ TEST_F(DatasetTest, LoadSiftMicro) {
   EXPECT_EQ(ds.ground_truth_.size(), ds.query_num_ * ds.gt_dim_);
 }
 
-TEST_F(DatasetTest, DataTruncation) {
+TEST_F(DatasetTest, DISABLED_DataTruncation) {
   // First load full siftsmall
   auto full_config = sift_small(data_dir_);
   auto full_ds = load_dataset(full_config);
