@@ -127,12 +127,12 @@ TEST(MetadataFilterConditionTest, EvaluatesCollectionAndContainsOperators) {
   };
 
   EXPECT_TRUE(make_condition("category",
-                             FilterOp::IN,
+                             FilterOp::IN_SET,
                              int64_t(0),
                              {std::string("books"), std::string("music")})
                   .evaluate(metadata));
   EXPECT_TRUE(make_condition("category",
-                             FilterOp::NOT_IN,
+                             FilterOp::NOT_IN_SET,
                              int64_t(0),
                              {std::string("games"), std::string("video")})
                   .evaluate(metadata));
@@ -289,7 +289,7 @@ TEST_F(MetadataFilterExecutorTest, ExactAndInFiltersUseIndexFastPath) {
   expect_matches(matches, {1, 0, 1, 0});
 
   auto in_filter = make_single_condition_filter("category",
-                                                FilterOp::IN,
+                                                FilterOp::IN_SET,
                                                 int64_t(0),
                                                 {std::string("books"),
                                                  std::string("music"),
@@ -381,7 +381,7 @@ TEST_F(MetadataFilterExecutorTest, NonIndexedAndUnsupportedFiltersFallBackToRawE
   expect_mask(result, {false, true, true, false});
 
   auto not_in_filter = make_single_condition_filter("category",
-                                                    FilterOp::NOT_IN,
+                                                    FilterOp::NOT_IN_SET,
                                                     int64_t(0),
                                                     {std::string("books")});
   MetadataFilterExecutor<TestID> not_in_executor(not_in_filter, storage.get(), 4);
