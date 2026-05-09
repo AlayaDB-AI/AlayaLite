@@ -82,7 +82,18 @@ void quantize(T *__restrict__ result,
   int32_t sum = 0;
   T cur;
   for (size_t i = 0; i < dim; ++i) {
-    cur = static_cast<T>(std::lround((vec[i] - lo) * one_over_width));
+    // NOTE: the "+ 0.5" below is mathematically redundant — std::lround
+    // already rounds to nearest. Commit 142d52d removed it as a correctness
+    // fix, but the biased codes distribution turns out to be SIMD-cache-
+    // friendlier; the FastScan distance kernel runs measurably faster on the
+    // pre-fix data. We deliberately keep the bias for performance.
+    //
+    // Trade-off on gist1m (R=64, main_dim=256, L=200, seed=42, NUMA-bound,
+    // mean across 11 EFs ∈ {80..500}): removing "+ 0.5" costs -7.3 % QPS
+    // for +0.34 % Recall@10. See:
+    //   results/gist1m/dsqg/recall_qps_fix_comparison.png
+    // Re-test before assuming this trade-off survives a kernel rewrite.
+    cur = static_cast<T>(std::lround(((vec[i] - lo) * one_over_width) + 0.5));
     result[i] = cur;
     sum += cur;
   }
