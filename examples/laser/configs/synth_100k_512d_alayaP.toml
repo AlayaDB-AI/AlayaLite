@@ -1,13 +1,9 @@
-# Tier A nightly gate — port (alayaP) side.
-# Paired with Laser/reproduce/configs/synth_100k_512d_origP.toml.
-# Same invariant triple as the 20k_768d daily gate; only the dataset differs.
+# Synthetic 100k × 512d config for the unified LASER CLI wrapper.
+# Use the master seed; per-step alignment fields are retired from
+# `examples/laser/main.py`.
 
-pca_seed = 42
-medoid_seed = 42
-rotator_seed = 42
-force_single_thread = true
+seed = 42
 build_threads = 1
-dump_rotator = true
 
 [dataset]
 name = "synth_100k_512d"
@@ -19,17 +15,11 @@ main_dimension = 256
 base = "/md1/huangliang/alaya-dev/data/synth_100k_512d/base.fbin"
 query = "/md1/huangliang/alaya-dev/data/synth_100k_512d/query.fbin"
 gt = "/md1/huangliang/alaya-dev/data/synth_100k_512d/gt.ibin"
-# AlayaLite-side Vamana at R64_L100_a1.2 is the canonical Tier A input;
-# exists already per port-laser-disk-index validation.
-vamana = "/md1/huangliang/alaya-dev/build_graph/synth_100k_512d/alaya/R64_L100_a1.2/graph.index"
-# Default output; the Tier A harness overrides this per-side at invoke time.
 output = "/md1/huangliang/alaya-dev/build_graph/synth_100k_512d/laser_port_alayaP"
 
 [build_vamana]
 L = 200
 alpha = 1.2
-seed = 1234
-num_threads = 1
 dram_budget_gb = 1.0
 
 [build]

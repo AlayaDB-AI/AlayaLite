@@ -131,6 +131,14 @@ def validate_seed_sidecar(prefix: str, seed: int) -> bool:
         return False
 
 
+def invalidate_seed_sidecar(prefix: str) -> None:
+    """Remove ``<prefix>_seed.txt`` if present before rebuilding mismatched artifacts."""
+    try:
+        os.remove(seed_sidecar_path(prefix))
+    except FileNotFoundError:
+        pass
+
+
 def write_seed_sidecar(prefix: str, seed: int) -> None:
     """Atomically publish ``<prefix>_seed.txt`` with the master seed.
 

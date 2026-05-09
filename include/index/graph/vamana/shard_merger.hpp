@@ -266,7 +266,10 @@ inline uint64_t merge_shards(const std::vector<std::filesystem::path> &shard_gra
 
   // Open output. Reserve 24 bytes for the header; patch bytes 0..7 after
   // we know the final file size. Matches `vamana_writer::save_graph`.
-  std::filesystem::create_directories(output_path.parent_path());
+  const auto output_parent = output_path.parent_path();
+  if (!output_parent.empty()) {
+    std::filesystem::create_directories(output_parent);
+  }
   std::ofstream out(output_path, std::ios::binary | std::ios::trunc);
   if (!out.is_open()) {
     throw std::runtime_error("merge_shards: cannot open output " + output_path.string());

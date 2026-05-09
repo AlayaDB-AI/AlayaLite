@@ -71,6 +71,49 @@ def test_pca_outputs_are_byte_identical_with_fixed_seed_and_single_thread(tmp_pa
     assert first_pca_base == second_pca_base
 
 
+def test_sample_vectors_keeps_at_least_raw_dim_rows_when_available(tmp_path: Path) -> None:
+    from alayalite.laser._pca import sample_vectors_from_fbin  # pylint: disable=import-outside-toplevel
+
+    rng = np.random.default_rng(2025)
+    vectors = rng.normal(size=(512, 256)).astype(np.float32)
+    base_path = tmp_path / "base.fbin"
+    _write_fbin(base_path, vectors)
+
+    _, sample_vectors = sample_vectors_from_fbin(
+        str(base_path),
+        sample_ratio=0.25,
+        seed=123,
+    )
+
+    assert sample_vectors.shape == (256, 256)
+
+
+def test_sample_vectors_returns_all_rows_when_raw_dim_exceeds_count(tmp_path: Path) -> None:
+    from alayalite.laser._pca import sample_vectors_from_fbin  # pylint: disable=import-outside-toplevel
+
+    rng = np.random.default_rng(2026)
+    vectors = rng.normal(size=(128, 256)).astype(np.float32)
+    base_path = tmp_path / "small_base.fbin"
+    _write_fbin(base_path, vectors)
+
+    _, sample_vectors = sample_vectors_from_fbin(
+        str(base_path),
+        sample_ratio=0.25,
+        seed=123,
+    )
+
+    assert sample_vectors.shape == vectors.shape
+
+
+def test_fit_incremental_pca_rejects_too_few_samples_for_components() -> None:
+    from alayalite.laser._pca import fit_incremental_pca  # pylint: disable=import-outside-toplevel
+
+    sample_vectors = np.zeros((128, 256), dtype=np.float32)
+
+    with pytest.raises(ValueError, match="at least n_components"):
+        fit_incremental_pca(sample_vectors, n_components=256)
+
+
 def test_force_single_thread_requires_all_alignment_seeds(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[4]
     spec = importlib.util.spec_from_file_location(

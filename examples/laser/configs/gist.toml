@@ -24,40 +24,28 @@ base  = "/path/to/gist1m/gist_base.fbin"
 query = "/path/to/gist1m/gist_query.fbin"
 gt    = "/path/to/gist1m/gist_gt.ibin"
 
-# Optional. When absent (or the file is missing), step_vamana writes to
-# {output}/data/{name}/vamana/graph.index. When present and the file has
-# a valid DiskANN header (R = [dataset].degree, frozen_pts = 0), the
-# build is skipped and the existing file is reused — this is how the
-# external-DiskANN-built graph workflow stays compatible.
-# vamana = "/path/to/build_graph/gist1m/alaya/R64_L100_a1.2/graph.index"
-
 # Required — all pipeline artefacts land under this directory.
 output = "/path/to/build_graph/gist1m/laser_port"
 
-# Optional Vamana build parameters. Defaults come from
-# `alaya::vamana::kDefaultVamanaBuildParams` in
-# include/index/graph/vamana/build_dispatch.hpp:
-#   L = 200, alpha = 1.2, seed = 1234, num_threads = 0 (= omp_get_num_procs),
-#   dram_budget_gb = 32.0
+# Optional unified build seed. This drives PCA, medoid, Vamana, and
+# LASER rotator randomness through `Index.fit(...)`.
+# seed = 42
+
+# Optional Vamana build parameters still exposed by the unified wrapper.
+# Thread count is controlled by [build].build_threads; seed is the
+# top-level `seed` above.
 #
 # R is NOT listed here — it is read from [dataset].degree to enforce the
 # three-way contract (Vamana build R = written max_observed_degree =
 # Laser degree_bound). Setting [build_vamana].R raises a config-load error.
-#
-# num_threads tuning note: on a 96-core dual-NUMA box, T=80 (unbound)
-# gives the best Vamana build throughput; T=48 bound to a single NUMA
-# node with `numactl --cpunodebind=0 --membind=0` produces slightly lower
-# but more reproducible recall. See docs/LASER.md for the full table.
 # [build_vamana]
 # L = 200
 # alpha = 1.2
-# seed = 1234
-# num_threads = 0
 # dram_budget_gb = 32.0
 
-# Optional Laser index-build parameters.
+# Optional unified build parameters.
 # [build]
-# build_threads = 48   # threads for QG index construction
+# build_threads = 48   # threads for Vamana and QG construction
 # ef_indexing = 200    # ef parameter for QG index construction
 
 # Optional search sweep parameters.

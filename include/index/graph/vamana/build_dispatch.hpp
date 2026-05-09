@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
 #include <limits>
@@ -130,6 +131,13 @@ static_assert(kDefaultVamanaBuildParams.build_dram_budget_gb ==
               "Vamana default dram_budget drifted — update CLI / binding / fixtures together");
 static_assert(kDefaultVamanaBuildParams.sampling_rate == kFrozenDefaults.sampling_rate,
               "Vamana default sampling_rate drifted — update CLI / binding / fixtures together");
+
+inline bool is_finite_float(float value) {
+  uint32_t bits = 0;
+  static_assert(sizeof(bits) == sizeof(value));
+  std::memcpy(&bits, &value, sizeof(value));
+  return (bits & 0x7F800000U) != 0x7F800000U;
+}
 
 // read_fbin_header — read the 8-byte (num, dim) header of a .fbin without
 // loading any vectors. Used by the partition path to decide dispatch
@@ -434,8 +442,8 @@ inline void build_vamana(const BuildVamanaParams &params_in) {
   if (params.L < params.R) {
     throw std::invalid_argument("L (lbuild) must be >= R (max_degree)");
   }
-  if (params.alpha < 1.0F) {
-    throw std::invalid_argument("alpha must be >= 1.0");
+  if (!detail::is_finite_float(params.alpha) || params.alpha < 1.0F) {
+    throw std::invalid_argument("alpha must be finite and >= 1.0");
   }
   if (!(params.sampling_rate < 0.0F ||
         (params.sampling_rate > 0.0F && params.sampling_rate <= 1.0F))) {

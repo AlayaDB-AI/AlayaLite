@@ -38,6 +38,7 @@ except (AttributeError, ImportError):
     _raw_laser_mod = None
 
 from ._idempotence import (
+    invalidate_seed_sidecar,
     validate_laser_index,
     validate_medoids,
     validate_pca_base,
@@ -246,6 +247,7 @@ class Index:
         _validate_main_dim(resolved_main_dim, raw_dim)
 
         master_seed = int(seed)
+        resolved_threads = _effective_threads(int(num_threads))
 
         # Sidecar gate: a missing-or-mismatched seed sidecar disables
         # skip_existing for this call so all sub-steps rebuild against the
@@ -254,7 +256,10 @@ class Index:
         # leaves the previous (or absent) sidecar in place — the next
         # invocation will then see "mismatch" and rebuild any partially
         # written artifacts rather than trusting them.
-        effective_skip = bool(skip_existing) and validate_seed_sidecar(prefix, master_seed)
+        seed_matches = validate_seed_sidecar(prefix, master_seed)
+        if not seed_matches:
+            invalidate_seed_sidecar(prefix)
+        effective_skip = bool(skip_existing) and seed_matches
 
         if vectors_arr is not None:
             if not (effective_skip and validate_pca_base(raw_fbin_path, n, raw_dim)):
@@ -309,7 +314,7 @@ class Index:
                 L=int(bp.L),
                 alpha=float(bp.alpha),
                 seed=master_seed,
-                num_threads=int(num_threads),
+                num_threads=resolved_threads,
                 dram_budget_gb=float(dram_budget_gb),
             )
 
@@ -329,7 +334,7 @@ class Index:
                 vamana_file=vamana_path,
                 data_file=prefix,
                 EF=int(bp.ef_indexing),
-                num_thread=int(num_threads),
+                num_thread=resolved_threads,
             )
 
         # All build steps succeeded; publish the sidecar so a future
@@ -343,7 +348,7 @@ class Index:
             # explicit set_params() call. Override via Index.set_params(...).
             raw.set_params(
                 ef_search=int(bp.ef_indexing),
-                num_threads=_effective_threads(int(num_threads)),
+                num_threads=resolved_threads,
                 beam_width=16,
             )
             loaded = True
@@ -422,6 +427,8 @@ class Index:
         q = np.ascontiguousarray(query, dtype=np.float32)
         if q.ndim != 1:
             raise ValueError(f"expected 1D query, got ndim={q.ndim}")
+        if q.shape[0] != self._params.raw_dim:
+            raise ValueError(f"expected query.shape[0]={self._params.raw_dim}, got query.shape[0]={q.shape[0]}")
         return self._raw.search(q, int(k))
 
     def batch_search(self, queries: np.ndarray, k: int):
@@ -429,6 +436,8 @@ class Index:
         q = np.ascontiguousarray(queries, dtype=np.float32)
         if q.ndim != 2:
             raise ValueError(f"expected 2D queries, got ndim={q.ndim}")
+        if q.shape[1] != self._params.raw_dim:
+            raise ValueError(f"expected queries.shape[1]={self._params.raw_dim}, got queries.shape[1]={q.shape[1]}")
         return self._raw.batch_search(q, int(k))
 
     def set_params(self, ef_search: int = 200, num_threads: int = 0, beam_width: int = 16) -> None:

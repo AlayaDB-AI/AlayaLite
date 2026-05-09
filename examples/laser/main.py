@@ -13,17 +13,16 @@
 # limitations under the License.
 
 """
-Laser CLI wrapper around ``alayalite.laser.Index.fit``.
+Small CLI wrapper around ``alayalite.laser.Index.fit``.
 
 Two steps:
-- ``build``  — runs the full PCA/medoid/Vamana/QG pipeline via ``Index.fit``.
+- ``build``  — runs the unified PCA/medoid/Vamana/QG build.
 - ``search`` — loads the built index and runs an EF sweep.
 
 Usage:
     uv run examples/laser/main.py -c examples/laser/configs/gist.toml all
     uv run examples/laser/main.py -c examples/laser/configs/gist.toml search
     uv run examples/laser/main.py -c examples/laser/configs/gist.toml search --threads 4 --efs 100 200 300
-    uv run examples/laser/main.py -c examples/laser/configs/gist.toml -c examples/laser/configs/sift.toml all
 """
 
 import argparse
@@ -80,10 +79,6 @@ def success(tag, msg):
     print(f"  {GREEN}[{tag}]{RESET} {msg}")
 
 
-def warn(tag, msg):
-    print(f"  {YELLOW}[{tag}]{RESET} {msg}")
-
-
 def separator(width=56):
     print(f"  {DIM}" + "─" * width + f"{RESET}")
 
@@ -123,8 +118,6 @@ DEFAULTS = {
     "runs": 30,
     "build_vamana_L": 200,
     "build_vamana_alpha": 1.2,
-    "build_vamana_seed": 1234,
-    "build_vamana_num_threads": 0,
     "build_vamana_dram_budget_gb": 32.0,
 }
 
@@ -151,7 +144,7 @@ def print_config(cfg):
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Laser reproduce pipeline",
+        description="Laser unified Index.fit CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -161,12 +154,7 @@ def parse_args():
         action="append",
         help="Path to dataset config TOML file (can be specified multiple times)",
     )
-    parser.add_argument(
-        "steps",
-        nargs="+",
-        choices=STEPS + ["all"],
-        help="Steps to run: vamana, pca, medoid, index, search, or all",
-    )
+    parser.add_argument("steps", nargs="+", choices=STEPS + ["all"], help="Steps to run: build, search, or all")
     parser.add_argument("--topk", type=int, default=None)
     parser.add_argument("--threads", type=int, default=None)
     parser.add_argument("--beam-width", type=int, default=None)
@@ -193,6 +181,30 @@ def load_config(toml_path, cli_args):
     search = raw.get("search", {})
     build_vamana = raw.get("build_vamana", {})
 
+    legacy_top_level = {"pca_seed", "medoid_seed", "rotator_seed", "force_single_thread", "dump_rotator"} & raw.keys()
+    if legacy_top_level:
+        legacy_family = "pca_seed, medoid_seed, rotator_seed, force_single_thread, dump_rotator"
+        found_list = ", ".join(sorted(legacy_top_level))
+        raise ValueError(
+            "legacy per-step alignment fields are no longer supported by examples/laser/main.py "
+            f"(found: {found_list}; retired family: {legacy_family}); "
+            "use the unified top-level seed field instead"
+        )
+
+    if "vamana" in paths:
+        raise ValueError(
+            "legacy [paths].vamana is no longer supported by examples/laser/main.py; "
+            "the unified Index.fit wrapper builds and validates its own Vamana artifact"
+        )
+
+    retired_build_vamana = {"seed", "num_threads"} & build_vamana.keys()
+    if retired_build_vamana:
+        found_list = ", ".join(sorted(retired_build_vamana))
+        raise ValueError(
+            "legacy [build_vamana] seed/num_threads fields are no longer supported by examples/laser/main.py "
+            f"(found: {found_list}); use top-level seed and [build].build_threads"
+        )
+
     # Three-way R contract: Vamana build R, TOML [dataset].degree, and
     # Laser degree_bound must match. R is sourced from [dataset].degree;
     # permitting R under [build_vamana] would let it diverge from the
@@ -211,8 +223,8 @@ def load_config(toml_path, cli_args):
     def resolve_build(key, cli_val):
         if cli_val is not None:
             return cli_val
-        # TOML root takes precedence over [build] so seed/thread invariants
-        # (pca_seed, build_threads, ...) stay visible at a glance.
+        # TOML root takes precedence over [build] so thread settings stay
+        # visible at a glance in compact configs.
         if key in raw:
             return raw[key]
         return build.get(key, DEFAULTS[key])
@@ -220,58 +232,10 @@ def load_config(toml_path, cli_args):
     def resolve_build_vamana(toml_key, defaults_key):
         return build_vamana.get(toml_key, DEFAULTS[defaults_key])
 
-    pca_seed = raw.get("pca_seed")
-    medoid_seed = raw.get("medoid_seed")
-    rotator_seed = int(raw.get("rotator_seed", 0))
-    force_single_thread = bool(raw.get("force_single_thread", False))
-    dump_rotator = bool(raw.get("dump_rotator", False))
-
     build_threads_resolved = resolve_build("build_threads", cli_args.build_threads)
-
-    # `qg_builder`'s `#pragma omp parallel for num_threads(num_threads_)`
-    # overrides OMP_NUM_THREADS, so process-level single-thread pinning is
-    # silently defeated unless build_threads is also 1. Fail loudly.
-    if force_single_thread and int(build_threads_resolved) != 1:
-        raise ValueError(
-            f"force_single_thread=true requires build_threads=1 (got build_threads={build_threads_resolved!r})."
-        )
-
-    # force_single_thread signals "I want byte-reproducible builds". Any
-    # unseeded RNG silently defeats that intent, so require all three
-    # seeds explicitly rather than falling back to defaults.
-    if force_single_thread:
-        missing_seeds = [
-            key
-            for key, val in (
-                ("pca_seed", pca_seed),
-                ("medoid_seed", medoid_seed),
-            )
-            if val is None
-        ]
-        if rotator_seed == 0:
-            missing_seeds.append("rotator_seed (nonzero)")
-        if missing_seeds:
-            raise ValueError(f"force_single_thread=true requires explicit seeds, missing: {missing_seeds}")
-
-    # dump_rotator with an unseeded rotator produces a different file
-    # every run, which is useless for the byte-equality comparison that
-    # dump_rotator exists to support. Catch this at config load.
-    if dump_rotator and rotator_seed == 0:
-        raise ValueError(
-            "dump_rotator=true requires rotator_seed ≠ 0 (unseeded rotator produces a different dump every run)."
-        )
 
     name = ds["name"]
     output = paths["output"]
-
-    # [paths].vamana is optional: when omitted, step_vamana writes to a
-    # derived path under {output}/data/{name}/vamana/graph.index. Existing
-    # configs that pin a path (e.g. gist_diskann.toml's externally-built
-    # graph) continue to work unchanged — step_vamana's idempotence check
-    # detects the valid file and skips the build.
-    vamana_path = paths.get("vamana")
-    if vamana_path is None:
-        vamana_path = f"{output}/data/{name}/vamana/graph.index"
 
     return {
         "name": name,
@@ -281,7 +245,6 @@ def load_config(toml_path, cli_args):
         "base": paths["base"],
         "query": paths["query"],
         "gt": paths["gt"],
-        "vamana": vamana_path,
         "output": output,
         "build_threads": build_threads_resolved,
         "ef_indexing": resolve_build("ef_indexing", cli_args.ef_indexing),
@@ -295,14 +258,7 @@ def load_config(toml_path, cli_args):
         "runs": resolve_search("runs", cli_args.runs),
         "build_vamana_L": resolve_build_vamana("L", "build_vamana_L"),
         "build_vamana_alpha": resolve_build_vamana("alpha", "build_vamana_alpha"),
-        "build_vamana_seed": resolve_build_vamana("seed", "build_vamana_seed"),
-        "build_vamana_num_threads": resolve_build_vamana("num_threads", "build_vamana_num_threads"),
         "build_vamana_dram_budget_gb": resolve_build_vamana("dram_budget_gb", "build_vamana_dram_budget_gb"),
-        "pca_seed": pca_seed,
-        "medoid_seed": medoid_seed,
-        "rotator_seed": rotator_seed,
-        "force_single_thread": force_single_thread,
-        "dump_rotator": dump_rotator,
         "seed": raw.get("seed"),
     }
 
@@ -338,33 +294,6 @@ def _fit_unified(cfg, *, auto_load: bool = False):
         skip_existing=True,
         auto_load=auto_load,
     )
-
-
-# DiskANN single-file .index header: 24 bytes total.
-#   offset 0..7   uint64  expected_file_size
-#   offset 8..11  uint32  max_observed_degree  (= R)
-#   offset 12..15 uint32  start                (medoid id)
-#   offset 16..23 uint64  frozen_pts           (0 in this port)
-_VAMANA_HEADER_BYTES = 24
-
-
-def _read_vamana_header(path):
-    """Return (file_size, max_degree, start, frozen_pts) or None if unreadable."""
-    try:
-        file_size = os.path.getsize(path)
-    except OSError:
-        return None
-    if file_size < _VAMANA_HEADER_BYTES:
-        return None
-    with open(path, "rb") as f:
-        buf = f.read(_VAMANA_HEADER_BYTES)
-    if len(buf) != _VAMANA_HEADER_BYTES:
-        return None
-    expected_size = int.from_bytes(buf[0:8], "little")
-    max_degree = int.from_bytes(buf[8:12], "little")
-    start = int.from_bytes(buf[12:16], "little")
-    frozen_pts = int.from_bytes(buf[16:24], "little")
-    return file_size, expected_size, max_degree, start, frozen_pts
 
 
 def step_build(cfg):
@@ -526,55 +455,6 @@ STEP_FUNCS = {
 }
 
 
-_SINGLE_THREAD_LIMITER = None
-
-
-def apply_single_thread_invariant():
-    """Force the process into single-thread mode and assert observed state.
-
-    Byte-reproducible builds need OpenMP, BLAS/MKL, and faiss all pinned
-    at 1 thread BEFORE any parallel region runs (IncrementalPCA, faiss
-    k-means, QG link). Env-level OMP_NUM_THREADS=1 covers most cases,
-    but faiss needs a direct `omp_set_num_threads(1)` call, and
-    `qg_builder`'s `num_threads(num_threads_)` pragma is only neutralised
-    by `build_threads=1` in the TOML (see config-load fail-fast above).
-
-    Asserts the observed thread counts all land at 1; raises on mismatch.
-    """
-    import faiss  # pylint: disable=import-outside-toplevel
-    import threadpoolctl  # pylint: disable=import-outside-toplevel
-
-    faiss.omp_set_num_threads(1)
-    # Keep a module-level reference to the limiter so it outlives this
-    # function. `threadpool_limits` is a context manager; the limit is
-    # removed via `__exit__`, and some threadpoolctl versions wire that
-    # into `__del__`. Holding the reference sidesteps both and keeps the
-    # single-thread pin in place for every downstream pipeline step.
-    global _SINGLE_THREAD_LIMITER  # noqa: PLW0603
-    _SINGLE_THREAD_LIMITER = threadpoolctl.threadpool_limits(limits=1)
-
-    faiss_n = faiss.omp_get_max_threads()
-    omp_n = None
-    blas_report = []
-    for pool in threadpoolctl.threadpool_info():
-        if pool["user_api"] == "openmp":
-            omp_n = pool["num_threads"]
-        if pool["user_api"] == "blas":
-            blas_report.append((pool["prefix"], pool["num_threads"]))
-
-    print(
-        f"[single-thread self-check] faiss.omp_get_max_threads={faiss_n}  "
-        f"openmp.num_threads={omp_n}  "
-        f"blas={blas_report}",
-        flush=True,
-    )
-
-    assert faiss_n == 1, f"faiss.omp_get_max_threads() = {faiss_n}, expected 1"
-    assert omp_n == 1, f"openmp.num_threads = {omp_n}, expected 1"
-    for prefix, n in blas_report:
-        assert n == 1, f"blas/{prefix} num_threads = {n}, expected 1"
-
-
 def main():
     args = parse_args()
     steps = STEPS if "all" in args.steps else args.steps
@@ -583,9 +463,6 @@ def main():
         cfg = load_config(toml_path, args)
         header(f"{cfg['name']}  ({toml_path})")  # pylint: disable=inconsistent-quotes
         print_config(cfg)
-
-        if cfg["force_single_thread"]:
-            apply_single_thread_invariant()
 
         for step in steps:
             step_header(step)

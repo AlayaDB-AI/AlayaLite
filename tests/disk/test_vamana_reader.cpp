@@ -178,6 +178,30 @@ TEST_F(VamanaReaderTest, LoadsWriterOutput) {
   }
 }
 
+TEST_F(VamanaReaderTest, SaveGraphWritesBareFilename) {
+  const auto cwd = std::filesystem::current_path();
+  const auto root = std::filesystem::temp_directory_path() / "alaya_vamana_writer_bare_output";
+  std::error_code ec;
+  std::filesystem::remove_all(root, ec);
+  std::filesystem::create_directories(root);
+
+  std::filesystem::current_path(root);
+  EXPECT_NO_THROW(
+      alaya::vamana::save_graph({{1}, {0}}, "bare.index", /*max_degree=*/1, /*start=*/0));
+  std::filesystem::current_path(cwd);
+
+  const auto path = root / "bare.index";
+  ASSERT_TRUE(std::filesystem::is_regular_file(path));
+  alaya::vamana::VamanaReader reader{path};
+  EXPECT_EQ(reader.num_nodes(), 2u);
+  EXPECT_EQ(reader.max_degree(), 1u);
+  EXPECT_EQ(reader.start(), 0u);
+  EXPECT_EQ(reader.graph()[0], std::vector<uint32_t>{1});
+  EXPECT_EQ(reader.graph()[1], std::vector<uint32_t>{0});
+
+  std::filesystem::remove_all(root, ec);
+}
+
 // 9.2 — truncated by 1 byte.
 TEST_F(VamanaReaderTest, RejectsTruncatedFile) {
   BuildResult br = build_and_save(64, 4, 8, 32, 1.2f, 7, "vamana_reader_truncated");

@@ -99,6 +99,8 @@ def fit_incremental_pca(sample_vectors, n_components, batch_size=200000):
         Fitted IncrementalPCA model (with canonical component signs).
     """
     n_samples = sample_vectors.shape[0]
+    if n_samples < int(n_components):
+        raise ValueError(f"PCA fitting requires at least n_components sample rows; got {n_samples} < {n_components}")
     ipca = IncrementalPCA(n_components=n_components, batch_size=min(batch_size, n_samples))
     for i in tqdm(range(0, n_samples, batch_size), desc="Training IncrementalPCA"):
         end_idx = min(i + batch_size, n_samples)
@@ -124,7 +126,7 @@ def sample_vectors_from_fbin(filepath, sample_ratio=0.25, seed=None):
     """
     vectors = read_fbin(filepath)
     n, d = vectors.shape
-    sample_size = int(sample_ratio * n)
+    sample_size = min(n, max(int(sample_ratio * n), d))
 
     if n > sample_size:
         rng = np.random.default_rng(seed) if seed is not None else np.random

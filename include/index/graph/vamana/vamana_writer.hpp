@@ -47,7 +47,10 @@ inline void save_graph(const std::vector<std::vector<uint32_t>> &graph,
                        uint32_t max_degree,
                        uint32_t start,
                        uint64_t frozen_pts = 0) {
-  std::filesystem::create_directories(path.parent_path());
+  const auto parent = path.parent_path();
+  if (!parent.empty()) {
+    std::filesystem::create_directories(parent);
+  }
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
   if (!out.is_open()) {
     throw std::runtime_error("save_graph: cannot open for writing: " + path.string());

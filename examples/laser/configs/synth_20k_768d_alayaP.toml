@@ -1,17 +1,10 @@
-# Tier A daily gate — port (alayaP) side.
-# Paired with Laser/reproduce/configs/synth_20k_768d_origP.toml.
-# Drives examples/laser/main.py under the Tier A invariant triple (D4):
-#   OMP_NUM_THREADS=1 (env)  AND  force_single_thread=true  AND  build_threads=1
-# At these settings the port and upstream pipelines SHOULD emit SHA-256-equal
-# dsqg_synth_20k_768d_{pca.bin,medoids,medoids_indices,rotator_signs.bin,index}
-# (subject to the D9 PCA demotion path for NumPy/sklearn version skew).
+# Synthetic 20k × 768d config for the unified LASER CLI wrapper.
+# The older per-step alignment fields (`pca_seed`, `medoid_seed`,
+# `rotator_seed`, `dump_rotator`) are intentionally not accepted here;
+# use the master seed below.
 
-pca_seed = 42
-medoid_seed = 42
-rotator_seed = 42
-force_single_thread = true
+seed = 42
 build_threads = 1
-dump_rotator = true
 
 [dataset]
 name = "synth_20k_768d"
@@ -23,17 +16,11 @@ main_dimension = 256
 base = "/md1/huangliang/alaya-dev/data/synth_20k_768d/base.fbin"
 query = "/md1/huangliang/alaya-dev/data/synth_20k_768d/query.fbin"
 gt = "/md1/huangliang/alaya-dev/data/synth_20k_768d/gt.ibin"
-# Vamana graph input — must be byte-identical across port and upstream runs.
-# AlayaLite-side Vamana at R64_L100_a1.2 is the canonical Tier A input.
-vamana = "/md1/huangliang/alaya-dev/build_graph/synth_20k_768d/alaya/R64_L100_a1.2/graph.index"
-# Default output; the Tier A harness overrides this per-side at invoke time.
 output = "/md1/huangliang/alaya-dev/build_graph/synth_20k_768d/laser_port_alayaP"
 
 [build_vamana]
 L = 200
 alpha = 1.2
-seed = 1234
-num_threads = 1
 dram_budget_gb = 1.0
 
 [build]
