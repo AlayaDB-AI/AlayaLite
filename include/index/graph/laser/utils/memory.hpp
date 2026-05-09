@@ -114,11 +114,11 @@ template <size_t Alignment>
 inline void *align_allocate(size_t nbytes, bool huge_page = false) {
   size_t size = round_up_to_multiple(nbytes, Alignment);
   void *ptr = std::aligned_alloc(Alignment, size);
+  assert(ptr != nullptr);
   if (huge_page) {
     madvise(ptr, nbytes, MADV_HUGEPAGE);
   }
   std::memset(ptr, 0, size);
-  assert(ptr != nullptr);
   return ptr;
 }
 

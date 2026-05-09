@@ -82,7 +82,7 @@ void quantize(T *__restrict__ result,
   int32_t sum = 0;
   T cur;
   for (size_t i = 0; i < dim; ++i) {
-    cur = static_cast<T>(std::lround(((vec[i] - lo) * one_over_width) + 0.5));
+    cur = static_cast<T>(std::lround((vec[i] - lo) * one_over_width));
     result[i] = cur;
     sum += cur;
   }

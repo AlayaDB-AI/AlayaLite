@@ -35,7 +35,6 @@
 #include "index/graph/laser/qg/qg.hpp"
 #include "index/graph/laser/space/space.hpp"
 #include "index/graph/laser/utils/aligned_file_reader.hpp"
-#include "index/graph/laser/utils/partitioner.hpp"
 #include "index/graph/laser/utils/tools.hpp"
 #include "third_party/ngt/hashset.hpp"
 

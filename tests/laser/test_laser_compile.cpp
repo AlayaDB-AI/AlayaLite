@@ -31,7 +31,6 @@
 #include "index/graph/laser/utils/freq_relayout.hpp"
 #include "index/graph/laser/utils/io.hpp"
 #include "index/graph/laser/utils/memory.hpp"
-#include "index/graph/laser/utils/partitioner.hpp"
 #include "index/graph/laser/utils/pca_transform.hpp"
 #include "index/graph/laser/utils/rotator.hpp"
 #include "index/graph/laser/utils/scalar_quantize.hpp"
