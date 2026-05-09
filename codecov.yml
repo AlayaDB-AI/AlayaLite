@@ -6,6 +6,8 @@ codecov :
 ignore  :
 - tests
 - '*/tests/*'
+- examples/**
+- python/benchmarks/**
 
 coverage:
   precision: 2
