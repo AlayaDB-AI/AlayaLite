@@ -42,7 +42,9 @@ from ._idempotence import (
     validate_medoids,
     validate_pca_base,
     validate_pca_params,
+    validate_seed_sidecar,
     validate_vamana_index,
+    write_seed_sidecar,
 )
 from ._io import write_fbin
 
@@ -200,6 +202,14 @@ class Index:
             (PCA sampling, medoid clustering, Vamana, LASER rotator).
             Search-time settings live on the returned ``Index``; use
             ``set_params(...)`` after ``fit``.
+        skip_existing
+            When True, reuse on-disk artifacts whose size + header match the
+            requested shape AND whose seed sidecar (``<prefix>_seed.txt``)
+            matches ``seed``. A missing sidecar (e.g. legacy artifacts built
+            before this contract) forces a rebuild — the per-artifact
+            validators only check size/header, so without the sidecar gate
+            ``fit(seed=Y, skip_existing=True)`` would silently reuse
+            artifacts built earlier with ``seed=X``.
 
         Notes
         -----
@@ -237,15 +247,24 @@ class Index:
 
         master_seed = int(seed)
 
+        # Sidecar gate: a missing-or-mismatched seed sidecar disables
+        # skip_existing for this call so all sub-steps rebuild against the
+        # requested master_seed. The sidecar is republished at the end of
+        # fit() once every build step has succeeded, so a crash mid-build
+        # leaves the previous (or absent) sidecar in place — the next
+        # invocation will then see "mismatch" and rebuild any partially
+        # written artifacts rather than trusting them.
+        effective_skip = bool(skip_existing) and validate_seed_sidecar(prefix, master_seed)
+
         if vectors_arr is not None:
-            if not (skip_existing and validate_pca_base(raw_fbin_path, n, raw_dim)):
+            if not (effective_skip and validate_pca_base(raw_fbin_path, n, raw_dim)):
                 write_fbin(raw_fbin_path, vectors_arr)
 
         pca_base_path = f"{prefix}_pca_base.fbin"
         pca_params_path = f"{prefix}_pca.bin"
         if resolved_main_dim < raw_dim:
             if not (
-                skip_existing
+                effective_skip
                 and validate_pca_base(pca_base_path, n, raw_dim)
                 and validate_pca_params(pca_params_path, raw_dim)
             ):
@@ -261,14 +280,14 @@ class Index:
                 save_pca_params(pca, pca_params_path)
                 pca_transform_and_save(vectors, pca, pca_base_path)
         else:
-            if not (skip_existing and validate_pca_base(pca_base_path, n, raw_dim)):
+            if not (effective_skip and validate_pca_base(pca_base_path, n, raw_dim)):
                 shutil.copyfile(raw_fbin_path, pca_base_path)
             # Keep the no-PCA branch explicit: stale files would rotate queries unexpectedly.
             if os.path.exists(pca_params_path):
                 os.remove(pca_params_path)
 
         if not bp.disable_medoid:
-            if not (skip_existing and validate_medoids(prefix)):
+            if not (effective_skip and validate_medoids(prefix)):
                 from alayalite.laser._medoid import generate_and_save_medoids  # pylint: disable=import-outside-toplevel
 
                 generate_and_save_medoids(
@@ -280,7 +299,7 @@ class Index:
                 )
 
         vamana_path = f"{prefix}_vamana_graph.index"
-        if not (skip_existing and validate_vamana_index(vamana_path, int(bp.R))):
+        if not (effective_skip and validate_vamana_index(vamana_path, int(bp.R))):
             from alayalite import vamana as vamana_mod  # pylint: disable=import-outside-toplevel
 
             vamana_mod.build_index(
@@ -305,13 +324,17 @@ class Index:
             rotator_seed=master_seed,
             rotator_dump_path="",
         )
-        if not (skip_existing and validate_laser_index(prefix, int(bp.R), int(resolved_main_dim), int(n))):
+        if not (effective_skip and validate_laser_index(prefix, int(bp.R), int(resolved_main_dim), int(n))):
             raw.build_index(
                 vamana_file=vamana_path,
                 data_file=prefix,
                 EF=int(bp.ef_indexing),
                 num_thread=int(num_threads),
             )
+
+        # All build steps succeeded; publish the sidecar so a future
+        # `fit(seed=master_seed, skip_existing=True)` can short-circuit.
+        write_seed_sidecar(prefix, master_seed)
 
         loaded = False
         if auto_load:

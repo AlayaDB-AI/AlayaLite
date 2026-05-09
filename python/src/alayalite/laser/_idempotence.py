@@ -20,6 +20,7 @@ import os
 import struct
 
 _VAMANA_HEADER_BYTES = 24
+_SEED_SIDECAR_SUFFIX = "_seed.txt"
 
 
 def _exists_non_empty(path: str) -> bool:
@@ -101,3 +102,44 @@ def validate_laser_index(prefix: str, graph_r: int, main_dim: int, n: int) -> bo
         return declared_n == int(n)
     except (OSError, struct.error):
         return False
+
+
+def seed_sidecar_path(prefix: str) -> str:
+    """Return the seed-sidecar path used by the validator and writer."""
+    return f"{prefix}{_SEED_SIDECAR_SUFFIX}"
+
+
+def validate_seed_sidecar(prefix: str, seed: int) -> bool:
+    """Return True iff ``<prefix>_seed.txt`` exists and matches ``seed``.
+
+    The per-artifact validators above only check size + header, so they
+    cannot detect that an existing artifact was built from a different
+    master seed. Without this gate, ``Index.fit(seed=Y, skip_existing=True)``
+    would silently reuse artifacts built earlier with ``seed=X`` and the
+    caller would think they got a seed-Y index. A missing sidecar is
+    treated as mismatch so legacy artifacts produced before this contract
+    do not silently leak into a new seed's run.
+    """
+    path = seed_sidecar_path(prefix)
+    try:
+        if not _exists_non_empty(path):
+            return False
+        with open(path, encoding="utf-8") as f:
+            content = f.read().strip()
+        return int(content) == int(seed)
+    except (OSError, ValueError):
+        return False
+
+
+def write_seed_sidecar(prefix: str, seed: int) -> None:
+    """Atomically publish ``<prefix>_seed.txt`` with the master seed.
+
+    Written via tmp-file + ``os.replace`` so a crash mid-write leaves the
+    previous sidecar intact rather than producing a half-written file
+    that ``validate_seed_sidecar`` would reject as a parse error.
+    """
+    target = seed_sidecar_path(prefix)
+    tmp = f"{target}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(f"{int(seed)}\n")
+    os.replace(tmp, target)

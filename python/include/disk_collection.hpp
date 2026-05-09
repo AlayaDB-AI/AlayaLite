@@ -646,7 +646,7 @@ inline void register_disk_collection(py::module_ &m) {
            py::kw_only(),
            py::arg("max_pending_bytes") = DiskCollection::kDefaultMaxPendingBytes,
            py::arg("vamana_R") = 64,
-           py::arg("vamana_L") = 100,
+           py::arg("vamana_L") = 200,
            py::arg("vamana_alpha") = 1.2,
            py::arg("vamana_seed") = 1234,
            py::arg("vamana_num_threads") = 0)
