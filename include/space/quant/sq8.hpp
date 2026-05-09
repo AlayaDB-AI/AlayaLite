@@ -23,7 +23,7 @@ namespace alaya {
  */
 template <typename DataType>
 struct SQ8Quantizer {
-  uint32_t dim_;                      ///< Dimensionality of input data
+  uint32_t dim_{0};                   ///< Dimensionality of input data
   std::vector<DataType> min_vector_;  ///< Per-dimension minimum values
   std::vector<DataType> max_vector_;  ///< Per-dimension maximum values
 

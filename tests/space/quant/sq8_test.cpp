@@ -4,6 +4,7 @@
 
 #include "space/quant/sq8.hpp"
 #include <gtest/gtest.h>
+#include <vector>
 
 namespace alaya {
 using IDType = uint32_t;
@@ -45,13 +46,13 @@ TEST_F(SQ8QuantizerTest, Quantize) {
 }
 
 TEST_F(SQ8QuantizerTest, Encode) {
-  float raw_data[] = {0.0, 5.0, 10.0, 7.5};
-  uint8_t encoded_data[4] = {0};
+  std::vector<float> raw_data{0.0, 5.0, 10.0, 7.5};
+  std::vector<uint8_t> encoded_data(dim_, 0);
 
   quantizer_.min_vector_ = {0.0, 0.0, 0.0, 0.0};
   quantizer_.max_vector_ = {10.0, 10.0, 10.0, 10.0};
 
-  quantizer_.encode(raw_data, encoded_data);
+  quantizer_.encode(raw_data.data(), encoded_data.data());
   EXPECT_EQ(encoded_data[0], 0);
   EXPECT_EQ(encoded_data[1], 127);
   EXPECT_EQ(encoded_data[2], 255);
