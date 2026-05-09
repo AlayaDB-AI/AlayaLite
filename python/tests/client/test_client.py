@@ -6,6 +6,8 @@
 Unit tests for the AlayaLite Client class.
 """
 
+# pylint: disable=protected-access
+
 import gc
 import os
 import shutil
@@ -14,6 +16,25 @@ import unittest
 
 import numpy as np
 from alayalite import Client, Collection, Index
+
+
+class _FakeClosable:
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+        if self.fail:
+            raise RuntimeError("close failed")
+
+
+class _FakeNativeIndex:
+    def __init__(self):
+        self.closed = False
+
+    def close_db(self):
+        self.closed = True
 
 
 class TestClient(unittest.TestCase):
@@ -103,6 +124,47 @@ class TestClient(unittest.TestCase):
         self.client.reset()
         self.assertEqual(len(self.client.list_collections()), 0)
         self.assertEqual(len(self.client.list_indices()), 0)
+
+    def test_reset_closes_managed_resources_and_deletes_disk_entries(self):
+        url = os.path.join(self.tmp_dir, "client_url")
+        os.makedirs(os.path.join(url, "collection_on_disk"))
+        os.makedirs(os.path.join(url, "index_on_disk"))
+
+        client = Client(url)
+        collection = _FakeClosable()
+        index = _FakeClosable()
+        client._Client__collection_map = {"collection_on_disk": collection}
+        client._Client__index_map = {"index_on_disk": index}
+
+        client.reset(delete_on_disk=True)
+
+        self.assertTrue(collection.closed)
+        self.assertTrue(index.closed)
+        self.assertFalse(os.path.exists(os.path.join(url, "collection_on_disk")))
+        self.assertFalse(os.path.exists(os.path.join(url, "index_on_disk")))
+        self.assertEqual(client.list_collections(), [])
+        self.assertEqual(client.list_indices(), [])
+
+    def test_close_helpers_ignore_native_close_errors(self):
+        collection = _FakeClosable(fail=True)
+        index = _FakeClosable(fail=True)
+
+        Client._close_collection(collection)
+        Client._close_index(index)
+
+        self.assertTrue(collection.closed)
+        self.assertTrue(index.closed)
+
+    def test_index_close_releases_native_handle_once(self):
+        index = Index("closable_index")
+        native = _FakeNativeIndex()
+        index._Index__index = native
+
+        index.close()
+        index.close()
+
+        self.assertTrue(native.closed)
+        self.assertIsNone(index._Index__index)
 
     def test_get_non_exist(self):
         index = self.client.get_index("non_exist")
