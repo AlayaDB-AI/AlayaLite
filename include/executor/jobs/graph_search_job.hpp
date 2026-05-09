@@ -79,9 +79,16 @@ struct GraphSearchJob {
     auto dim = sp->get_dim();
     uint32_t supplement_count = 0;
     // Add unvisited neighbors of the result nodes as supplementary result nodes
-    auto data = result_pool.data();
-    for (auto record : data) {
-      auto *ptr_nb = sp->get_edges(record.id_);
+    const auto &data = result_pool.data();
+    const auto seed_count = result_pool.size();
+    std::vector<IDType> seed_ids;
+    seed_ids.reserve(seed_count);
+    for (size_t i = 0; i < seed_count; ++i) {
+      seed_ids.push_back(data[i].id_);
+    }
+
+    for (const auto seed_id : seed_ids) {
+      auto *ptr_nb = sp->get_edges(seed_id);
       for (uint32_t i = 0; i < RaBitQSpace<>::kDegreeBound; ++i) {
         auto cur_neighbor = ptr_nb[i];
         if (!vis.get(cur_neighbor)) {

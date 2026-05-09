@@ -154,6 +154,12 @@ inline void accumulate(const uint8_t *ALAYA_RESTRICT codes,
                        const uint8_t *ALAYA_RESTRICT lp_table,
                        uint16_t *ALAYA_RESTRICT result,
                        size_t dim) {
+  if ((dim & 0x0FU) != 0U) {
+    log_scalar_fastscan_fallback();
+    detail::accumulate_scalar(codes, lp_table, result, dim);
+    return;
+  }
+
 #if defined(__AVX512F__)
   size_t code_length = dim << 2;
   __m512i c;
@@ -315,6 +321,14 @@ inline void accumulate_and_estimate_distances(const uint8_t *ALAYA_RESTRICT code
                                               size_t dim) {
   static_assert(std::is_same_v<T, float>,
                 "fastscan::accumulate_and_estimate_distances only supports float.");
+  if ((dim & 0x0FU) != 0U) {
+    log_scalar_fastscan_fallback();
+    alignas(64) std::array<uint16_t, kBatchSize> nth_segments{};
+    detail::accumulate_scalar(codes, lp_table, nth_segments.data(), dim);
+    estimate_distances(nth_segments.data(), f_add, f_rescale, g_add, lut_delta, lut_bias, result);
+    return;
+  }
+
 #if defined(__AVX512F__)
   size_t code_length = dim << 2;
   __m512i c;
