@@ -16,7 +16,6 @@
 
 import faiss
 import numpy as np
-from tqdm import tqdm
 
 from alayalite.laser._io import read_fbin, write_fbin, write_ibin
 
@@ -48,14 +47,10 @@ def generate_medoids(base_path, n_clusters, sample_ratio=0.10, seed=None):
 
     if n > sample_size:
         rng = np.random.default_rng(seed) if seed is not None else np.random
-        sample_indices = rng.choice(n, sample_size, replace=False)
-        sample_indices = np.sort(sample_indices)
-
-        sample_vectors = np.empty((sample_size, d), dtype=np.float32)
-        with open(base_path, "rb") as f:
-            for i, idx in enumerate(tqdm(sample_indices, desc="Reading sample vectors")):
-                f.seek(8 + idx * d * 4)
-                sample_vectors[i] = np.frombuffer(f.read(d * 4), dtype=np.float32)
+        sample_indices = np.sort(rng.choice(n, sample_size, replace=False))
+        # Sorted fancy indexing on the mmap touches pages roughly sequentially —
+        # avoids the per-vector seek+read syscall that the previous open-loop did.
+        sample_vectors = np.ascontiguousarray(X[sample_indices], dtype=np.float32)
     else:
         sample_vectors = X
         sample_indices = np.arange(n)

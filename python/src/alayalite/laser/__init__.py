@@ -153,8 +153,12 @@ def _read_index_header_24(path: str) -> tuple[int, int]:
 
 
 def _validate_main_dim(main_dim: int, raw_dim: int) -> None:
-    if main_dim <= 0 or (main_dim & (main_dim - 1)) != 0:
-        raise ValueError(f"main_dim must be a positive power of two, got {main_dim}")
+    # Order matters: 0 & -1 == 0 in Python's bigint, so the power-of-two
+    # check would falsely pass for main_dim == 0 without this guard.
+    if main_dim <= 0:
+        raise ValueError(f"main_dim must be positive, got {main_dim}")
+    if main_dim & (main_dim - 1) != 0:
+        raise ValueError(f"main_dim must be a power of two, got {main_dim}")
     if main_dim < 128:
         raise ValueError(f"main_dim must be >= 128 (LASER floor), got {main_dim}")
     if main_dim > raw_dim:
@@ -337,8 +341,6 @@ class Index:
                 num_thread=resolved_threads,
             )
 
-        # All build steps succeeded; publish the sidecar so a future
-        # `fit(seed=master_seed, skip_existing=True)` can short-circuit.
         write_seed_sidecar(prefix, master_seed)
 
         loaded = False

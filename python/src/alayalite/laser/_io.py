@@ -66,7 +66,7 @@ def write_fbin(filename, arr):
     nvecs, dim = arr.shape
     with open(filename, "wb") as f:
         np.array([nvecs, dim], dtype=np.int32).tofile(f)
-        arr.astype(np.float32).tofile(f)
+        np.ascontiguousarray(arr, dtype=np.float32).tofile(f)
 
 
 def write_ibin(filename, arr):
@@ -74,4 +74,4 @@ def write_ibin(filename, arr):
     nvecs, dim = arr.shape
     with open(filename, "wb") as f:
         np.array([nvecs, dim], dtype=np.int32).tofile(f)
-        arr.astype(np.int32).tofile(f)
+        np.ascontiguousarray(arr, dtype=np.int32).tofile(f)

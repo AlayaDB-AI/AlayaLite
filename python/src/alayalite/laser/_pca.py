@@ -125,19 +125,15 @@ def sample_vectors_from_fbin(filepath, sample_ratio=0.25, seed=None):
         Tuple of (all_vectors, sample_vectors)
     """
     vectors = read_fbin(filepath)
-    n, d = vectors.shape
-    sample_size = min(n, max(int(sample_ratio * n), d))
+    n, _ = vectors.shape
+    sample_size = min(n, max(int(sample_ratio * n), vectors.shape[1]))
 
     if n > sample_size:
         rng = np.random.default_rng(seed) if seed is not None else np.random
-        sample_indices = rng.choice(n, sample_size, replace=False)
-        sample_indices = np.sort(sample_indices)
-
-        sample_vecs = np.empty((sample_size, d), dtype=np.float32)
-        with open(filepath, "rb") as f:
-            for i, idx in enumerate(tqdm(sample_indices, desc="Reading sample vectors")):
-                f.seek(8 + idx * d * 4)
-                sample_vecs[i] = np.frombuffer(f.read(d * 4), dtype=np.float32)
+        sample_indices = np.sort(rng.choice(n, sample_size, replace=False))
+        # Sorted fancy indexing on the mmap touches pages roughly sequentially —
+        # avoids the per-vector seek+read syscall that the previous open-loop did.
+        sample_vecs = np.ascontiguousarray(vectors[sample_indices], dtype=np.float32)
         return vectors, sample_vecs
     return vectors, vectors
 
@@ -153,10 +149,11 @@ def pca_transform_and_save(vectors, pca, output_path, chunk_size=100000):
         output_path: Output fbin file path
         chunk_size: Number of vectors per chunk
     """
-    n, d = vectors.shape
+    n = vectors.shape[0]
+    out_dim = int(pca.n_components_)
     num_chunks = (n + chunk_size - 1) // chunk_size
-    header_size = 8  # two int32s (n, d)
-    bytes_per_vector = d * 4
+    header_size = 8
+    bytes_per_vector = out_dim * 4
     start_chunk = 0
 
     if os.path.exists(output_path):
@@ -165,7 +162,6 @@ def pca_transform_and_save(vectors, pca, output_path, chunk_size=100000):
             data_bytes = file_size - header_size
             completed_vectors = data_bytes // bytes_per_vector
             start_chunk = completed_vectors // chunk_size
-            # Truncate to last complete chunk boundary
             valid_size = header_size + start_chunk * chunk_size * bytes_per_vector
             if file_size != valid_size:
                 with open(output_path, "r+b") as f:
@@ -179,16 +175,16 @@ def pca_transform_and_save(vectors, pca, output_path, chunk_size=100000):
 
     if start_chunk == 0:
         with open(output_path, "wb") as f:
-            np.array([n, d], dtype=np.int32).tofile(f)
+            np.array([n, out_dim], dtype=np.int32).tofile(f)
 
-    for chunk_idx in tqdm(
-        range(start_chunk, num_chunks),
-        desc="PCA transforming",
-        initial=start_chunk,
-        total=num_chunks,
-    ):
-        start_idx = chunk_idx * chunk_size
-        end_idx = min(start_idx + chunk_size, n)
-        transformed = pca.transform(vectors[start_idx:end_idx])
-        with open(output_path, "ab") as f:
-            transformed.astype(np.float32).tofile(f)
+    with open(output_path, "ab") as f:
+        for chunk_idx in tqdm(
+            range(start_chunk, num_chunks),
+            desc="PCA transforming",
+            initial=start_chunk,
+            total=num_chunks,
+        ):
+            start_idx = chunk_idx * chunk_size
+            end_idx = min(start_idx + chunk_size, n)
+            transformed = pca.transform(vectors[start_idx:end_idx])
+            np.ascontiguousarray(transformed, dtype=np.float32).tofile(f)
