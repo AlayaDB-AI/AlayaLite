@@ -334,6 +334,16 @@ def _find_efs(index, query, gt, nq, topk):
     return efs
 
 
+def _warmup_index(index, query, *, topk, rounds, single_search):
+    if single_search:
+        for _ in range(rounds):
+            for i in range(query.shape[0]):
+                index.search(query[i], topk)
+    else:
+        for _ in range(rounds):
+            index.batch_search(query, topk)
+
+
 def step_search(cfg):
     # pylint: disable=import-outside-toplevel
     import pandas as pd
@@ -384,9 +394,8 @@ def step_search(cfg):
 
         index.set_params(ef_search=ef, num_threads=num_threads, beam_width=bw)
 
-        # Warmup: pre-heat page cache, SSD controller, and OS I/O path
-        for _ in range(num_warmup):
-            index.batch_search(query, topk)
+        # Warmup must exercise the same API path that the timed loop uses.
+        _warmup_index(index, query, topk=topk, rounds=num_warmup, single_search=single_search)
 
         for _ in range(num_runs):
             if single_search:
