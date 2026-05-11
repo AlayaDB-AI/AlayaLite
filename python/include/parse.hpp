@@ -60,7 +60,9 @@ inline auto pydict_to_metadata_map(const py::dict &meta) -> MetadataMap {
 
 inline auto metadata_map_to_pydict(const MetadataMap &meta_map) -> py::dict {
   py::dict meta;
+
   for (const auto &item : meta_map) {
+    // Use explicit variable declaration instead of structured binding for wider compiler support.
     const auto &key = item.first;
     const auto &value = item.second;
     std::visit(
