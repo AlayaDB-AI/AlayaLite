@@ -144,3 +144,11 @@ repos:
     language: python
     files: (Makefile|\.(c|cc|cpp|cxx|h|hpp|hxx|ipp|py|yaml|yml|sh|cmake|txt))$
     exclude: ^(docs/|build/)
+
+#===========================================================================
+#                            REUSE LICENSE COMPLIANCE HOOK
+#===========================================================================
+- repo: https://codeberg.org/fsfe/reuse-tool
+  rev: v6.2.0
+  hooks:
+  - id: reuse
