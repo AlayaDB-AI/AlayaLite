@@ -24,8 +24,9 @@ jobs       :
     - uses: actions/checkout@v4
     - uses: gsactions/commit-message-checker@v2
       with:
-        pattern: '^(feat|fix|docs|style|refactor|chore|perf|test|build|ci|revert)(\(\S+\))?: .+'
-        error: Invalid commit type
+        pattern: '^(feat|fix|docs|style|refactor|chore|perf|test|build|ci|revert)\(\S+\): .+'
+        error: 'Commit message must follow Conventional Commits with a required (scope), e.g. feat(laser): warmup fix. See
+          CONTRIBUTING.md.'
         excludeDescription: 'true'
         excludeTitle: 'false'
         checkAllCommitMessages: 'true'

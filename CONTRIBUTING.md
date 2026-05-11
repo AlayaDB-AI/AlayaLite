@@ -224,16 +224,16 @@ chore(repo): add CODE_OF_CONDUCT and templates
 
 ### PR Title Format
 
-Follow the same convention as commit messages, including the optional scope:
+Follow the same convention as commit messages, including the required scope:
 
 ```
 feat(space): add support for cosine similarity metric
 fix(disk): correct page eviction under concurrent search
-docs: add community documentation and templates
+docs(repo): add community documentation and templates
 ```
 
-The PR title becomes the squash-merge commit on `main`, so the scope rules
-above apply to it directly.
+The PR title becomes the squash-merge commit on the base branch, so the scope
+rules above apply to it directly.
 
 ## Code Style
 
