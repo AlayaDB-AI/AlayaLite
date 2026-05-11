@@ -101,17 +101,8 @@ inline auto atomic_replace(const fs::path &from, const fs::path &to) -> void {
 #else
   std::error_code ec;
   fs::rename(from, to, ec);
-  if (!ec) {
-    return;
-  }
-
-  LOG_INFO("platform fallback: rename failed for {}, removing destination before retrying",
-           to.string());
-  fs::remove(to, ec);
-  ec.clear();
-  fs::rename(from, to, ec);
   if (ec) {
-    throw std::runtime_error("Failed to atomically replace " + to.string());
+    throw std::runtime_error("Failed to atomically replace " + to.string() + ": " + ec.message());
   }
 #endif
 }

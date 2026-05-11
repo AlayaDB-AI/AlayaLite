@@ -227,6 +227,8 @@ TEST(PlatformFsTest, AtomicReplaceCreatesParentsReplacesFilesAndReportsFailures)
   EXPECT_EQ(read_text_file(target), "second");
 
   EXPECT_THROW(platform::atomic_replace(root / "missing.txt", target), std::runtime_error);
+  EXPECT_TRUE(fs::exists(target));
+  EXPECT_EQ(read_text_file(target), "second");
 
   std::error_code ec;
   fs::remove_all(root, ec);
