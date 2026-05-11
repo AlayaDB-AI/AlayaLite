@@ -29,7 +29,7 @@ function(print_project_options_summary)
   message(STATUS "|   - BUILD_PYTHON    : ${BUILD_PYTHON}")
   message(STATUS "|   - BUILD_TESTING   : ${BUILD_TESTING}")
   message(STATUS "|   - ENABLE_COVERAGE : ${ENABLE_COVERAGE}")
-  message(STATUS "|   - NATIVE_OPT      : ${ALAYA_ENABLE_NATIVE_OPT}")
+  message(STATUS "|   - NATIVE_ARCH     : ${ALAYA_NATIVE_ARCH}")
 endfunction()
 
 # Print build configuration summary Usage: print_build_summary()

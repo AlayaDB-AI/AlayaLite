@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[3]
 WORKFLOWS = ROOT / ".github" / "workflows"
 CONAN_CACHE_ACTION = ROOT / ".github" / "actions" / "cache-restore" / "action.yaml"
 CMAKE_LISTS = ROOT / "CMakeLists.txt"
+PYPROJECT = ROOT / "pyproject.toml"
+PRINT_SUMMARY = ROOT / "cmake" / "PrintSummary.cmake"
 
 
 def _yaml(path: Path) -> dict:
@@ -89,8 +91,8 @@ def test_conan_cache_key_includes_install_script_and_target_arch() -> None:
 def test_workflow_conan_cache_calls_are_arch_scoped_and_nonfatal_on_save_race() -> None:
     conan_steps = [
         step
-        for workflow_name in ("code-checker.yaml", "codecov.yaml", "cibuildwheel.yaml")
-        for workflow in [_yaml(WORKFLOWS / workflow_name)]
+        for workflow_path in WORKFLOWS.glob("*.yaml")
+        for workflow in [_yaml(workflow_path)]
         for job in workflow["jobs"].values()
         for step in job["steps"]
         if step.get("uses") == "./.github/actions/cache-restore"
@@ -154,6 +156,16 @@ def test_cmake_defaults_to_portable_native_arch_and_guards_packages() -> None:
     assert "if(BUILD_PYTHON" in cmake_text
     assert "AND ALAYA_NATIVE_ARCH" in cmake_text
     assert "AND NOT ALAYA_ALLOW_NATIVE_PACKAGE" in cmake_text
+
+
+def test_native_arch_option_name_is_used_consistently() -> None:
+    pyproject_text = PYPROJECT.read_text(encoding="utf-8")
+    summary_text = PRINT_SUMMARY.read_text(encoding="utf-8")
+
+    assert 'ALAYA_NATIVE_ARCH="OFF"' in pyproject_text
+    assert "${ALAYA_NATIVE_ARCH}" in summary_text
+    assert "ALAYA_ENABLE_NATIVE_OPT" not in pyproject_text
+    assert "ALAYA_ENABLE_NATIVE_OPT" not in summary_text
 
 
 def test_portable_cmake_uses_avx2_baseline_without_native_or_avx512() -> None:

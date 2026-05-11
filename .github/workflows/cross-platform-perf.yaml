@@ -79,6 +79,8 @@ jobs       :
 
     - name: Restore Conan cache
       uses: ./.github/actions/cache-restore
+      with:
+        target-arch: ${{ matrix.arch }}
 
     - name: Install project dependencies
       shell: bash
