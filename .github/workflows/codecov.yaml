@@ -88,55 +88,7 @@ jobs:
     - name: Run python code coverage
       env:
         PYTHONFAULTHANDLER: '1'
-      run: |
-        set -o pipefail
-
-        python_bin=".venv/bin/python"
-        ulimit -c unlimited
-        sudo sysctl -w "kernel.core_pattern=${PWD}/core.%e.%p" || true
-
-        set +e
-        "$python_bin" -X faulthandler -m pytest --cov --cov-branch --cov-report=xml 2>&1 | tee pytest-crash.log
-        status=${PIPESTATUS[0]}
-        set -e
-
-        if [ "$status" -ne 0 ]; then
-          echo "::group::Python environment"
-          "$python_bin" --version || true
-          "$python_bin" -c "import platform, sys; print(sys.executable); print(sys.version); print(platform.platform())" || true
-          "$python_bin" -c "import alayalite, alayalite._alayalitepy as m; print(alayalite.__file__); print(m.__file__)" || true
-          echo "::endgroup::"
-
-          if [ "$status" -eq 139 ] || [ "$status" -eq 134 ]; then
-            echo "::group::Native crash backtrace"
-            shopt -s nullglob
-            cores=(core.*)
-            if [ "${#cores[@]}" -gt 0 ]; then
-              ls -lh "${cores[@]}" || true
-              for core in "${cores[@]}"; do
-                echo "Backtrace for ${core}"
-                gdb -q -batch \
-                  -ex "set pagination off" \
-                  -ex "set print thread-events off" \
-                  -ex "thread apply all bt full" \
-                  -ex "info sharedlibrary" \
-                  "$python_bin" "$core" || true
-              done
-            else
-              echo "No core file was produced; rerunning under gdb for an immediate native backtrace."
-              gdb -q -batch \
-                -ex "set pagination off" \
-                -ex "set print thread-events off" \
-                -ex "run" \
-                -ex "thread apply all bt full" \
-                -ex "info sharedlibrary" \
-                --args "$python_bin" -X faulthandler -m pytest --cov --cov-branch --cov-report=xml || true
-            fi
-            echo "::endgroup::"
-          fi
-        fi
-
-        exit "$status"
+      run: bash scripts/ci/codecov/python_coverage_with_crash_diagnostics.sh
 
     - name: Upload Python crash diagnostics
       if: failure()
