@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 AlayaDB.AI
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
 # Modified from https://github.com/cheshirekow/cmake-format/blob/master/cmake-format.py
 # ruff: noqa: F821
 

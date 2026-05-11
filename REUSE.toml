@@ -1,0 +1,55 @@
+version = 1
+
+# Catch-all for AlayaDB.AI-owned files that do not carry their own SPDX header
+# (docs, build files, configs, fixtures, assets). This block is FIRST so that
+# the more specific third-party blocks below win under REUSE's "last matching
+# table wins" rule. precedence = "closest" means the 312 source files that
+# already carry inline SPDX headers keep them; this block only fills gaps.
+[[annotations]]
+path = "**"
+precedence = "closest"
+SPDX-FileCopyrightText = "2025 AlayaDB.AI"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
+# --- Vendored third-party sources. These keep their upstream copyright and
+#     license and are NOT relicensed to AGPL-3.0; both Apache-2.0 and MIT are
+#     one-way compatible with AGPL-3.0. precedence = "override" plus their
+#     position after the catch-all ensures they are matched last and win. ---
+
+[[annotations]]
+path = "include/index/graph/laser/utils/concurrent_queue.hpp"
+precedence = "override"
+SPDX-FileCopyrightText = "Microsoft Corporation"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "include/third_party/ffht/fht_avx.hpp"
+precedence = "override"
+SPDX-FileCopyrightText = "2015 Alexandr Andoni, Piotr Indyk, Thijs Laarhoven, Ilya Razenshteyn, Ludwig Schmidt"
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = "include/index/graph/laser/utils/pca_transform.hpp"
+precedence = "override"
+SPDX-FileCopyrightText = "2024 the vsag project"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = "include/third_party/ngt/hashset.hpp"
+precedence = "override"
+SPDX-FileCopyrightText = "2015 Yahoo Japan Corporation"
+SPDX-License-Identifier = "Apache-2.0"
+
+[[annotations]]
+path = [
+  "include/simd/fht.ipp",
+  "include/utils/rabitq_utils/defines.hpp",
+  "include/utils/rabitq_utils/fastscan.hpp",
+  "include/utils/rabitq_utils/lut.hpp",
+  "include/utils/rabitq_utils/rotator.hpp",
+  "include/utils/rabitq_utils/search_utils/buffer.hpp",
+  "include/utils/rabitq_utils/search_utils/hashset.hpp",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2025 VectorDB.NTU"
+SPDX-License-Identifier = "Apache-2.0"

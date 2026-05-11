@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 AlayaDB.AI
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Generate synth_20k_768d dataset for Laser alignment Tier A daily gate.
 
 Produces:

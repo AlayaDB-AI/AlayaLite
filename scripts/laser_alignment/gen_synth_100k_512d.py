@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 AlayaDB.AI
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Generate synth_100k_512d dataset for Laser-port Phase L2 baseline.
 
 Produces:

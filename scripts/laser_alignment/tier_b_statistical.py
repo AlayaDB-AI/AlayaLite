@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 AlayaDB.AI
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Tier B statistical-equivalence harness for the Laser-upstream alignment gate.
 
 Compares the 4-combo GIST 1 M seed-injected experiment:

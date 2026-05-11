@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 AlayaDB.AI
+#
+# SPDX-License-Identifier: AGPL-3.0-only
+
 """Tier A byte-equality comparator for Laser-upstream alignment artifacts.
 
 Compares existing port (AlayaLite) Laser artifacts against upstream
