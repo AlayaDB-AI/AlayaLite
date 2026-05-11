@@ -5,25 +5,14 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
 """Unit tests for alayalite.bench._datasets (pure-Python, no C++ extension needed)."""
-
-# pylint: disable=wrong-import-position  # importorskip must run before bench imports
 
 import struct
 from pathlib import Path
 
 import numpy as np
 import pytest
-
-pytest.importorskip("alayalite._alayalitepy", reason="bench tests require built alayalite extension")
-
 from alayalite.bench._datasets import (
     DatasetMissing,
     DatasetSpec,
@@ -45,32 +34,18 @@ from alayalite.bench._datasets import (
 # ── binary format helpers ─────────────────────────────────────────────────────
 
 
-def _write_fvecs(path: Path, vecs: np.ndarray) -> None:
-    vecs = np.ascontiguousarray(vecs, dtype=np.float32)
+def _write_vecs(path: Path, vecs: np.ndarray, dtype) -> None:
+    """Write *vecs* format (per-row int32 dim prefix): fvecs (float32) or ivecs (int32)."""
+    vecs = np.ascontiguousarray(vecs, dtype=dtype)
     with path.open("wb") as f:
         for row in vecs:
             f.write(np.int32(row.shape[0]).tobytes())
             f.write(row.tobytes())
 
 
-def _write_ivecs(path: Path, vecs: np.ndarray) -> None:
-    vecs = np.ascontiguousarray(vecs, dtype=np.int32)
-    with path.open("wb") as f:
-        for row in vecs:
-            f.write(np.int32(row.shape[0]).tobytes())
-            f.write(row.tobytes())
-
-
-def _write_fbin(path: Path, vecs: np.ndarray) -> None:
-    vecs = np.ascontiguousarray(vecs, dtype=np.float32)
-    n, dim = vecs.shape
-    with path.open("wb") as f:
-        f.write(struct.pack("<II", n, dim))
-        f.write(vecs.tobytes())
-
-
-def _write_ibin(path: Path, vecs: np.ndarray) -> None:
-    vecs = np.ascontiguousarray(vecs, dtype=np.uint32)
+def _write_bin(path: Path, vecs: np.ndarray, dtype) -> None:
+    """Write *bin* format (single ``<II`` header + body): fbin (float32) or ibin (uint32)."""
+    vecs = np.ascontiguousarray(vecs, dtype=dtype)
     n, dim = vecs.shape
     with path.open("wb") as f:
         f.write(struct.pack("<II", n, dim))
@@ -114,7 +89,7 @@ def test_sha16_files_hashes_content(tmp_path):
 
 
 def test_sha16_directory_skips_subdirs(tmp_path):
-    # The subdirectory exercises the `if not path.is_file(): continue` branch
+    # Regression: subdirs must not be hashed (only regular files).
     (tmp_path / "sub").mkdir()
     (tmp_path / "file.bin").write_bytes(b"data")
     result = _sha16_directory(tmp_path)
@@ -124,24 +99,17 @@ def test_sha16_directory_skips_subdirs(tmp_path):
 # ── _distance_order ───────────────────────────────────────────────────────────
 
 
-def test_distance_order_cosine():
-    vecs = np.array([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]], dtype=np.float32)
-    q = np.array([1.0, 0.0], dtype=np.float32)
-    order = _distance_order(vecs, q, "COS", 2)
-    assert order[0] == 0
-
-
-def test_distance_order_ip():
-    vecs = np.array([[2.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=np.float32)
-    q = np.array([1.0, 0.0], dtype=np.float32)
-    order = _distance_order(vecs, q, "IP", 2)
-    assert order[0] == 0
-
-
-def test_distance_order_l2():
-    vecs = np.array([[0.0, 0.0], [10.0, 10.0], [1.0, 0.0]], dtype=np.float32)
-    q = np.array([0.0, 0.0], dtype=np.float32)
-    order = _distance_order(vecs, q, "L2", 2)
+@pytest.mark.parametrize(
+    "metric, vecs",
+    [
+        ("COS", [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]),
+        ("IP", [[2.0, 0.0], [0.0, 1.0], [1.0, 1.0]]),
+        ("L2", [[0.0, 0.0], [10.0, 10.0], [1.0, 0.0]]),
+    ],
+)
+def test_distance_order_picks_first_index(metric, vecs):
+    q = np.array([1.0, 0.0], dtype=np.float32) if metric != "L2" else np.array([0.0, 0.0], dtype=np.float32)
+    order = _distance_order(np.asarray(vecs, dtype=np.float32), q, metric, 2)
     assert order[0] == 0
 
 
@@ -170,19 +138,17 @@ def test_exact_ground_truth_basic():
 # ── load_synth ────────────────────────────────────────────────────────────────
 
 
-def test_load_synth_n_zero_raises():
-    with pytest.raises(ValueError, match="--n must be > 0"):
-        load_synth(0, 4, 5, 42)
-
-
-def test_load_synth_dim_zero_raises():
-    with pytest.raises(ValueError, match="--dim must be > 0"):
-        load_synth(10, 0, 5, 42)
-
-
-def test_load_synth_queries_zero_raises():
-    with pytest.raises(ValueError, match="--queries must be > 0"):
-        load_synth(10, 4, 0, 42)
+@pytest.mark.parametrize(
+    "n, dim, queries, match",
+    [
+        (0, 4, 5, "--n must be > 0"),
+        (10, 0, 5, "--dim must be > 0"),
+        (10, 4, 0, "--queries must be > 0"),
+    ],
+)
+def test_load_synth_zero_arg_raises(n, dim, queries, match):
+    with pytest.raises(ValueError, match=match):
+        load_synth(n, dim, queries, 42)
 
 
 def test_load_synth_ok():
@@ -193,15 +159,14 @@ def test_load_synth_ok():
     assert ds.dim == 4
 
 
-# ── _load_fvecs ───────────────────────────────────────────────────────────────
+# ── _load_fvecs / _load_ivecs ─────────────────────────────────────────────────
 
 
 def test_load_fvecs_success(tmp_path):
     vecs = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
     p = tmp_path / "test.fvecs"
-    _write_fvecs(p, vecs)
-    loaded = _load_fvecs(p)
-    np.testing.assert_array_almost_equal(loaded, vecs)
+    _write_vecs(p, vecs, np.float32)
+    np.testing.assert_array_almost_equal(_load_fvecs(p), vecs)
 
 
 def test_load_fvecs_empty_raises(tmp_path):
@@ -219,13 +184,10 @@ def test_load_fvecs_malformed_raises(tmp_path):
         _load_fvecs(p)
 
 
-# ── _load_ivecs ───────────────────────────────────────────────────────────────
-
-
 def test_load_ivecs_success(tmp_path):
     vecs = np.array([[0, 1, 2], [3, 4, 5]], dtype=np.int32)
     p = tmp_path / "test.ivecs"
-    _write_ivecs(p, vecs)
+    _write_vecs(p, vecs, np.int32)
     loaded = _load_ivecs(p)
     assert loaded.dtype == np.uint64
     np.testing.assert_array_equal(loaded, vecs.astype(np.uint64))
@@ -246,15 +208,14 @@ def test_load_ivecs_malformed_raises(tmp_path):
         _load_ivecs(p)
 
 
-# ── _load_fbin ────────────────────────────────────────────────────────────────
+# ── _load_fbin / _load_ibin ───────────────────────────────────────────────────
 
 
 def test_load_fbin_success(tmp_path):
     vecs = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
     p = tmp_path / "test.fbin"
-    _write_fbin(p, vecs)
-    loaded = _load_fbin(p)
-    np.testing.assert_array_almost_equal(loaded, vecs)
+    _write_bin(p, vecs, np.float32)
+    np.testing.assert_array_almost_equal(_load_fbin(p), vecs)
 
 
 def test_load_fbin_truncated_header_raises(tmp_path):
@@ -272,13 +233,10 @@ def test_load_fbin_truncated_body_raises(tmp_path):
         _load_fbin(p)
 
 
-# ── _load_ibin ────────────────────────────────────────────────────────────────
-
-
 def test_load_ibin_success(tmp_path):
     vecs = np.array([[0, 1], [2, 3]], dtype=np.uint32)
     p = tmp_path / "test.ibin"
-    _write_ibin(p, vecs)
+    _write_bin(p, vecs, np.uint32)
     loaded = _load_ibin(p)
     assert loaded.dtype == np.uint64
     np.testing.assert_array_equal(loaded, vecs.astype(np.uint64))
@@ -299,69 +257,99 @@ def test_load_ibin_truncated_body_raises(tmp_path):
         _load_ibin(p)
 
 
-# ── load_sift1m ───────────────────────────────────────────────────────────────
+# ── load_sift1m / load_gist1m ─────────────────────────────────────────────────
 
 
-def test_load_sift1m_missing_raises(tmp_path):
-    with pytest.raises(DatasetMissing, match="sift1m"):
-        load_sift1m(tmp_path / "nonexistent")
+@pytest.mark.parametrize(
+    "loader, prefix",
+    [(load_sift1m, "sift1m"), (load_gist1m, "gist1m")],
+)
+def test_named_dataset_missing_raises(tmp_path, loader, prefix):
+    with pytest.raises(DatasetMissing, match=prefix):
+        loader(tmp_path / "nonexistent")
 
 
-def test_load_sift1m_success(tmp_path):
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            {
+                "loader": load_sift1m,
+                "base_name": "sift_base.fvecs",
+                "query_name": "sift_query.fvecs",
+                "gt_name": "sift_groundtruth.ivecs",
+                "vec_dtype": np.float32,
+                "gt_dtype": np.int32,
+                "vec_writer": _write_vecs,
+                "gt_writer": _write_vecs,
+                "gt_value": np.arange(30, dtype=np.int32).reshape(3, 10),
+            },
+            id="sift1m",
+        ),
+        pytest.param(
+            {
+                "loader": load_gist1m,
+                "base_name": "gist_base.fbin",
+                "query_name": "gist_query.fbin",
+                "gt_name": "gist_gt.ibin",
+                "vec_dtype": np.float32,
+                "gt_dtype": np.uint32,
+                "vec_writer": _write_bin,
+                "gt_writer": _write_bin,
+                "gt_value": np.arange(16, dtype=np.uint32).reshape(2, 8),
+            },
+            id="gist1m",
+        ),
+    ],
+)
+def test_named_dataset_success(tmp_path, case):
     rng = np.random.default_rng(0)
-    vecs = rng.standard_normal((10, 4)).astype(np.float32)
-    queries = rng.standard_normal((3, 4)).astype(np.float32)
-    gt = np.arange(30, dtype=np.int32).reshape(3, 10)
-    _write_fvecs(tmp_path / "sift_base.fvecs", vecs)
-    _write_fvecs(tmp_path / "sift_query.fvecs", queries)
-    _write_ivecs(tmp_path / "sift_groundtruth.ivecs", gt)
-    ds = load_sift1m(tmp_path)
-    assert ds.name == "sift1m"
-    assert ds.vectors.shape == (10, 4)
-    assert ds.queries.shape == (3, 4)
+    loader = case["loader"]
+    gt_value = case["gt_value"]
+    n, dim = gt_value.shape[1], 4
+    vecs = rng.standard_normal((n, dim)).astype(case["vec_dtype"])
+    queries = rng.standard_normal((gt_value.shape[0], dim)).astype(case["vec_dtype"])
+    case["vec_writer"](tmp_path / case["base_name"], vecs, case["vec_dtype"])
+    case["vec_writer"](tmp_path / case["query_name"], queries, case["vec_dtype"])
+    case["gt_writer"](tmp_path / case["gt_name"], gt_value, case["gt_dtype"])
+    ds = loader(tmp_path)
+    assert ds.vectors.shape == (n, dim)
+    assert ds.queries.shape == (gt_value.shape[0], dim)
     assert ds.ground_truth is not None
 
 
-def test_load_sift1m_no_gt(tmp_path):
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(
+            {
+                "loader": load_sift1m,
+                "base_name": "sift_base.fvecs",
+                "query_name": "sift_query.fvecs",
+                "vec_dtype": np.float32,
+                "writer": _write_vecs,
+            },
+            id="sift1m",
+        ),
+        pytest.param(
+            {
+                "loader": load_gist1m,
+                "base_name": "gist_base.fbin",
+                "query_name": "gist_query.fbin",
+                "vec_dtype": np.float32,
+                "writer": _write_bin,
+            },
+            id="gist1m",
+        ),
+    ],
+)
+def test_named_dataset_no_gt(tmp_path, case):
     rng = np.random.default_rng(1)
-    vecs = rng.standard_normal((5, 4)).astype(np.float32)
-    queries = rng.standard_normal((2, 4)).astype(np.float32)
-    _write_fvecs(tmp_path / "sift_base.fvecs", vecs)
-    _write_fvecs(tmp_path / "sift_query.fvecs", queries)
-    ds = load_sift1m(tmp_path)
-    assert ds.ground_truth is None
-
-
-# ── load_gist1m ───────────────────────────────────────────────────────────────
-
-
-def test_load_gist1m_missing_raises(tmp_path):
-    with pytest.raises(DatasetMissing, match="gist1m"):
-        load_gist1m(tmp_path / "nonexistent")
-
-
-def test_load_gist1m_success(tmp_path):
-    rng = np.random.default_rng(2)
-    vecs = rng.standard_normal((8, 4)).astype(np.float32)
-    queries = rng.standard_normal((2, 4)).astype(np.float32)
-    gt = np.arange(16, dtype=np.uint32).reshape(2, 8)
-    _write_fbin(tmp_path / "gist_base.fbin", vecs)
-    _write_fbin(tmp_path / "gist_query.fbin", queries)
-    _write_ibin(tmp_path / "gist_gt.ibin", gt)
-    ds = load_gist1m(tmp_path)
-    assert ds.name == "gist1m"
-    assert ds.vectors.shape == (8, 4)
-    assert ds.ground_truth is not None
-
-
-def test_load_gist1m_no_gt(tmp_path):
-    rng = np.random.default_rng(3)
-    vecs = rng.standard_normal((4, 4)).astype(np.float32)
-    queries = rng.standard_normal((2, 4)).astype(np.float32)
-    _write_fbin(tmp_path / "gist_base.fbin", vecs)
-    _write_fbin(tmp_path / "gist_query.fbin", queries)
-    ds = load_gist1m(tmp_path)
-    assert ds.ground_truth is None
+    vecs = rng.standard_normal((5, 4)).astype(case["vec_dtype"])
+    queries = rng.standard_normal((2, 4)).astype(case["vec_dtype"])
+    case["writer"](tmp_path / case["base_name"], vecs, case["vec_dtype"])
+    case["writer"](tmp_path / case["query_name"], queries, case["vec_dtype"])
+    assert case["loader"](tmp_path).ground_truth is None
 
 
 # ── load_laser_files ──────────────────────────────────────────────────────────
@@ -371,7 +359,7 @@ def test_load_laser_files_from_vectors_path(tmp_path):
     rng = np.random.default_rng(4)
     vecs = rng.standard_normal((12, 4)).astype(np.float32)
     vp = tmp_path / "vecs.fbin"
-    _write_fbin(vp, vecs)
+    _write_bin(vp, vecs, np.float32)
     ds = load_laser_files(n=0, dim=4, query_count=3, seed=42, vectors_path=vp)
     assert ds.vectors.shape[1] == 4
     assert ds.n == 12
@@ -383,8 +371,8 @@ def test_load_laser_files_queries_dim_mismatch(tmp_path):
     queries = rng.standard_normal((3, 8)).astype(np.float32)  # wrong dim
     vp = tmp_path / "v.fbin"
     qp = tmp_path / "q.fbin"
-    _write_fbin(vp, vecs)
-    _write_fbin(qp, queries)
+    _write_bin(vp, vecs, np.float32)
+    _write_bin(qp, queries, np.float32)
     with pytest.raises(ValueError, match="dim.*does not match"):
         load_laser_files(n=0, dim=4, query_count=3, seed=42, vectors_path=vp, queries_path=qp)
 
@@ -392,14 +380,13 @@ def test_load_laser_files_queries_dim_mismatch(tmp_path):
 def test_load_laser_files_ground_truth_path(tmp_path):
     gt = np.arange(6, dtype=np.uint32).reshape(2, 3)
     gp = tmp_path / "gt.ibin"
-    _write_ibin(gp, gt)
+    _write_bin(gp, gt, np.uint32)
     ds = load_laser_files(n=5, dim=4, query_count=2, seed=42, ground_truth_path=gp)
     assert ds.ground_truth is not None
     assert ds.ground_truth.shape == (2, 3)
 
 
 def test_load_laser_files_no_vectors_no_queries():
-    # exercises: vectors = np.empty((0, dim), ...) and ground_truth = None
     ds = load_laser_files(n=5, dim=4, query_count=3, seed=42)
     assert ds.vectors.shape == (0, 4)
     assert ds.queries.shape == (3, 4)

@@ -5,16 +5,8 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
 """Tests for benchmark compatibility wrappers."""
-
-# pylint: disable=wrong-import-position  # importorskip must run before bench imports
 
 import importlib.util
 import subprocess
@@ -23,6 +15,8 @@ from pathlib import Path
 
 
 def _load_module(path: Path):
+    # `python/benchmarks/` is not on sys.path as a package, so spec-load
+    # the wrapper script directly rather than relying on `import`.
     spec = importlib.util.spec_from_file_location(path.stem, path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -33,7 +27,7 @@ def _load_module(path: Path):
 def test_disk_laser_wrapper_forwards_legacy_input_flags(monkeypatch):
     repo_root = Path(__file__).resolve().parents[3]
     module = _load_module(repo_root / "python" / "benchmarks" / "disk_laser_smoke.py")
-    captured = {}
+    captured: dict = {}
 
     def fake_run(cmd, check=False):
         captured["cmd"] = cmd
