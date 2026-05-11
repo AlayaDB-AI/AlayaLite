@@ -482,8 +482,8 @@ class RaBitQSpace {
     DataType lut_delta_ = 0;
     DataType lut_bias_ = 0;
 
-    // alignas(64) std::array<uint16_t, fastscan::kBatchSize> accu_res_{};
-    alignas(64) std::array<DataType, kDegreeBound> est_dists_{};
+    // Keep QueryComputer at natural alignment; coroutine search stores it in coroutine frames.
+    std::array<DataType, kDegreeBound> est_dists_{};
 
     void batch_est_dist() {
       const char *base = storage_ptr_ + data_chunk_size_ * c_;

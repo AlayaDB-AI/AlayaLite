@@ -298,7 +298,7 @@ inline void estimate_distances(const uint16_t *ALAYA_RESTRICT nth_segments,
     const __m512 inner = _mm512_fmadd_ps(v_delta, nth_f, v_bias);
     const __m512 est = _mm512_fmadd_ps(f_rescale_v, inner, _mm512_add_ps(f_add_v, v_gadd));
 
-    _mm512_store_ps(result + off, est);
+    _mm512_storeu_ps(result + off, est);
   }
 #else
   log_scalar_fastscan_fallback();
