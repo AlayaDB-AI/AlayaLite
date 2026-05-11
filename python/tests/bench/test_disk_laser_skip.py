@@ -5,22 +5,25 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """Tests for disk_laser runtime gating in the benchmark harness."""
 
 import json
 
 import numpy as np
-import pytest
-from alayalite.bench import _engines
+from alayalite.bench import _engines, disk_collection
 from alayalite.bench._datasets import DatasetSpec
-from alayalite.bench._engines import probe_disk_laser_supported
 from alayalite.bench.disk_collection import main as bench_main
 
 
-def test_disk_laser_unsupported_probe_skips_cleanly(tmp_path, capsys):
-    if probe_disk_laser_supported():
-        pytest.skip("disk_laser is supported on this build")
+def test_disk_laser_unsupported_probe_skips_cleanly(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(disk_collection, "probe_disk_laser_supported", lambda scratch_root: False)
 
     argv = [
         "--engine",

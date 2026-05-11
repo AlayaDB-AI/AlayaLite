@@ -5,6 +5,12 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """End-to-end schema smoke for in-memory disk_flat / disk_vamana paths.
 
@@ -35,6 +41,8 @@ def test_engine_synth_outputs_schema(tmp_path, engine, extra_argv, recall_assert
         engine,
         "--dataset",
         "synth",
+        "--metric",
+        "L2",
         "--n",
         "1024",
         "--queries",

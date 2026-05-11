@@ -5,8 +5,14 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-"""Unit tests for alayalite.bench._datasets (pure-Python, no C++ extension needed)."""
+"""Unit tests for alayalite.bench._datasets within the bench test suite."""
 
 import struct
 from pathlib import Path
@@ -100,16 +106,15 @@ def test_sha16_directory_skips_subdirs(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "metric, vecs",
+    "metric, vecs, q",
     [
-        ("COS", [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]]),
-        ("IP", [[2.0, 0.0], [0.0, 1.0], [1.0, 1.0]]),
-        ("L2", [[0.0, 0.0], [10.0, 10.0], [1.0, 0.0]]),
+        ("COS", [[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]], [1.0, 0.0]),
+        ("IP", [[2.0, 0.0], [0.0, 1.0], [1.0, 1.0]], [1.0, 0.0]),
+        ("L2", [[0.0, 0.0], [10.0, 10.0], [1.0, 0.0]], [0.0, 0.0]),
     ],
 )
-def test_distance_order_picks_first_index(metric, vecs):
-    q = np.array([1.0, 0.0], dtype=np.float32) if metric != "L2" else np.array([0.0, 0.0], dtype=np.float32)
-    order = _distance_order(np.asarray(vecs, dtype=np.float32), q, metric, 2)
+def test_distance_order_picks_first_index(metric, vecs, q):
+    order = _distance_order(np.asarray(vecs, dtype=np.float32), np.asarray(q, dtype=np.float32), metric, 2)
     assert order[0] == 0
 
 
