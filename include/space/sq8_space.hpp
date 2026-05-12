@@ -79,8 +79,8 @@ class SQ8Space {
       : capacity_(capacity),
         dim_(dim),
         metric_(metric),
-        config_(std::move(config)),
-        quantizer_(dim) {
+        quantizer_(dim),
+        config_(std::move(config)) {
     data_size_ = dim_ * sizeof(uint8_t);
     data_storage_.init(data_size_, capacity);
     set_metric_function();

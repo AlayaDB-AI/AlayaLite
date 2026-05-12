@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <memory>
 #include <string_view>
+#include <vector>
 #include "utils/log.hpp"
 #include "utils/metadata_filter.hpp"
 #include "utils/scalar_data.hpp"
@@ -85,8 +86,8 @@ TEST_F(SQ8SpaceTest, SaveAndLoad) {
 TEST_F(SQ8SpaceTest, QueryComputerWithQuery) {
   float data[8] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0};
   space_->fit(reinterpret_cast<float *>(data), 2);
-  float query[4] = {1.0, 2.0, 3.0, 4.0};
-  auto query_computer = space_->get_query_computer(query);
+  std::vector<float> query{1.0, 2.0, 3.0, 4.0};
+  auto query_computer = space_->get_query_computer(query.data());
   EXPECT_GE(query_computer(1), 64);
 }
 
@@ -132,7 +133,8 @@ TEST_F(SQ8SpaceTest, HandleFileErrors) {
 
 class SQ8SpaceMetadataTest : public ::testing::Test {
  protected:
-  using SpaceType = SQ8Space<float, float, uint32_t, SequentialStorage<uint8_t, uint32_t>, ScalarData>;
+  using SpaceType =
+      SQ8Space<float, float, uint32_t, SequentialStorage<uint8_t, uint32_t>, ScalarData>;
 
   void SetUp() override {
     dim_ = 4;
@@ -161,7 +163,8 @@ class SQ8SpaceMetadataTest : public ::testing::Test {
       meta["category"] = static_cast<int64_t>(i % 5);
       meta["timestamp"] = static_cast<double>(i) * 100.0;
       meta["description"] = std::string("description_") + std::to_string(i);
-      metadata[i] = ScalarData("item_" + std::to_string(i), "doc_content_" + std::to_string(i), meta);
+      metadata[i] =
+          ScalarData("item_" + std::to_string(i), "doc_content_" + std::to_string(i), meta);
     }
     return metadata;
   }
@@ -212,8 +215,10 @@ TEST_F(SQ8SpaceMetadataTest, GetMetadata) {
     EXPECT_EQ(retrieved.item_id, metadata[i].item_id);
     EXPECT_EQ(retrieved.document, metadata[i].document);
     EXPECT_EQ(std::get<int64_t>(retrieved.metadata.at("category")), static_cast<int64_t>(i % 5));
-    EXPECT_DOUBLE_EQ(std::get<double>(retrieved.metadata.at("timestamp")), static_cast<double>(i) * 100.0);
-    EXPECT_EQ(std::get<std::string>(retrieved.metadata.at("description")), "description_" + std::to_string(i));
+    EXPECT_DOUBLE_EQ(std::get<double>(retrieved.metadata.at("timestamp")),
+                     static_cast<double>(i) * 100.0);
+    EXPECT_EQ(std::get<std::string>(retrieved.metadata.at("description")),
+              "description_" + std::to_string(i));
   }
 }
 
@@ -240,7 +245,8 @@ TEST_F(SQ8SpaceMetadataTest, SaveAndLoadWithMetadata) {
       EXPECT_EQ(retrieved.item_id, metadata[i].item_id);
       EXPECT_EQ(retrieved.document, metadata[i].document);
       EXPECT_EQ(std::get<int64_t>(retrieved.metadata.at("category")), static_cast<int64_t>(i % 5));
-      EXPECT_DOUBLE_EQ(std::get<double>(retrieved.metadata.at("timestamp")), static_cast<double>(i) * 100.0);
+      EXPECT_DOUBLE_EQ(std::get<double>(retrieved.metadata.at("timestamp")),
+                       static_cast<double>(i) * 100.0);
     }
   }
 }
@@ -290,7 +296,8 @@ TEST_F(SQ8SpaceMetadataTest, MetadataCorrectness) {
     auto retrieved = space_->get_scalar_data(i);
     EXPECT_EQ(retrieved.item_id, "item_" + std::to_string(i));
     EXPECT_EQ(std::get<int64_t>(retrieved.metadata.at("category")), static_cast<int64_t>(i % 5));
-    EXPECT_DOUBLE_EQ(std::get<double>(retrieved.metadata.at("timestamp")), static_cast<double>(i) * 100.0);
+    EXPECT_DOUBLE_EQ(std::get<double>(retrieved.metadata.at("timestamp")),
+                     static_cast<double>(i) * 100.0);
   }
 }
 
@@ -316,7 +323,7 @@ TEST_F(SQ8SpaceMetadataTest, GetScalarDataWithEmptyFilter) {
   config.db_path_ = db_path_;
   space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
 
-  float data[20] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+  float data[20] = {1.0,  2.0,  3.0,  4.0,  5.0,  6.0,  7.0,  8.0,  9.0,  10.0,
                     11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0};
   auto metadata = make_test_metadata(5);
   space_->fit(data, 5, metadata.data());
@@ -332,7 +339,7 @@ TEST_F(SQ8SpaceMetadataTest, GetScalarDataWithEqFilter) {
   config.db_path_ = db_path_;
   space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
 
-  float data[20] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+  float data[20] = {1.0,  2.0,  3.0,  4.0,  5.0,  6.0,  7.0,  8.0,  9.0,  10.0,
                     11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0};
   auto metadata = make_test_metadata(5);
   space_->fit(data, 5, metadata.data());
@@ -353,7 +360,7 @@ TEST_F(SQ8SpaceMetadataTest, GetScalarDataWithGtFilter) {
   config.db_path_ = db_path_;
   space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
 
-  float data[20] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+  float data[20] = {1.0,  2.0,  3.0,  4.0,  5.0,  6.0,  7.0,  8.0,  9.0,  10.0,
                     11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0};
   auto metadata = make_test_metadata(5);
   space_->fit(data, 5, metadata.data());
@@ -372,7 +379,7 @@ TEST_F(SQ8SpaceMetadataTest, GetScalarDataWithLimit) {
   config.db_path_ = db_path_;
   space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
 
-  float data[20] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+  float data[20] = {1.0,  2.0,  3.0,  4.0,  5.0,  6.0,  7.0,  8.0,  9.0,  10.0,
                     11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0};
   auto metadata = make_test_metadata(5);
   space_->fit(data, 5, metadata.data());
@@ -388,7 +395,7 @@ TEST_F(SQ8SpaceMetadataTest, GetScalarDataWithOrFilter) {
   config.db_path_ = db_path_;
   space_ = std::make_shared<SpaceType>(capacity_, dim_, metric_, config);
 
-  float data[20] = {1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0,
+  float data[20] = {1.0,  2.0,  3.0,  4.0,  5.0,  6.0,  7.0,  8.0,  9.0,  10.0,
                     11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0};
   auto metadata = make_test_metadata(5);
   space_->fit(data, 5, metadata.data());
