@@ -88,17 +88,16 @@ class TestCollection(unittest.TestCase):
         self.assertEqual(result["metadata"], [{"category": "A"}])
         self.assertEqual(len(self.collection.filter_query({})["id"]), 1)
 
-    def test_fit_rejects_duplicate_item_id(self):
-        """Columnar fit should reject duplicate non-empty item IDs."""
+    def test_initial_insert_rejects_duplicate_columnar_item_id(self):
+        """Collection insert should reject duplicate non-empty item IDs from columnar inputs."""
         vectors = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=np.float32)
+        item_ids = ["dup", "dup"]
+        documents = ["Document 1", "Document 2"]
+        metadata_list = [{"category": "A"}, {"category": "B"}]
+        items = list(zip(item_ids, documents, vectors, metadata_list))
 
         with self.assertRaisesRegex(RuntimeError, "Duplicate item_id: dup"):
-            self.collection.fit(
-                vectors,
-                item_ids=["dup", "dup"],
-                documents=["Document 1", "Document 2"],
-                metadata_list=[{"category": "A"}, {"category": "B"}],
-            )
+            self.collection.insert(items)
 
     def test_get_cpp_index_before_first_insert_has_actionable_error(self):
         """Accessing the native index before first insert should explain how to initialize it."""
