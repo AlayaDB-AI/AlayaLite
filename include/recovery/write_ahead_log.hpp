@@ -5,18 +5,17 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
 #include <mutex>
 #include <optional>
-#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "utils/binary_io.hpp"
 #include "utils/log.hpp"
 #include "utils/platform_fs.hpp"
 
@@ -24,137 +23,57 @@ namespace alaya::recovery {
 
 namespace fs = std::filesystem;
 
-constexpr uint32_t kWalFrameMagic = 0x414C5752U;    // ALWR
-constexpr uint32_t kWalTrailerMagic = 0x5752414CU;  // WRAL
-constexpr uint8_t kWalFormatVersion = 1;
+constexpr uint32_t kWalFrameMagic = 0x48454144U;    ///< WAL frame prefix magic, "HEAD".
+constexpr uint32_t kWalTrailerMagic = 0x5441494CU;  ///< WAL frame trailer magic, "TAIL".
+constexpr uint8_t kWalFormatVersion = 1;            ///< Current on-disk WAL frame version.
 
+/**
+ * @brief Identifies whether a WAL frame starts or commits a mutation.
+ *
+ * Recovery only replays records that have both a PREPARE frame with payload and a matching COMMIT
+ * frame, which avoids applying half-written operations after a crash.
+ */
 enum class WalFrameType : uint8_t {
-  PREPARE = 1,
-  COMMIT = 2,
+  kPrepare = 1,  ///< Contains the full mutation payload before commit.
+  kCommit = 2,   ///< Marks the prepared operation as committed and re-playable.
 };
 
+/**
+ * @brief Logical mutation category stored with a WAL record.
+ *
+ * The mutation type lets recovery route a replayed payload to the same insert, upsert or delete
+ * path that originally produced the operation.
+ */
 enum class MutationType : uint8_t {
-  INSERT = 1,
-  UPSERT = 2,
-  REMOVE_BY_ITEM_ID = 3,
-  REMOVE_BY_INTERNAL_ID = 4,
+  kInsert = 1,              ///< Insert a new vector/scalar record.
+  kUpsert = 2,              ///< Insert or replace a vector/scalar record.
+  kRemoveByItemId = 3,      ///< Delete by external item id.
+  kRemoveByInternalId = 4,  ///< Delete by internal storage id.
 };
 
+/**
+ * @brief In-memory representation of one durable mutation from the WAL.
+ *
+ * PREPARE frames carry the serialized payload, while COMMIT frames validate that the prepared
+ * operation became durable. Replayed records are returned with their original operation id and
+ * mutation type.
+ */
 struct WalRecord {
-  uint64_t op_id{0};
-  MutationType mutation_type{MutationType::INSERT};
-  std::vector<char> payload{};
+  uint64_t op_id_{0};                                  ///< Monotonic operation id.
+  MutationType mutation_type_{MutationType::kInsert};  ///< Mutation category for replay.
+  std::vector<char> payload_;                          ///< Opaque serialized mutation payload.
 };
 
-class BinaryWriter {
- public:
-  auto write_u8(uint8_t value) -> void { write_pod(value); }
-  auto write_u32(uint32_t value) -> void { write_pod(value); }
-  auto write_u64(uint64_t value) -> void { write_pod(value); }
+using BinaryReader = binary_io::BinaryReader;
+using BinaryWriter = binary_io::BinaryWriter;
 
-  auto write_bytes(const char *data, size_t size) -> void {
-    if (size == 0) {
-      return;
-    }
-    buffer_.insert(buffer_.end(), data, data + size);
-  }
-
-  auto write_string(const std::string &value) -> void {
-    write_u64(static_cast<uint64_t>(value.size()));
-    write_bytes(value.data(), value.size());
-  }
-
-  auto write_blob(const std::vector<char> &value) -> void {
-    write_u64(static_cast<uint64_t>(value.size()));
-    write_bytes(value.data(), value.size());
-  }
-
-  auto write_blob(const std::string &value) -> void {
-    write_u64(static_cast<uint64_t>(value.size()));
-    write_bytes(value.data(), value.size());
-  }
-
-  template <typename T>
-  auto write_vector_blob(const T *data, size_t element_count) -> void {
-    auto bytes = static_cast<uint64_t>(element_count * sizeof(T));
-    write_u64(bytes);
-    write_bytes(reinterpret_cast<const char *>(data), static_cast<size_t>(bytes));
-  }
-
-  [[nodiscard]] auto finish() && -> std::vector<char> { return std::move(buffer_); }
-
- private:
-  template <typename T>
-  auto write_pod(const T &value) -> void {
-    auto *ptr = reinterpret_cast<const char *>(&value);
-    buffer_.insert(buffer_.end(), ptr, ptr + sizeof(T));
-  }
-
-  std::vector<char> buffer_{};
-};
-
-class BinaryReader {
- public:
-  BinaryReader(const char *data, size_t size) : data_(data), size_(size) {}
-
-  auto read_u8() -> std::optional<uint8_t> { return read_pod<uint8_t>(); }
-  auto read_u32() -> std::optional<uint32_t> { return read_pod<uint32_t>(); }
-  auto read_u64() -> std::optional<uint64_t> { return read_pod<uint64_t>(); }
-
-  auto read_string() -> std::optional<std::string> {
-    auto size = read_u64();
-    if (!size.has_value()) {
-      return std::nullopt;
-    }
-    if (remaining() < size.value()) {
-      return std::nullopt;
-    }
-    std::string value(data_ + offset_, data_ + offset_ + static_cast<size_t>(size.value()));
-    offset_ += static_cast<size_t>(size.value());
-    return value;
-  }
-
-  auto read_blob() -> std::optional<std::vector<char>> {
-    auto size = read_u64();
-    if (!size.has_value()) {
-      return std::nullopt;
-    }
-    if (remaining() < size.value()) {
-      return std::nullopt;
-    }
-    std::vector<char> value(data_ + offset_, data_ + offset_ + static_cast<size_t>(size.value()));
-    offset_ += static_cast<size_t>(size.value());
-    return value;
-  }
-
-  auto read_fixed_blob(size_t size) -> std::optional<std::vector<char>> {
-    if (remaining() < size) {
-      return std::nullopt;
-    }
-    std::vector<char> value(data_ + offset_, data_ + offset_ + size);
-    offset_ += size;
-    return value;
-  }
-
-  [[nodiscard]] auto remaining() const -> size_t { return size_ - offset_; }
-
- private:
-  template <typename T>
-  auto read_pod() -> std::optional<T> {
-    if (remaining() < sizeof(T)) {
-      return std::nullopt;
-    }
-    T value{};
-    std::memcpy(&value, data_ + offset_, sizeof(T));
-    offset_ += sizeof(T);
-    return value;
-  }
-
-  const char *data_{nullptr};
-  size_t size_{0};
-  size_t offset_{0};
-};
-
+/**
+ * @brief Append-only write-ahead log used to recover operations after crashes.
+ *
+ * The log stores each operation as PREPARE plus COMMIT frames. Replay scans complete frames,
+ * validates their prepare/commit pairing and returns only committed records newer than the active
+ * snapshot.
+ */
 class WriteAheadLog {
  public:
   explicit WriteAheadLog(fs::path path) : path_(std::move(path)) {}
@@ -172,11 +91,12 @@ class WriteAheadLog {
   auto operator=(WriteAheadLog &&) -> WriteAheadLog & = delete;
 
   auto append_prepare(const WalRecord &record) const -> void {
-    append_frame(WalFrameType::PREPARE, record);
+    append_frame(WalFrameType::kPrepare, record);
   }
 
   auto append_commit(uint64_t op_id, MutationType mutation_type) const -> void {
-    append_frame(WalFrameType::COMMIT, WalRecord{op_id, mutation_type, {}});
+    append_frame(WalFrameType::kCommit,
+                 WalRecord{.op_id_ = op_id, .mutation_type_ = mutation_type, .payload_ = {}});
   }
 
   auto truncate() const -> void {
@@ -199,6 +119,17 @@ class WriteAheadLog {
     platform::sync_file(path_);
   }
 
+  /**
+   * @brief Reads the WAL and returns durable committed records that have not been applied yet.
+   *
+   * PREPARE frames are held until a matching COMMIT frame is seen. Truncated or corrupted tail
+   * frames stop replay after logging a warning, preserving all complete committed records that were
+   * written before the damaged section.
+   *
+   * @param applied_through Highest operation id already covered by the active snapshot.
+   * @param max_seen_op_id Optional output for the largest operation id observed while scanning.
+   * @return Committed WAL records sorted by operation id.
+   */
   [[nodiscard]] auto replayable_records(uint64_t applied_through,
                                         uint64_t *max_seen_op_id = nullptr) const
       -> std::vector<WalRecord> {
@@ -232,8 +163,8 @@ class WriteAheadLog {
         break;
       }
 
-      std::vector<char> payload(header->payload_size);
-      if (header->payload_size > 0) {
+      std::vector<char> payload(header->payload_size_);
+      if (header->payload_size_ > 0) {
         input.read(payload.data(), static_cast<std::streamsize>(payload.size()));
         if (!input) {
           LOG_WARN("WAL truncated while reading payload at {}", path_.string());
@@ -248,24 +179,25 @@ class WriteAheadLog {
         break;
       }
 
-      max_op_id = std::max(max_op_id, header->op_id);
-      if (header->frame_type == WalFrameType::PREPARE) {
-        pending[header->op_id] =
-            WalRecord{header->op_id, header->mutation_type, std::move(payload)};
+      max_op_id = std::max(max_op_id, header->op_id_);
+      if (header->frame_type_ == WalFrameType::kPrepare) {
+        pending[header->op_id_] = WalRecord{.op_id_ = header->op_id_,
+                                            .mutation_type_ = header->mutation_type_,
+                                            .payload_ = std::move(payload)};
         continue;
       }
 
-      auto pending_it = pending.find(header->op_id);
+      auto pending_it = pending.find(header->op_id_);
       if (pending_it == pending.end()) {
-        LOG_WARN("WAL commit without prepare: op_id={}", header->op_id);
+        LOG_WARN("WAL commit without prepare: op_id={}", header->op_id_);
         continue;
       }
-      if (pending_it->second.mutation_type != header->mutation_type) {
-        LOG_WARN("WAL prepare/commit mutation mismatch: op_id={}", header->op_id);
+      if (pending_it->second.mutation_type_ != header->mutation_type_) {
+        LOG_WARN("WAL prepare/commit mutation mismatch: op_id={}", header->op_id_);
         pending.erase(pending_it);
         continue;
       }
-      if (header->op_id > applied_through) {
+      if (header->op_id_ > applied_through) {
         committed.push_back(std::move(pending_it->second));
       }
       pending.erase(pending_it);
@@ -274,18 +206,18 @@ class WriteAheadLog {
     if (max_seen_op_id != nullptr) {
       *max_seen_op_id = max_op_id;
     }
-    std::sort(committed.begin(), committed.end(), [](const WalRecord &lhs, const WalRecord &rhs) {
-      return lhs.op_id < rhs.op_id;
+    std::ranges::sort(committed, [](const WalRecord &lhs, const WalRecord &rhs) {
+      return lhs.op_id_ < rhs.op_id_;
     });
     return committed;
   }
 
  private:
   struct FrameHeader {
-    WalFrameType frame_type{WalFrameType::PREPARE};
-    MutationType mutation_type{MutationType::INSERT};
-    uint64_t op_id{0};
-    uint64_t payload_size{0};
+    WalFrameType frame_type_{WalFrameType::kPrepare};    ///< PREPARE payload or COMMIT marker.
+    MutationType mutation_type_{MutationType::kInsert};  ///< Mutation category from the frame.
+    uint64_t op_id_{0};                                  ///< Operation id for frame pairing.
+    uint64_t payload_size_{0};                           ///< Payload byte count after header.
   };
 
   auto ensure_stream_open() const -> void {
@@ -298,6 +230,13 @@ class WriteAheadLog {
     }
   }
 
+  /**
+   * @brief Serializes and appends one WAL frame for a PREPARE or COMMIT operation.
+   *
+   * The full frame is assembled into a contiguous buffer before writing so the header, payload and
+   * trailer are emitted together. COMMIT frames are fsynced to make the commit boundary durable for
+   * crash recovery.
+   */
   auto append_frame(WalFrameType frame_type, const WalRecord &record) const -> void {
     std::lock_guard<std::mutex> lock(wal_mutex_);
     ensure_stream_open();
@@ -307,7 +246,8 @@ class WriteAheadLog {
     constexpr size_t kHeaderSize =
         sizeof(uint32_t) + sizeof(uint8_t) * 4 + sizeof(uint64_t) + sizeof(uint64_t);
     constexpr size_t kTrailerSize = sizeof(uint32_t);
-    uint64_t payload_size = static_cast<uint64_t>(record.payload.size());
+    auto payload_size = static_cast<uint64_t>(record.payload_.size());
+
     std::vector<char> buf(kHeaderSize + static_cast<size_t>(payload_size) + kTrailerSize);
     char *ptr = buf.data();
 
@@ -317,16 +257,18 @@ class WriteAheadLog {
     };
 
     write_pod(kWalFrameMagic);
+
     write_pod(kWalFormatVersion);
     write_pod(static_cast<uint8_t>(frame_type));
-    write_pod(static_cast<uint8_t>(record.mutation_type));
+    write_pod(static_cast<uint8_t>(record.mutation_type_));
     write_pod(static_cast<uint8_t>(0));  // reserved
-    write_pod(record.op_id);
+    write_pod(record.op_id_);
     write_pod(payload_size);
     if (payload_size > 0) {
-      std::memcpy(ptr, record.payload.data(), static_cast<size_t>(payload_size));
+      std::memcpy(ptr, record.payload_.data(), static_cast<size_t>(payload_size));
       ptr += static_cast<size_t>(payload_size);
     }
+
     write_pod(kWalTrailerMagic);
 
     wal_stream_.write(buf.data(), static_cast<std::streamsize>(buf.size()));
@@ -335,11 +277,17 @@ class WriteAheadLog {
     // Only fsync on COMMIT frames. PREPARE frames are durable enough after
     // flush — a crash between PREPARE and COMMIT leaves an uncommitted record
     // that is correctly skipped during replay.
-    if (frame_type == WalFrameType::COMMIT) {
+    if (frame_type == WalFrameType::kCommit) {
       platform::sync_file(path_);
     }
   }
 
+  /**
+   * @brief Reads and validates the fixed-size WAL frame header from the input stream.
+   *
+   * The reader returns std::nullopt on EOF, truncated headers, unexpected magic values or
+   * unsupported format versions so the replay loop can stop at the last complete valid frame.
+   */
   [[nodiscard]] static auto read_frame_header(std::ifstream &input) -> std::optional<FrameHeader> {
     uint32_t magic = 0;
     input.read(reinterpret_cast<char *>(&magic), sizeof(magic));
@@ -377,16 +325,16 @@ class WriteAheadLog {
       return std::nullopt;
     }
     return FrameHeader{
-        static_cast<WalFrameType>(frame_type),
-        static_cast<MutationType>(mutation_type),
-        op_id,
-        payload_size,
+        .frame_type_ = static_cast<WalFrameType>(frame_type),
+        .mutation_type_ = static_cast<MutationType>(mutation_type),
+        .op_id_ = op_id,
+        .payload_size_ = payload_size,
     };
   }
 
-  fs::path path_;
-  mutable std::mutex wal_mutex_;
-  mutable std::ofstream wal_stream_;
+  fs::path path_;                     ///< Filesystem path of the WAL file.
+  mutable std::mutex wal_mutex_;      ///< Guards appends, flushes, truncation and stream state.
+  mutable std::ofstream wal_stream_;  ///< Lazily opened append stream for WAL frames.
 };
 
 }  // namespace alaya::recovery

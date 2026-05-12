@@ -30,7 +30,7 @@ static auto make_payload(const std::string &content) -> std::vector<char> {
 }
 
 static auto payload_string(const WalRecord &record) -> std::string {
-  return {record.payload.begin(), record.payload.end()};
+  return {record.payload_.begin(), record.payload_.end()};
 }
 
 // ---------------------------------------------------------------------------
@@ -62,20 +62,20 @@ class WalTest : public ::testing::Test {
 
 TEST_F(WalTest, PrepareAndCommitRoundtrip) {
   WriteAheadLog wal(wal_path_);
-  WalRecord record{1, MutationType::INSERT, make_payload("hello")};
+  WalRecord record{1, MutationType::kInsert, make_payload("hello")};
   wal.append_prepare(record);
-  wal.append_commit(1, MutationType::INSERT);
+  wal.append_commit(1, MutationType::kInsert);
 
   auto records = wal.replayable_records(0);
   ASSERT_EQ(records.size(), 1U);
-  EXPECT_EQ(records[0].op_id, 1U);
-  EXPECT_EQ(records[0].mutation_type, MutationType::INSERT);
+  EXPECT_EQ(records[0].op_id_, 1U);
+  EXPECT_EQ(records[0].mutation_type_, MutationType::kInsert);
   EXPECT_EQ(payload_string(records[0]), "hello");
 }
 
 TEST_F(WalTest, PrepareWithoutCommitNotReplayable) {
   WriteAheadLog wal(wal_path_);
-  wal.append_prepare({1, MutationType::INSERT, make_payload("orphan")});
+  wal.append_prepare({1, MutationType::kInsert, make_payload("orphan")});
 
   auto records = wal.replayable_records(0);
   EXPECT_TRUE(records.empty());
@@ -85,38 +85,38 @@ TEST_F(WalTest, MixedCommittedAndUncommitted) {
   WriteAheadLog wal(wal_path_);
 
   // Commit ops 1 and 3, leave op 2 uncommitted
-  wal.append_prepare({1, MutationType::INSERT, make_payload("op1")});
-  wal.append_commit(1, MutationType::INSERT);
+  wal.append_prepare({1, MutationType::kInsert, make_payload("op1")});
+  wal.append_commit(1, MutationType::kInsert);
 
-  wal.append_prepare({2, MutationType::UPSERT, make_payload("op2")});
+  wal.append_prepare({2, MutationType::kUpsert, make_payload("op2")});
   // no commit for op 2
 
-  wal.append_prepare({3, MutationType::REMOVE_BY_ITEM_ID, make_payload("op3")});
-  wal.append_commit(3, MutationType::REMOVE_BY_ITEM_ID);
+  wal.append_prepare({3, MutationType::kRemoveByItemId, make_payload("op3")});
+  wal.append_commit(3, MutationType::kRemoveByItemId);
 
   auto records = wal.replayable_records(0);
   ASSERT_EQ(records.size(), 2U);
-  EXPECT_EQ(records[0].op_id, 1U);
-  EXPECT_EQ(records[1].op_id, 3U);
+  EXPECT_EQ(records[0].op_id_, 1U);
+  EXPECT_EQ(records[1].op_id_, 3U);
 }
 
 TEST_F(WalTest, AppliedThroughFiltersOlderRecords) {
   WriteAheadLog wal(wal_path_);
 
   for (uint64_t i = 1; i <= 3; ++i) {
-    wal.append_prepare({i, MutationType::INSERT, make_payload("op" + std::to_string(i))});
-    wal.append_commit(i, MutationType::INSERT);
+    wal.append_prepare({i, MutationType::kInsert, make_payload("op" + std::to_string(i))});
+    wal.append_commit(i, MutationType::kInsert);
   }
 
   auto records = wal.replayable_records(2);
   ASSERT_EQ(records.size(), 1U);
-  EXPECT_EQ(records[0].op_id, 3U);
+  EXPECT_EQ(records[0].op_id_, 3U);
 }
 
 TEST_F(WalTest, TruncatedWalHandledGracefully) {
   WriteAheadLog wal(wal_path_);
-  wal.append_prepare({1, MutationType::INSERT, make_payload("data")});
-  wal.append_commit(1, MutationType::INSERT);
+  wal.append_prepare({1, MutationType::kInsert, make_payload("data")});
+  wal.append_commit(1, MutationType::kInsert);
 
   // Corrupt the file by removing the last 4 bytes (trailer)
   {
@@ -148,8 +148,8 @@ TEST_F(WalTest, ConcurrentWritesDoNotCorrupt) {
         for (int i = 0; i < kOpsPerThread; ++i) {
           uint64_t op_id = static_cast<uint64_t>(t * 1000 + i + 1);
           auto payload = make_payload("t" + std::to_string(t) + "_" + std::to_string(i));
-          wal.append_prepare({op_id, MutationType::INSERT, payload});
-          wal.append_commit(op_id, MutationType::INSERT);
+          wal.append_prepare({op_id, MutationType::kInsert, payload});
+          wal.append_commit(op_id, MutationType::kInsert);
         }
       });
     }
@@ -168,15 +168,15 @@ TEST_F(WalTest, ConcurrentWritesDoNotCorrupt) {
   // Verify all unique op_ids are present
   std::set<uint64_t> op_ids;
   for (const auto &rec : records) {
-    op_ids.insert(rec.op_id);
+    op_ids.insert(rec.op_id_);
   }
   EXPECT_EQ(op_ids.size(), static_cast<size_t>(kThreads * kOpsPerThread));
 }
 
 TEST_F(WalTest, TruncateRemovesWalFile) {
   WriteAheadLog wal(wal_path_);
-  wal.append_prepare({1, MutationType::INSERT, make_payload("data")});
-  wal.append_commit(1, MutationType::INSERT);
+  wal.append_prepare({1, MutationType::kInsert, make_payload("data")});
+  wal.append_commit(1, MutationType::kInsert);
   ASSERT_TRUE(fs::exists(wal_path_));
 
   wal.truncate();
@@ -186,28 +186,28 @@ TEST_F(WalTest, TruncateRemovesWalFile) {
   EXPECT_TRUE(records.empty());
 
   // Can write new records after truncation
-  wal.append_prepare({2, MutationType::UPSERT, make_payload("new")});
-  wal.append_commit(2, MutationType::UPSERT);
+  wal.append_prepare({2, MutationType::kUpsert, make_payload("new")});
+  wal.append_commit(2, MutationType::kUpsert);
 
   records = wal.replayable_records(0);
   ASSERT_EQ(records.size(), 1U);
-  EXPECT_EQ(records[0].op_id, 2U);
+  EXPECT_EQ(records[0].op_id_, 2U);
 }
 
 TEST_F(WalTest, MaxSeenOpIdTracksHighest) {
   WriteAheadLog wal(wal_path_);
 
   // Committed op 3
-  wal.append_prepare({3, MutationType::INSERT, make_payload("op3")});
-  wal.append_commit(3, MutationType::INSERT);
+  wal.append_prepare({3, MutationType::kInsert, make_payload("op3")});
+  wal.append_commit(3, MutationType::kInsert);
 
   // Uncommitted op 5 (prepare only)
-  wal.append_prepare({5, MutationType::UPSERT, make_payload("op5")});
+  wal.append_prepare({5, MutationType::kUpsert, make_payload("op5")});
 
   uint64_t max_seen = 0;
   auto records = wal.replayable_records(0, &max_seen);
   ASSERT_EQ(records.size(), 1U);
-  EXPECT_EQ(records[0].op_id, 3U);
+  EXPECT_EQ(records[0].op_id_, 3U);
   EXPECT_EQ(max_seen, 5U);
 }
 
@@ -217,29 +217,29 @@ TEST_F(WalTest, MaxSeenOpIdTracksHighest) {
 
 TEST(SnapshotManifestTest, SerializeDeserializeRoundtrip) {
   SnapshotManifest original;
-  original.format_version = 1;
-  original.snapshot_id = "snapshot-123456";
-  original.reason = "test_reason";
-  original.applied_through_op_id = 42;
-  original.created_unix_ms = 1700000000000ULL;
-  original.graph_file = "graph.bin";
-  original.data_file = "data.bin";
-  original.quant_file = "quant.bin";
-  original.rocksdb_dir = "rocksdb";
+  original.format_version_ = 1;
+  original.snapshot_id_ = "snapshot-123456";
+  original.reason_ = "test_reason";
+  original.applied_through_op_id_ = 42;
+  original.created_unix_ms_ = 1700000000000ULL;
+  original.graph_file_ = "graph.bin";
+  original.data_file_ = "data.bin";
+  original.quant_file_ = "quant.bin";
+  original.rocksdb_dir_ = "rocksdb";
 
   auto serialized = original.serialize();
   auto deserialized = SnapshotManifest::deserialize(serialized);
 
   ASSERT_TRUE(deserialized.has_value());
-  EXPECT_EQ(deserialized->format_version, original.format_version);
-  EXPECT_EQ(deserialized->snapshot_id, original.snapshot_id);
-  EXPECT_EQ(deserialized->reason, original.reason);
-  EXPECT_EQ(deserialized->applied_through_op_id, original.applied_through_op_id);
-  EXPECT_EQ(deserialized->created_unix_ms, original.created_unix_ms);
-  EXPECT_EQ(deserialized->graph_file, original.graph_file);
-  EXPECT_EQ(deserialized->data_file, original.data_file);
-  EXPECT_EQ(deserialized->quant_file, original.quant_file);
-  EXPECT_EQ(deserialized->rocksdb_dir, original.rocksdb_dir);
+  EXPECT_EQ(deserialized->format_version_, original.format_version_);
+  EXPECT_EQ(deserialized->snapshot_id_, original.snapshot_id_);
+  EXPECT_EQ(deserialized->reason_, original.reason_);
+  EXPECT_EQ(deserialized->applied_through_op_id_, original.applied_through_op_id_);
+  EXPECT_EQ(deserialized->created_unix_ms_, original.created_unix_ms_);
+  EXPECT_EQ(deserialized->graph_file_, original.graph_file_);
+  EXPECT_EQ(deserialized->data_file_, original.data_file_);
+  EXPECT_EQ(deserialized->quant_file_, original.quant_file_);
+  EXPECT_EQ(deserialized->rocksdb_dir_, original.rocksdb_dir_);
 }
 
 TEST(SnapshotManifestTest, DeserializeRejectsEmptySnapshotId) {
@@ -277,10 +277,10 @@ class RecoveryManagerTest : public ::testing::Test {
 
   auto make_manifest(const std::string &snapshot_id, uint64_t applied_through) -> SnapshotManifest {
     SnapshotManifest manifest;
-    manifest.snapshot_id = snapshot_id;
-    manifest.reason = "test";
-    manifest.applied_through_op_id = applied_through;
-    manifest.created_unix_ms = SnapshotManifest::current_unix_ms();
+    manifest.snapshot_id_ = snapshot_id;
+    manifest.reason_ = "test";
+    manifest.applied_through_op_id_ = applied_through;
+    manifest.created_unix_ms_ = SnapshotManifest::current_unix_ms();
     return manifest;
   }
 
@@ -299,8 +299,8 @@ TEST_F(RecoveryManagerTest, PublishAndReadBackSnapshot) {
 
   auto current = mgr.current_snapshot();
   ASSERT_TRUE(current.has_value());
-  EXPECT_EQ(current->snapshot_id, manifest.snapshot_id);
-  EXPECT_EQ(current->applied_through_op_id, 10U);
+  EXPECT_EQ(current->snapshot_id_, manifest.snapshot_id_);
+  EXPECT_EQ(current->applied_through_op_id_, 10U);
 
   auto current_dir = mgr.current_snapshot_dir();
   ASSERT_TRUE(current_dir.has_value());
@@ -334,7 +334,7 @@ TEST_F(RecoveryManagerTest, OldSnapshotsRemovedAfterPublish) {
 
   auto current = mgr.current_snapshot();
   ASSERT_TRUE(current.has_value());
-  EXPECT_EQ(current->snapshot_id, manifest_b.snapshot_id);
+  EXPECT_EQ(current->snapshot_id_, manifest_b.snapshot_id_);
 }
 
 TEST_F(RecoveryManagerTest, WalTruncatedAfterPublish) {
@@ -342,9 +342,9 @@ TEST_F(RecoveryManagerTest, WalTruncatedAfterPublish) {
   mgr.ensure_layout();
 
   // Write some WAL records
-  WalRecord record{1, MutationType::INSERT, make_payload("test")};
+  WalRecord record{1, MutationType::kInsert, make_payload("test")};
   mgr.append_prepare(record);
-  mgr.append_commit(1, MutationType::INSERT);
+  mgr.append_commit(1, MutationType::kInsert);
 
   auto before = mgr.replayable_records(0);
   ASSERT_EQ(before.size(), 1U);
@@ -367,8 +367,8 @@ TEST_F(RecoveryManagerTest, NextOperationIdReflectsState) {
   EXPECT_EQ(mgr.next_operation_id(), 1U);
 
   // Write a WAL record
-  mgr.append_prepare({5, MutationType::INSERT, make_payload("data")});
-  mgr.append_commit(5, MutationType::INSERT);
+  mgr.append_prepare({5, MutationType::kInsert, make_payload("data")});
+  mgr.append_commit(5, MutationType::kInsert);
 
   // next_operation_id should be 6
   EXPECT_EQ(mgr.next_operation_id(), 6U);

@@ -50,6 +50,7 @@
 #include "space/sq4_space.hpp"
 #include "space/sq8_space.hpp"
 #include "storage/rocksdb_storage.hpp"
+#include "utils/binary_io.hpp"
 #include "utils/index_encoding.hpp"
 #include "utils/log.hpp"
 #include "utils/metadata_filter.hpp"
@@ -157,10 +158,10 @@ class PyIndex : public BasePyIndex {
                                                                params_.rocksdb_path_));
 
     uint64_t max_seen_op_id = 0;
-    recovery_manager_->replayable_records(0, &max_seen_op_id);
+    (void)recovery_manager_->replayable_records(0, &max_seen_op_id);
     auto manifest = recovery_manager_->current_snapshot();
     if (manifest.has_value()) {
-      last_committed_recovery_op_id_ = manifest->applied_through_op_id;
+      last_committed_recovery_op_id_ = manifest->applied_through_op_id_;
     }
     last_seen_recovery_op_id_ = std::max(max_seen_op_id, last_committed_recovery_op_id_);
     next_recovery_op_id_ = last_seen_recovery_op_id_ + 1;
@@ -289,14 +290,14 @@ class PyIndex : public BasePyIndex {
     }
 
     alaya::recovery::SnapshotManifest manifest;
-    manifest.snapshot_id = snapshot_id;
-    manifest.reason = std::string(reason);
-    manifest.applied_through_op_id = last_committed_recovery_op_id_;
-    manifest.created_unix_ms = alaya::recovery::SnapshotManifest::current_unix_ms();
-    manifest.graph_file = graph_file;
-    manifest.data_file = data_file;
-    manifest.quant_file = quant_file;
-    manifest.rocksdb_dir = rocksdb_dir;
+    manifest.snapshot_id_ = snapshot_id;
+    manifest.reason_ = std::string(reason);
+    manifest.applied_through_op_id_ = last_committed_recovery_op_id_;
+    manifest.created_unix_ms_ = alaya::recovery::SnapshotManifest::current_unix_ms();
+    manifest.graph_file_ = graph_file;
+    manifest.data_file_ = data_file;
+    manifest.quant_file_ = quant_file;
+    manifest.rocksdb_dir_ = rocksdb_dir;
 
     recovery_manager_->publish_snapshot(manifest, snapshot_dir);
   }
@@ -305,7 +306,7 @@ class PyIndex : public BasePyIndex {
                                                 uint32_t ef,
                                                 const ScalarData &scalar_data) const
       -> std::vector<char> {
-    alaya::recovery::BinaryWriter writer;
+    alaya::binary_io::BinaryWriter writer;
     writer.write_u32(ef);
     writer.write_vector_blob(data, static_cast<size_t>(data_dim_));
     writer.write_blob(scalar_data.serialize());
@@ -314,13 +315,13 @@ class PyIndex : public BasePyIndex {
 
   [[nodiscard]] auto encode_remove_item_payload(const std::string &item_id) const
       -> std::vector<char> {
-    alaya::recovery::BinaryWriter writer;
+    alaya::binary_io::BinaryWriter writer;
     writer.write_string(item_id);
     return std::move(writer).finish();
   }
 
   [[nodiscard]] auto encode_remove_internal_payload(IDType internal_id) const -> std::vector<char> {
-    alaya::recovery::BinaryWriter writer;
+    alaya::binary_io::BinaryWriter writer;
     writer.write_u64(static_cast<uint64_t>(internal_id));
     return std::move(writer).finish();
   }
@@ -394,11 +395,11 @@ class PyIndex : public BasePyIndex {
   }
 
   auto replay_record(const alaya::recovery::WalRecord &record) -> void {
-    alaya::recovery::BinaryReader reader(record.payload.data(), record.payload.size());
+    alaya::binary_io::BinaryReader reader(record.payload_.data(), record.payload_.size());
 
-    switch (record.mutation_type) {
-      case alaya::recovery::MutationType::INSERT:
-      case alaya::recovery::MutationType::UPSERT: {
+    switch (record.mutation_type_) {
+      case alaya::recovery::MutationType::kInsert:
+      case alaya::recovery::MutationType::kUpsert: {
         auto ef = reader.read_u32();
         auto vector_blob = reader.read_blob();
         auto scalar_blob = reader.read_blob();
@@ -413,14 +414,14 @@ class PyIndex : public BasePyIndex {
         std::vector<DataType> vector(data_dim_);
         std::memcpy(vector.data(), vector_blob->data(), vector_blob->size());
 
-        if (record.mutation_type == alaya::recovery::MutationType::INSERT) {
+        if (record.mutation_type_ == alaya::recovery::MutationType::kInsert) {
           insert_nondurable(vector.data(), ef.value(), &scalar_data);
         } else {
           upsert_nondurable(vector.data(), ef.value(), scalar_data);
         }
         break;
       }
-      case alaya::recovery::MutationType::REMOVE_BY_ITEM_ID: {
+      case alaya::recovery::MutationType::kRemoveByItemId: {
         auto item_id = reader.read_string();
         if (!item_id.has_value()) {
           throw std::runtime_error("Invalid WAL remove-by-item-id payload");
@@ -432,7 +433,7 @@ class PyIndex : public BasePyIndex {
         }
         break;
       }
-      case alaya::recovery::MutationType::REMOVE_BY_INTERNAL_ID: {
+      case alaya::recovery::MutationType::kRemoveByInternalId: {
         auto internal_id = reader.read_u64();
         if (!internal_id.has_value()) {
           throw std::runtime_error("Invalid WAL remove-by-id payload");
@@ -457,7 +458,7 @@ class PyIndex : public BasePyIndex {
         recovery_manager_->replayable_records(applied_through, &last_seen_recovery_op_id_);
     for (const auto &record : records) {
       replay_record(record);
-      last_committed_recovery_op_id_ = std::max(last_committed_recovery_op_id_, record.op_id);
+      last_committed_recovery_op_id_ = std::max(last_committed_recovery_op_id_, record.op_id_);
     }
     if (!records.empty()) {
       LOG_INFO("recovery: replayed {} committed mutations", records.size());
@@ -515,9 +516,9 @@ class PyIndex : public BasePyIndex {
         resolved_index_path = manifest->graph_path(snapshot_dir.value());
         resolved_data_path = manifest->data_path(snapshot_dir.value());
         resolved_quant_path = manifest->quant_path(snapshot_dir.value());
-        applied_through = manifest->applied_through_op_id;
+        applied_through = manifest->applied_through_op_id_;
         LOG_INFO("recovery: loading snapshot id={} applied_through={}",
-                 manifest->snapshot_id,
+                 manifest->snapshot_id_,
                  applied_through);
       }
     }
@@ -693,10 +694,10 @@ class PyIndex : public BasePyIndex {
       auto op_id = next_recovery_op_id_++;
       recovery_manager_->append_prepare(
           {op_id,
-           alaya::recovery::MutationType::INSERT,
+           alaya::recovery::MutationType::kInsert,
            encode_insert_like_payload(insert_data_ptr, ef, scalar_data)});
       auto inserted_id = insert_nondurable(insert_data_ptr, ef, &scalar_data);
-      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::INSERT);
+      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::kInsert);
       last_committed_recovery_op_id_ = op_id;
       last_seen_recovery_op_id_ = std::max(last_seen_recovery_op_id_, op_id);
       return inserted_id;
@@ -719,10 +720,10 @@ class PyIndex : public BasePyIndex {
       auto op_id = next_recovery_op_id_++;
       recovery_manager_->append_prepare(
           {op_id,
-           alaya::recovery::MutationType::UPSERT,
+           alaya::recovery::MutationType::kUpsert,
            encode_insert_like_payload(insert_data_ptr, ef, scalar_data)});
       auto upserted_id = upsert_nondurable(insert_data_ptr, ef, scalar_data);
-      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::UPSERT);
+      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::kUpsert);
       last_committed_recovery_op_id_ = op_id;
       last_seen_recovery_op_id_ = std::max(last_seen_recovery_op_id_, op_id);
       return upserted_id;
@@ -735,10 +736,10 @@ class PyIndex : public BasePyIndex {
     if (recovery_manager_ != nullptr) {
       auto op_id = next_recovery_op_id_++;
       recovery_manager_->append_prepare({op_id,
-                                         alaya::recovery::MutationType::REMOVE_BY_INTERNAL_ID,
+                                         alaya::recovery::MutationType::kRemoveByInternalId,
                                          encode_remove_internal_payload(id)});
       remove_nondurable(id);
-      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::REMOVE_BY_INTERNAL_ID);
+      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::kRemoveByInternalId);
       last_committed_recovery_op_id_ = op_id;
       last_seen_recovery_op_id_ = std::max(last_seen_recovery_op_id_, op_id);
       return;
@@ -750,10 +751,10 @@ class PyIndex : public BasePyIndex {
     if (recovery_manager_ != nullptr) {
       auto op_id = next_recovery_op_id_++;
       recovery_manager_->append_prepare({op_id,
-                                         alaya::recovery::MutationType::REMOVE_BY_ITEM_ID,
+                                         alaya::recovery::MutationType::kRemoveByItemId,
                                          encode_remove_item_payload(item_id)});
       remove_nondurable(item_id);
-      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::REMOVE_BY_ITEM_ID);
+      recovery_manager_->append_commit(op_id, alaya::recovery::MutationType::kRemoveByItemId);
       last_committed_recovery_op_id_ = op_id;
       last_seen_recovery_op_id_ = std::max(last_seen_recovery_op_id_, op_id);
       return;

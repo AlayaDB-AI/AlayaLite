@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include <chrono>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
 #include <optional>
@@ -21,6 +20,13 @@ namespace alaya::recovery {
 
 namespace fs = std::filesystem;
 
+/**
+ * @brief Coordinates snapshot metadata, WAL replay and RocksDB checkpoint restoration.
+ *
+ * RecoveryManager owns the recovery directory layout under root_dir. It publishes snapshots through
+ * an atomic CURRENT pointer, delegates mutation durability to WriteAheadLog and restores the active
+ * RocksDB directory from snapshot checkpoints when needed.
+ */
 class RecoveryManager {
  public:
   RecoveryManager(fs::path root_dir, fs::path active_rocksdb_path)
@@ -39,13 +45,20 @@ class RecoveryManager {
     fs::create_directories(snapshots_dir_);
   }
 
+  /**
+   * @brief Calculates the next operation id from the current snapshot and WAL contents.
+   *
+   * The snapshot applied-through id gives the lower bound, and scanning the WAL advances it to the
+   * largest operation id seen in prepared or committed frames so new operations keep increasing
+   * monotonically after restart.
+   */
   [[nodiscard]] auto next_operation_id() const -> uint64_t {
     uint64_t max_seen = 0;
     auto manifest = current_snapshot();
     if (manifest.has_value()) {
-      max_seen = manifest->applied_through_op_id;
+      max_seen = manifest->applied_through_op_id_;
     }
-    wal_.replayable_records(0, &max_seen);
+    (void)wal_.replayable_records(0, &max_seen);
     return max_seen + 1;
   }
 
@@ -62,19 +75,32 @@ class RecoveryManager {
   // TODO(P2): Graph save and RocksDB checkpoint are not atomic. A crash between
   // them creates an inconsistent snapshot. Consider a two-phase commit protocol
   // where both components are written before the CURRENT pointer is updated.
+  /**
+   * @brief Publishes a completed snapshot and makes it the recovery CURRENT target.
+   *
+   * The manifest and CURRENT pointer are written atomically, then the WAL is truncated because all
+   * operations through the manifest are represented in the snapshot. Older snapshot directories are
+   * cleaned up after the new snapshot is visible.
+   */
   auto publish_snapshot(const SnapshotManifest &manifest, const fs::path &snapshot_dir) const
       -> void {
     ensure_layout();
     auto manifest_path = snapshot_dir / "manifest.txt";
     write_text_atomically(manifest_path, manifest.serialize());
-    write_text_atomically(current_path_, manifest.snapshot_id + "\n");
+    write_text_atomically(current_path_, manifest.snapshot_id_ + "\n");
     LOG_INFO("recovery: published snapshot id={} applied_through={}",
-             manifest.snapshot_id,
-             manifest.applied_through_op_id);
+             manifest.snapshot_id_,
+             manifest.applied_through_op_id_);
     wal_.truncate();
-    remove_old_snapshots(manifest.snapshot_id);
+    remove_old_snapshots(manifest.snapshot_id_);
   }
 
+  /**
+   * @brief Loads the manifest for the snapshot named by the CURRENT pointer.
+   *
+   * Missing recovery state, unreadable files and empty CURRENT contents are treated as no snapshot
+   * being available, allowing callers to fall back to WAL-only recovery or a fresh layout.
+   */
   [[nodiscard]] auto current_snapshot() const -> std::optional<SnapshotManifest> {
     if (!enabled() || !fs::exists(current_path_)) {
       return std::nullopt;
@@ -107,7 +133,7 @@ class RecoveryManager {
     if (!manifest.has_value()) {
       return std::nullopt;
     }
-    return snapshots_dir_ / manifest->snapshot_id;
+    return snapshots_dir_ / manifest->snapshot_id_;
   }
 
   [[nodiscard]] auto replayable_records(uint64_t applied_through,
@@ -124,9 +150,16 @@ class RecoveryManager {
 
   auto sync_wal() const -> void { wal_.sync(); }
 
+  /**
+   * @brief Replaces the active RocksDB directory with the checkpoint stored in a snapshot.
+   *
+   * If RocksDB recovery is not configured or the snapshot does not include a checkpoint, the method
+   * exits without modifying the active directory. Existing active contents are removed before the
+   * checkpoint is copied into place.
+   */
   auto restore_active_rocksdb_from_snapshot(const SnapshotManifest &manifest,
                                             const fs::path &snapshot_dir) const -> void {
-    if (active_rocksdb_path_.empty() || manifest.rocksdb_dir.empty()) {
+    if (active_rocksdb_path_.empty() || manifest.rocksdb_dir_.empty()) {
       return;
     }
 
@@ -145,6 +178,12 @@ class RecoveryManager {
   }
 
  private:
+  /**
+   * @brief Removes stale snapshot directories after a new snapshot is published.
+   *
+   * The currently published snapshot is preserved while all other directories under the snapshot
+   * root are best-effort deleted with warnings for failures.
+   */
   auto remove_old_snapshots(const std::string &current_snapshot_id) const -> void {
     if (!fs::exists(snapshots_dir_)) {
       return;
@@ -194,6 +233,12 @@ class RecoveryManager {
     return buffer.str();
   }
 
+  /**
+   * @brief Writes text through a temporary file and atomically replaces the target path.
+   *
+   * The temporary file is flushed and synced before replacement, then the parent directory is
+   * synced so snapshot manifests and CURRENT pointer updates survive process or system crashes.
+   */
   static auto write_text_atomically(const fs::path &path, const std::string &content) -> void {
     fs::create_directories(path.parent_path());
     auto tmp_path = path;
@@ -214,6 +259,12 @@ class RecoveryManager {
     platform::sync_directory(path.parent_path());
   }
 
+  /**
+   * @brief Recursively copies a snapshot checkpoint directory into the active target directory.
+   *
+   * Directories are recreated and regular files are overwritten at the destination, followed by a
+   * directory sync to make the restored checkpoint durable.
+   */
   static auto copy_directory_recursive(const fs::path &source, const fs::path &target) -> void {
     fs::create_directories(target);
     for (const auto &entry : fs::recursive_directory_iterator(source)) {
@@ -229,11 +280,11 @@ class RecoveryManager {
     platform::sync_directory(target);
   }
 
-  fs::path root_dir_;
-  fs::path snapshots_dir_;
-  fs::path current_path_;
-  WriteAheadLog wal_;
-  fs::path active_rocksdb_path_;
+  fs::path root_dir_;             ///< Recovery metadata root; empty disables recovery.
+  fs::path snapshots_dir_;        ///< Directory that stores snapshot subdirectories.
+  fs::path current_path_;         ///< Atomic pointer file for the current snapshot id.
+  WriteAheadLog wal_;             ///< WAL for mutations not yet covered by a snapshot.
+  fs::path active_rocksdb_path_;  ///< Live RocksDB directory restored from checkpoints.
 };
 
 }  // namespace alaya::recovery
