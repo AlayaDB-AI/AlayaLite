@@ -139,7 +139,7 @@ class QGBuilder {
     LOG_INFO("Searching for new neighbor candidates...");
     ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t i = 0; i < static_cast<int64_t>(num_nodes_); ++i) {
-      IDType cur_id = static_cast<IDType>(i);
+      auto cur_id = static_cast<IDType>(i);
       auto tid = platform::openmp_thread_num();
       CandidateList candidates;
       HashBasedBooleanSet &vis = visited_list_[tid];
@@ -173,13 +173,14 @@ class QGBuilder {
     ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t data_id = 0; data_id < static_cast<int64_t>(num_nodes_);
          ++data_id) {  // for every vertex
-      for (const auto &nei : new_neighbors_[data_id]) {
+      auto current_id = static_cast<IDType>(data_id);
+      for (const auto &nei : new_neighbors_[static_cast<size_t>(data_id)]) {
         auto dst = nei.id_;
         bool dup = false;
-        CandidateList &dst_neighbors = new_neighbors_[dst];
-        std::lock_guard lock(locks[dst]);
+        CandidateList &dst_neighbors = new_neighbors_[static_cast<size_t>(dst)];
+        std::lock_guard lock(locks[static_cast<size_t>(dst)]);
         for (auto &dst_nei : dst_neighbors) {
-          if (dst_nei.id_ == data_id) {
+          if (dst_nei.id_ == current_id) {
             dup = true;
             break;
           }
