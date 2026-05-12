@@ -72,9 +72,11 @@ class RecoveryManager {
     return snapshot_dir;
   }
 
-  // TODO(P2): Graph save and RocksDB checkpoint are not atomic. A crash between
-  // them creates an inconsistent snapshot. Consider a two-phase commit protocol
-  // where both components are written before the CURRENT pointer is updated.
+  // TODO(P2): The snapshot directory is only published after graph files and the RocksDB
+  // checkpoint are written, so a process crash before CURRENT is updated leaves the old snapshot
+  // active. Remaining risk: component writes are not durably staged as a unit, RocksDB checkpoint
+  // failures are not surfaced to the publisher, and there is no READY marker or checksum proving
+  // that every component reached stable storage before CURRENT is advanced.
   /**
    * @brief Publishes a completed snapshot and makes it the recovery CURRENT target.
    *

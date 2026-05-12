@@ -143,32 +143,12 @@ class RocksDBStorage {
    */
   [[nodiscard]] auto batch_get_raw_values(const std::vector<IDType> &ids) const
       -> std::vector<std::string> {
-    std::vector<rocksdb::Slice> keys;
-    std::vector<std::string> key_strings;
-    keys.reserve(ids.size());
-    key_strings.reserve(ids.size());
-
-    for (auto id : ids) {
-      key_strings.push_back(data_key(id));
-      keys.emplace_back(key_strings.back());
+    auto stored_values = batch_get_data_values(ids);
+    std::vector<std::string> values;
+    values.reserve(stored_values.size());
+    for (auto &stored_value : stored_values) {
+      values.push_back(stored_value.found ? std::move(stored_value.value) : std::string{});
     }
-
-    std::vector<std::string> values(ids.size());
-    std::vector<rocksdb::Status> statuses = db_->MultiGet(rocksdb::ReadOptions(), keys, &values);
-
-    for (size_t i = 0; i < statuses.size(); ++i) {
-      if (!statuses[i].ok()) {
-        values[i].clear();
-        auto legacy_key = legacy_data_key(ids[i]);
-        if (legacy_key != key_strings[i]) {
-          rocksdb::Status fallback = db_->Get(rocksdb::ReadOptions(), legacy_key, &values[i]);
-          if (!fallback.ok()) {
-            values[i].clear();
-          }
-        }
-      }
-    }
-
     return values;
   }
 
@@ -246,7 +226,7 @@ class RocksDBStorage {
       if (resolved_key != key) {
         batch.Delete(resolved_key);
       }
-      delete_item_id_index_if_owned(batch, old_data->item_id, id);
+      delete_item_id_index(batch, old_data->item_id);
       remove_field_indexes(batch, id, *old_data);
     }
     batch.Put(key, value_slice);
@@ -297,27 +277,41 @@ class RocksDBStorage {
 
     std::vector<PendingRecord> records;
     std::unordered_map<std::string, IDType> batch_item_ids;
+    std::vector<IDType> preflight_ids;
+    std::vector<std::string> preflight_item_ids;
 
     IDType preflight_id = start_id;
     for (auto it = begin; it != end; ++it, ++preflight_id) {
       PendingRecord record{preflight_id, *it, std::nullopt, {}};
+      preflight_ids.push_back(preflight_id);
 
       if (!record.data.item_id.empty()) {
         if (!batch_item_ids.emplace(record.data.item_id, preflight_id).second) {
           LOG_ERROR("Batch insert failed: duplicate item_id '{}' in batch", record.data.item_id);
           return false;
         }
+        preflight_item_ids.push_back(record.data.item_id);
       }
 
-      std::string serialized;
-      if (get_data_value(preflight_id, &serialized, &record.resolved_key)) {
-        record.old_data = ScalarData::deserialize(serialized.data(), serialized.size());
-      }
       records.push_back(std::move(record));
     }
 
+    auto existing_records = batch_get_data_values(preflight_ids);
+    for (size_t i = 0; i < records.size(); ++i) {
+      if (existing_records[i].found) {
+        records[i].resolved_key = std::move(existing_records[i].resolved_key);
+        records[i].old_data = ScalarData::deserialize(existing_records[i].value.data(),
+                                                      existing_records[i].value.size());
+      }
+    }
+
+    auto existing_item_owners = batch_find_item_id_owners(preflight_item_ids);
     for (const auto &record : records) {
-      if (!item_id_available_for_locked(record.data.item_id, record.id)) {
+      if (record.data.item_id.empty()) {
+        continue;
+      }
+      auto existing = existing_item_owners.find(record.data.item_id);
+      if (existing != existing_item_owners.end() && existing->second != record.id) {
         LOG_ERROR("Batch insert failed: duplicate item_id '{}'", record.data.item_id);
         return false;
       }
@@ -332,7 +326,7 @@ class RocksDBStorage {
         if (record.resolved_key != key) {
           batch.Delete(record.resolved_key);
         }
-        delete_item_id_index_if_owned(batch, record.old_data->item_id, record.id);
+        delete_item_id_index(batch, record.old_data->item_id);
         remove_field_indexes(batch, record.id, *record.old_data);
       } else {
         ++inserted_count;
@@ -381,7 +375,7 @@ class RocksDBStorage {
     rocksdb::WriteBatch batch;
     batch.Delete(resolved_key);
 
-    delete_item_id_index_if_owned(batch, data.item_id, id);
+    delete_item_id_index(batch, data.item_id);
 
     // Remove field indexes
     remove_field_indexes(batch, id, data);
@@ -429,7 +423,7 @@ class RocksDBStorage {
 
     // Update secondary index if item_id changed
     if (old_data.item_id != data.item_id) {
-      delete_item_id_index_if_owned(batch, old_data.item_id, id);
+      delete_item_id_index(batch, old_data.item_id);
       if (!data.item_id.empty()) {
         rocksdb::Slice id_slice(reinterpret_cast<const char *>(&id), sizeof(IDType));
         batch.Put(item_id_index_key(data.item_id), id_slice);
@@ -748,6 +742,12 @@ class RocksDBStorage {
   using UnsignedIDType = std::make_unsigned_t<IDType>;
   static constexpr size_t kSortableDigits = std::numeric_limits<UnsignedIDType>::digits10 + 1;
 
+  struct StoredValue {
+    bool found{false};
+    std::string value;
+    std::string resolved_key;
+  };
+
   static auto data_key(IDType id) -> std::string {
     auto digits = std::to_string(static_cast<UnsignedIDType>(id));
     if (digits.size() >= kSortableDigits) {
@@ -804,6 +804,93 @@ class RocksDBStorage {
       *resolved_key = std::move(fallback_key);
     }
     return true;
+  }
+
+  [[nodiscard]] auto batch_get_data_values(const std::vector<IDType> &ids) const
+      -> std::vector<StoredValue> {
+    std::vector<StoredValue> results(ids.size());
+    std::vector<std::string> primary_key_strings;
+    std::vector<rocksdb::Slice> primary_keys;
+    primary_key_strings.reserve(ids.size());
+    primary_keys.reserve(ids.size());
+
+    for (auto id : ids) {
+      primary_key_strings.push_back(data_key(id));
+      primary_keys.emplace_back(primary_key_strings.back());
+    }
+
+    std::vector<std::string> primary_values(ids.size());
+    auto primary_statuses = db_->MultiGet(rocksdb::ReadOptions(), primary_keys, &primary_values);
+
+    std::vector<size_t> fallback_indexes;
+    std::vector<std::string> fallback_key_strings;
+    std::vector<rocksdb::Slice> fallback_keys;
+    fallback_indexes.reserve(ids.size());
+    fallback_key_strings.reserve(ids.size());
+    fallback_keys.reserve(ids.size());
+
+    for (size_t i = 0; i < primary_statuses.size(); ++i) {
+      if (primary_statuses[i].ok()) {
+        results[i].found = true;
+        results[i].value = std::move(primary_values[i]);
+        results[i].resolved_key = primary_key_strings[i];
+        continue;
+      }
+
+      auto fallback_key = legacy_data_key(ids[i]);
+      if (fallback_key == primary_key_strings[i]) {
+        continue;
+      }
+      fallback_indexes.push_back(i);
+      fallback_key_strings.push_back(std::move(fallback_key));
+      fallback_keys.emplace_back(fallback_key_strings.back());
+    }
+
+    if (fallback_keys.empty()) {
+      return results;
+    }
+
+    std::vector<std::string> fallback_values(fallback_keys.size());
+    auto fallback_statuses = db_->MultiGet(rocksdb::ReadOptions(), fallback_keys, &fallback_values);
+    for (size_t i = 0; i < fallback_statuses.size(); ++i) {
+      if (!fallback_statuses[i].ok()) {
+        continue;
+      }
+      auto result_index = fallback_indexes[i];
+      results[result_index].found = true;
+      results[result_index].value = std::move(fallback_values[i]);
+      results[result_index].resolved_key = fallback_key_strings[i];
+    }
+    return results;
+  }
+
+  [[nodiscard]] auto batch_find_item_id_owners(const std::vector<std::string> &item_ids) const
+      -> std::unordered_map<std::string, IDType> {
+    std::unordered_map<std::string, IDType> owners;
+    if (item_ids.empty()) {
+      return owners;
+    }
+
+    std::vector<std::string> key_strings;
+    std::vector<rocksdb::Slice> keys;
+    key_strings.reserve(item_ids.size());
+    keys.reserve(item_ids.size());
+    for (const auto &item_id : item_ids) {
+      key_strings.push_back(item_id_index_key(item_id));
+      keys.emplace_back(key_strings.back());
+    }
+
+    std::vector<std::string> values(item_ids.size());
+    auto statuses = db_->MultiGet(rocksdb::ReadOptions(), keys, &values);
+    for (size_t i = 0; i < statuses.size(); ++i) {
+      if (!statuses[i].ok() || values[i].size() != sizeof(IDType)) {
+        continue;
+      }
+      IDType owner_id;
+      std::memcpy(&owner_id, values[i].data(), sizeof(IDType));
+      owners.emplace(item_ids[i], owner_id);
+    }
+    return owners;
   }
 
   void initialize_db() {
@@ -908,16 +995,11 @@ class RocksDBStorage {
     return item_id_available(item_id, std::optional<IDType>{allowed_id});
   }
 
-  void delete_item_id_index_if_owned(rocksdb::WriteBatch &batch,
-                                     const std::string &item_id,
-                                     IDType owner_id) const {
+  void delete_item_id_index(rocksdb::WriteBatch &batch, const std::string &item_id) const {
     if (item_id.empty()) {
       return;
     }
-    auto existing = find_by_item_id(item_id);
-    if (existing.has_value() && *existing == owner_id) {
-      batch.Delete(item_id_index_key(item_id));
-    }
+    batch.Delete(item_id_index_key(item_id));
   }
 
   /**
