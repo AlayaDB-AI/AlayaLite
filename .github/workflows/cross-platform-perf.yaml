@@ -46,19 +46,14 @@ jobs       :
       matrix:
         include:
         - os: ubuntu-latest
-          arch: x86_64
           label: ubuntu-latest
         - os: ubuntu-24.04-arm
-          arch: aarch64
           label: ubuntu-24.04-arm
         - os: macos-15-intel
-          arch: x86_64
           label: macos-15-intel
         - os: macos-14
-          arch: arm64
           label: macos-14
         - os: windows-2022
-          arch: AMD64
           label: windows-2022
 
     env:
@@ -78,17 +73,28 @@ jobs       :
       uses: astral-sh/setup-uv@v5
 
     - name: Restore Conan cache
+      id: conan-cache
       uses: ./.github/actions/cache-restore
       with:
-        target-arch: ${{ matrix.arch }}
+        build-type: Release
+        target-arch: ${{ runner.arch }}
 
     - name: Install project dependencies
       shell: bash
       run: uv sync --dev
 
+    - name: Save Conan cache
+      if: steps.conan-cache.outputs.cache-hit != 'true'
+      continue-on-error: true
+      uses: ./.github/actions/cache-restore
+      with:
+        mode: save
+        build-type: Release
+        target-arch: ${{ runner.arch }}
+
     - name: Download qdrant_random_ints_1m
       shell: bash
-      run: python scripts/cross_platform_perf/cross_platform_perf.py download-dataset
+      run: uv run python scripts/cross_platform_perf/cross_platform_perf.py download-dataset
 
     - name: Run Collection.hybrid_query benchmark
       shell: bash
@@ -101,7 +107,7 @@ jobs       :
         BENCHMARK_SELECTIVITY: ${{ github.event.inputs.selectivity }}
         BENCHMARK_BUILD_THREADS: ${{ github.event.inputs.build_threads }}
         BENCHMARK_QUERY_THREADS: ${{ github.event.inputs.query_threads }}
-      run: python scripts/cross_platform_perf/cross_platform_perf.py run-benchmark
+      run: uv run python scripts/cross_platform_perf/cross_platform_perf.py run-benchmark
 
     - name: Upload benchmark artifact
       uses: actions/upload-artifact@v4
@@ -113,7 +119,7 @@ jobs       :
       shell: bash
       env:
         BENCHMARK_LABEL: ${{ matrix.label }}
-      run: python scripts/cross_platform_perf/cross_platform_perf.py append-summary
+      run: uv run python scripts/cross_platform_perf/cross_platform_perf.py append-summary
 
   aggregate-summary:
     name: Aggregate benchmark summary
@@ -121,6 +127,16 @@ jobs       :
     if: always()
     needs: benchmark
     steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
+
     - name: Download benchmark artifacts
       uses: actions/download-artifact@v4
       continue-on-error: true
@@ -131,4 +147,4 @@ jobs       :
 
     - name: Append aggregated benchmark summary
       shell: bash
-      run: python scripts/cross_platform_perf/cross_platform_perf.py aggregate-summary
+      run: uv run --no-project python scripts/cross_platform_perf/cross_platform_perf.py aggregate-summary
