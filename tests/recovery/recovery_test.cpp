@@ -8,6 +8,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <set>
 #include <string>
 #include <thread>
@@ -31,6 +32,11 @@ static auto make_payload(const std::string &content) -> std::vector<char> {
 
 static auto payload_string(const WalRecord &record) -> std::string {
   return {record.payload_.begin(), record.payload_.end()};
+}
+
+template <typename T>
+static auto write_pod(std::ofstream &output, const T &value) -> void {
+  output.write(reinterpret_cast<const char *>(&value), sizeof(value));
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +217,25 @@ TEST_F(WalTest, MaxSeenOpIdTracksHighest) {
   EXPECT_EQ(max_seen, 5U);
 }
 
+TEST_F(WalTest, RejectsAbsurdPayloadSizeBeforeAllocating) {
+  {
+    std::ofstream output(wal_path_, std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(output.is_open());
+    write_pod(output, kWalFrameMagic);
+    write_pod(output, kWalFormatVersion);
+    write_pod(output, static_cast<uint8_t>(WalFrameType::kPrepare));
+    write_pod(output, static_cast<uint8_t>(MutationType::kInsert));
+    write_pod(output, static_cast<uint8_t>(0));
+    write_pod(output, uint64_t{99});
+    write_pod(output, std::numeric_limits<uint64_t>::max());
+  }
+
+  WriteAheadLog wal(wal_path_);
+  std::vector<WalRecord> records;
+  EXPECT_NO_THROW(records = wal.replayable_records(0));
+  EXPECT_TRUE(records.empty());
+}
+
 // ---------------------------------------------------------------------------
 // SnapshotManifestTest
 // ---------------------------------------------------------------------------
@@ -246,6 +271,22 @@ TEST(SnapshotManifestTest, DeserializeRejectsEmptySnapshotId) {
   std::string raw = "format_version=1\nsnapshot_id=\nreason=test\n";
   auto result = SnapshotManifest::deserialize(raw);
   EXPECT_FALSE(result.has_value());
+}
+
+TEST(SnapshotManifestTest, DeserializeRejectsMalformedNumericFields) {
+  const std::string base =
+      "snapshot_id=snapshot-123\nreason=test\napplied_through_op_id=1\ncreated_unix_ms=2\n";
+
+  EXPECT_FALSE(SnapshotManifest::deserialize("format_version=abc\n" + base).has_value());
+  EXPECT_FALSE(SnapshotManifest::deserialize("format_version=1\nsnapshot_id=snapshot-123\n"
+                                             "applied_through_op_id=-1\ncreated_unix_ms=2\n")
+                   .has_value());
+  EXPECT_FALSE(SnapshotManifest::deserialize("format_version=1\nsnapshot_id=snapshot-123\n"
+                                             "applied_through_op_id=1x\ncreated_unix_ms=2\n")
+                   .has_value());
+  EXPECT_FALSE(SnapshotManifest::deserialize("format_version=4294967296\nsnapshot_id=snapshot-123\n"
+                                             "applied_through_op_id=1\ncreated_unix_ms=2\n")
+                   .has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +346,26 @@ TEST_F(RecoveryManagerTest, PublishAndReadBackSnapshot) {
   auto current_dir = mgr.current_snapshot_dir();
   ASSERT_TRUE(current_dir.has_value());
   EXPECT_EQ(*current_dir, snapshot_dir);
+}
+
+TEST_F(RecoveryManagerTest, CurrentSnapshotTreatsMalformedManifestAsNoSnapshot) {
+  auto mgr = make_manager();
+  mgr.ensure_layout();
+
+  auto snapshot_dir = root_dir_ / "snapshots" / "snapshot-bad";
+  fs::create_directories(snapshot_dir);
+  {
+    std::ofstream current(root_dir_ / "CURRENT", std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(current.is_open());
+    current << "snapshot-bad\n";
+  }
+  {
+    std::ofstream manifest(snapshot_dir / "manifest.txt", std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(manifest.is_open());
+    manifest << "format_version=abc\nsnapshot_id=snapshot-bad\n";
+  }
+
+  EXPECT_FALSE(mgr.current_snapshot().has_value());
 }
 
 TEST_F(RecoveryManagerTest, OldSnapshotsRemovedAfterPublish) {

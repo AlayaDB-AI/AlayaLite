@@ -4,15 +4,48 @@
 
 #pragma once
 
+#include <charconv>
 #include <chrono>
 #include <filesystem>  // NOLINT(build/c++17)
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <system_error>
 
 namespace alaya::recovery {
 
 namespace fs = std::filesystem;
+
+namespace detail {
+
+inline auto parse_uint64_decimal(std::string_view value, uint64_t &out) -> bool {
+  if (value.empty()) {
+    return false;
+  }
+  uint64_t parsed = 0;
+  const auto *begin = value.data();
+  const auto *end = begin + value.size();
+  auto [ptr, ec] = std::from_chars(begin, end, parsed, 10);
+  if (ec != std::errc() || ptr != end) {
+    return false;
+  }
+  out = parsed;
+  return true;
+}
+
+inline auto parse_uint32_decimal(std::string_view value, uint32_t &out) -> bool {
+  uint64_t parsed = 0;
+  if (!parse_uint64_decimal(value, parsed) ||
+      parsed > static_cast<uint64_t>(std::numeric_limits<uint32_t>::max())) {
+    return false;
+  }
+  out = static_cast<uint32_t>(parsed);
+  return true;
+}
+
+}  // namespace detail
 
 /**
  * @brief Persistent metadata describing one published recovery snapshot.
@@ -56,6 +89,9 @@ struct SnapshotManifest {
     std::istringstream input(raw);
     std::string line;
     while (std::getline(input, line)) {
+      if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+      }
       auto delimiter = line.find('=');
       if (delimiter == std::string::npos) {
         continue;
@@ -63,15 +99,21 @@ struct SnapshotManifest {
       auto key = line.substr(0, delimiter);
       auto value = line.substr(delimiter + 1);
       if (key == "format_version") {
-        manifest.format_version_ = static_cast<uint32_t>(std::stoul(value));
+        if (!detail::parse_uint32_decimal(value, manifest.format_version_)) {
+          return std::nullopt;
+        }
       } else if (key == "snapshot_id") {
         manifest.snapshot_id_ = value;
       } else if (key == "reason") {
         manifest.reason_ = value;
       } else if (key == "applied_through_op_id") {
-        manifest.applied_through_op_id_ = std::stoull(value);
+        if (!detail::parse_uint64_decimal(value, manifest.applied_through_op_id_)) {
+          return std::nullopt;
+        }
       } else if (key == "created_unix_ms") {
-        manifest.created_unix_ms_ = std::stoull(value);
+        if (!detail::parse_uint64_decimal(value, manifest.created_unix_ms_)) {
+          return std::nullopt;
+        }
       } else if (key == "graph_file") {
         manifest.graph_file_ = value;
       } else if (key == "data_file") {

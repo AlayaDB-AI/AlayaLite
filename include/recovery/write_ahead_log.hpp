@@ -9,8 +9,10 @@
 #include <cstring>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
+#include <limits>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -23,9 +25,10 @@ namespace alaya::recovery {
 
 namespace fs = std::filesystem;
 
-constexpr uint32_t kWalFrameMagic = 0x48454144U;    ///< WAL frame prefix magic, "HEAD".
-constexpr uint32_t kWalTrailerMagic = 0x5441494CU;  ///< WAL frame trailer magic, "TAIL".
-constexpr uint8_t kWalFormatVersion = 1;            ///< Current on-disk WAL frame version.
+constexpr uint32_t kWalFrameMagic = 0x48454144U;     ///< WAL frame prefix magic, "HEAD".
+constexpr uint32_t kWalTrailerMagic = 0x5441494CU;   ///< WAL frame trailer magic, "TAIL".
+constexpr uint8_t kWalFormatVersion = 1;             ///< Current on-disk WAL frame version.
+constexpr uint64_t kMaxWalPayloadSize = 1ULL << 30;  ///< Maximum accepted WAL payload bytes.
 
 /**
  * @brief Identifies whether a WAL frame starts or commits a mutation.
@@ -155,6 +158,15 @@ class WriteAheadLog {
     if (!input.is_open()) {
       throw std::runtime_error("Failed to open WAL file at " + path_.string());
     }
+    std::error_code file_size_ec;
+    const auto wal_file_size = fs::file_size(path_, file_size_ec);
+    if (file_size_ec) {
+      LOG_WARN("Failed to stat WAL file at {}: {}", path_.string(), file_size_ec.message());
+      if (max_seen_op_id != nullptr) {
+        *max_seen_op_id = applied_through;
+      }
+      return committed;
+    }
 
     uint64_t max_op_id = applied_through;
     while (true) {
@@ -162,8 +174,15 @@ class WriteAheadLog {
       if (!header.has_value()) {
         break;
       }
+      if (!payload_size_is_plausible(input, wal_file_size, header->payload_size_)) {
+        LOG_WARN("WAL payload size is invalid: op_id={} payload_size={} path={}",
+                 header->op_id_,
+                 header->payload_size_,
+                 path_.string());
+        break;
+      }
 
-      std::vector<char> payload(header->payload_size_);
+      std::vector<char> payload(static_cast<size_t>(header->payload_size_));
       if (header->payload_size_ > 0) {
         input.read(payload.data(), static_cast<std::streamsize>(payload.size()));
         if (!input) {
@@ -220,6 +239,34 @@ class WriteAheadLog {
     uint64_t payload_size_{0};                           ///< Payload byte count after header.
   };
 
+  [[nodiscard]] static auto payload_size_is_plausible(std::ifstream &input,
+                                                      uintmax_t wal_file_size,
+                                                      uint64_t payload_size) -> bool {
+    if (payload_size > kMaxWalPayloadSize) {
+      return false;
+    }
+    if (payload_size > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
+      return false;
+    }
+    if (payload_size > static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+      return false;
+    }
+
+    const auto payload_start = input.tellg();
+    if (payload_start == std::ifstream::pos_type(-1)) {
+      return false;
+    }
+    const auto payload_offset = static_cast<uintmax_t>(payload_start);
+    if (payload_offset > wal_file_size) {
+      return false;
+    }
+
+    constexpr uintmax_t kTrailerSize = sizeof(uint32_t);
+    const auto remaining_bytes = wal_file_size - payload_offset;
+    return remaining_bytes >= kTrailerSize &&
+           static_cast<uintmax_t>(payload_size) <= remaining_bytes - kTrailerSize;
+  }
+
   auto ensure_stream_open() const -> void {
     if (!wal_stream_.is_open()) {
       fs::create_directories(path_.parent_path());
@@ -247,6 +294,9 @@ class WriteAheadLog {
         sizeof(uint32_t) + sizeof(uint8_t) * 4 + sizeof(uint64_t) + sizeof(uint64_t);
     constexpr size_t kTrailerSize = sizeof(uint32_t);
     auto payload_size = static_cast<uint64_t>(record.payload_.size());
+    if (payload_size > kMaxWalPayloadSize) {
+      throw std::runtime_error("WAL payload exceeds maximum frame size");
+    }
 
     std::vector<char> buf(kHeaderSize + static_cast<size_t>(payload_size) + kTrailerSize);
     char *ptr = buf.data();
