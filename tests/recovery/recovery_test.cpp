@@ -39,6 +39,24 @@ static auto write_pod(std::ofstream &output, const T &value) -> void {
   output.write(reinterpret_cast<const char *>(&value), sizeof(value));
 }
 
+static auto write_raw_wal_frame(std::ofstream &output,
+                                uint8_t frame_type,
+                                uint8_t mutation_type,
+                                uint64_t op_id,
+                                const std::vector<char> &payload = {}) -> void {
+  write_pod(output, kWalFrameMagic);
+  write_pod(output, kWalFormatVersion);
+  write_pod(output, frame_type);
+  write_pod(output, mutation_type);
+  write_pod(output, static_cast<uint8_t>(0));
+  write_pod(output, op_id);
+  write_pod(output, static_cast<uint64_t>(payload.size()));
+  if (!payload.empty()) {
+    output.write(payload.data(), static_cast<std::streamsize>(payload.size()));
+  }
+  write_pod(output, kWalTrailerMagic);
+}
+
 // ---------------------------------------------------------------------------
 // WalTest
 // ---------------------------------------------------------------------------
@@ -228,6 +246,41 @@ TEST_F(WalTest, RejectsAbsurdPayloadSizeBeforeAllocating) {
     write_pod(output, static_cast<uint8_t>(0));
     write_pod(output, uint64_t{99});
     write_pod(output, std::numeric_limits<uint64_t>::max());
+  }
+
+  WriteAheadLog wal(wal_path_);
+  std::vector<WalRecord> records;
+  EXPECT_NO_THROW(records = wal.replayable_records(0));
+  EXPECT_TRUE(records.empty());
+}
+
+TEST_F(WalTest, RejectsInvalidFrameTypeBeforeReplay) {
+  {
+    WriteAheadLog wal(wal_path_);
+    wal.append_prepare({7, MutationType::kInsert, make_payload("prepared")});
+  }
+  {
+    std::ofstream output(wal_path_, std::ios::binary | std::ios::app);
+    ASSERT_TRUE(output.is_open());
+    write_raw_wal_frame(output, 99, static_cast<uint8_t>(MutationType::kInsert), 7, {});
+  }
+
+  WriteAheadLog wal(wal_path_);
+  std::vector<WalRecord> records;
+  EXPECT_NO_THROW(records = wal.replayable_records(0));
+  EXPECT_TRUE(records.empty());
+}
+
+TEST_F(WalTest, RejectsInvalidMutationTypeBeforeReplay) {
+  {
+    std::ofstream output(wal_path_, std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(output.is_open());
+    write_raw_wal_frame(output,
+                        static_cast<uint8_t>(WalFrameType::kPrepare),
+                        99,
+                        8,
+                        make_payload("invalid-mutation"));
+    write_raw_wal_frame(output, static_cast<uint8_t>(WalFrameType::kCommit), 99, 8, {});
   }
 
   WriteAheadLog wal(wal_path_);

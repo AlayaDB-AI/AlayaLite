@@ -239,6 +239,33 @@ class WriteAheadLog {
     uint64_t payload_size_{0};                           ///< Payload byte count after header.
   };
 
+  [[nodiscard]] static auto parse_frame_type(uint8_t frame_type) -> std::optional<WalFrameType> {
+    switch (frame_type) {
+      case static_cast<uint8_t>(WalFrameType::kPrepare):
+        return WalFrameType::kPrepare;
+      case static_cast<uint8_t>(WalFrameType::kCommit):
+        return WalFrameType::kCommit;
+      default:
+        return std::nullopt;
+    }
+  }
+
+  [[nodiscard]] static auto parse_mutation_type(uint8_t mutation_type)
+      -> std::optional<MutationType> {
+    switch (mutation_type) {
+      case static_cast<uint8_t>(MutationType::kInsert):
+        return MutationType::kInsert;
+      case static_cast<uint8_t>(MutationType::kUpsert):
+        return MutationType::kUpsert;
+      case static_cast<uint8_t>(MutationType::kRemoveByItemId):
+        return MutationType::kRemoveByItemId;
+      case static_cast<uint8_t>(MutationType::kRemoveByInternalId):
+        return MutationType::kRemoveByInternalId;
+      default:
+        return std::nullopt;
+    }
+  }
+
   [[nodiscard]] static auto payload_size_is_plausible(std::ifstream &input,
                                                       uintmax_t wal_file_size,
                                                       uint64_t payload_size) -> bool {
@@ -374,9 +401,19 @@ class WriteAheadLog {
       LOG_WARN("Unsupported WAL version: {}", version);
       return std::nullopt;
     }
+    const auto parsed_frame_type = parse_frame_type(frame_type);
+    if (!parsed_frame_type.has_value()) {
+      LOG_WARN("Invalid WAL frame type: {}", static_cast<unsigned>(frame_type));
+      return std::nullopt;
+    }
+    const auto parsed_mutation_type = parse_mutation_type(mutation_type);
+    if (!parsed_mutation_type.has_value()) {
+      LOG_WARN("Invalid WAL mutation type: {}", static_cast<unsigned>(mutation_type));
+      return std::nullopt;
+    }
     return FrameHeader{
-        .frame_type_ = static_cast<WalFrameType>(frame_type),
-        .mutation_type_ = static_cast<MutationType>(mutation_type),
+        .frame_type_ = parsed_frame_type.value(),
+        .mutation_type_ = parsed_mutation_type.value(),
         .op_id_ = op_id,
         .payload_size_ = payload_size,
     };
