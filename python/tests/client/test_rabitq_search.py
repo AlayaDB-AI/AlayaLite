@@ -14,6 +14,8 @@ from alayalite import Client
 from alayalite.index import Index
 from alayalite.utils import calc_gt, calc_recall
 
+RABITQ_TEST_SEED = 12345
+
 
 def calc_gt_ip(data, query, topk):
     """Calculate ground truth using inner product (higher is better)."""
@@ -33,6 +35,10 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
         # Set RocksDB directory to temp_dir for isolation
         os.environ["ALAYALITE_ROCKSDB_DIR"] = os.path.join(self.temp_dir, "RocksDB")
         self.client = Client(url=self.temp_dir)
+        self.rng = np.random.default_rng(RABITQ_TEST_SEED)
+
+    def random_vectors(self, shape):
+        return self.rng.random(shape).astype(np.float32)
 
     def tearDown(self):
         """Clean up temp directories after each test."""
@@ -41,8 +47,8 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
 
     def test_rabitq_search_solo(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
-        vectors = np.random.rand(1000, 128).astype(np.float32)
-        single_query = np.random.rand(128).astype(np.float32)
+        vectors = self.random_vectors((1000, 128))
+        single_query = self.random_vectors(128)
         index.fit(vectors)
         result = index.search(single_query, 10, 400).reshape(1, -1)
         gt = calc_gt(vectors, single_query.reshape(1, -1), 10)
@@ -51,8 +57,8 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
 
     def test_rabitq_batch_search(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
-        vectors = np.random.rand(1000, 128).astype(np.float32)
-        queries = np.random.rand(10, 128).astype(np.float32)
+        vectors = self.random_vectors((1000, 128))
+        queries = self.random_vectors((10, 128))
         index.fit(vectors)
         result = index.batch_search(queries, 10, 400)
         gt = calc_gt(vectors, queries, 10)
@@ -61,8 +67,8 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
 
     def test_rabitq_batch_search_with_distance_unsupported(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
-        vectors = np.random.rand(256, 128).astype(np.float32)
-        queries = np.random.rand(4, 128).astype(np.float32)
+        vectors = self.random_vectors((256, 128))
+        queries = self.random_vectors((4, 128))
         index.fit(vectors)
 
         with self.assertRaises(RuntimeError):
@@ -70,8 +76,8 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
 
     def test_rabitq_save_load(self):
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
-        vectors = np.random.rand(1000, 128).astype(np.float32)
-        queries = np.random.rand(10, 128).astype(np.float32)
+        vectors = self.random_vectors((1000, 128))
+        queries = self.random_vectors((10, 128))
         index.fit(vectors)
         result = index.batch_search(queries, 10, 400)
         gt = calc_gt(vectors, queries, 10)
@@ -87,8 +93,8 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
 
     def test_rabitq_search_solo_ip(self):
         index = self.client.create_index(name="rabitq_ip_index", metric="ip", quantization_type="rabitq")
-        vectors = np.random.rand(1000, 128).astype(np.float32)
-        single_query = np.random.rand(128).astype(np.float32)
+        vectors = self.random_vectors((1000, 128))
+        single_query = self.random_vectors(128)
         index.fit(vectors)
         result = index.search(single_query, 10, 400).reshape(1, -1)
         gt = calc_gt_ip(vectors, single_query.reshape(1, -1), 10)
@@ -97,8 +103,8 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
 
     def test_rabitq_batch_search_ip(self):
         index = self.client.create_index(name="rabitq_ip_index", metric="ip", quantization_type="rabitq")
-        vectors = np.random.rand(1000, 128).astype(np.float32)
-        queries = np.random.rand(10, 128).astype(np.float32)
+        vectors = self.random_vectors((1000, 128))
+        queries = self.random_vectors((10, 128))
         index.fit(vectors)
         result = index.batch_search(queries, 10, 400)
         gt = calc_gt_ip(vectors, queries, 10)
@@ -107,8 +113,8 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
 
     def test_rabitq_save_load_ip(self):
         index = self.client.create_index(name="rabitq_ip_index", metric="ip", quantization_type="rabitq")
-        vectors = np.random.rand(1000, 128).astype(np.float32)
-        queries = np.random.rand(10, 128).astype(np.float32)
+        vectors = self.random_vectors((1000, 128))
+        queries = self.random_vectors((10, 128))
         index.fit(vectors)
         result = index.batch_search(queries, 10, 400)
         gt = calc_gt_ip(vectors, queries, 10)
@@ -124,8 +130,8 @@ class TestAlayaLiteRaBitQSearch(unittest.TestCase):
     def test_invalid_parameters(self):
         """Test that ef < k raises an error."""
         index = self.client.create_index(name="rabitq_index", metric="l2", quantization_type="rabitq")
-        vectors = np.random.rand(1000, 128).astype(np.float32)
-        query = np.random.rand(128).astype(np.float32)
+        vectors = self.random_vectors((1000, 128))
+        query = self.random_vectors(128)
         index.fit(vectors)
 
         # ef < k should throw exception
