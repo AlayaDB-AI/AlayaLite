@@ -115,6 +115,23 @@ def test_cpp_heavy_jobs_enable_ccache() -> None:
     assert "CMAKE_CXX_COMPILER_LAUNCHER=ccache" in _named_step(cpp_steps, "Run c++ code coverage")["run"]
 
 
+def test_python_unit_and_coverage_share_ccache_key() -> None:
+    unit_ccache = _uses(_steps("code-checker.yaml", "py-unit-test"), "hendrikmuhs/ccache-action@v1")[0]
+    coverage_ccache = _uses(_steps("codecov.yaml", "codecov-python"), "hendrikmuhs/ccache-action@v1")[0]
+
+    assert coverage_ccache["with"]["key"] == unit_ccache["with"]["key"]
+    assert coverage_ccache["with"]["restore-keys"] == unit_ccache["with"]["restore-keys"]
+
+
+def test_python_coverage_build_reuses_unit_build_configuration() -> None:
+    unit_build = _named_step(_steps("code-checker.yaml", "py-unit-test"), "Build Python test environment")["run"]
+    coverage_build = _named_step(_steps("codecov.yaml", "codecov-python"), "Build Python coverage environment")["run"]
+
+    assert coverage_build == unit_build
+    assert "CXXFLAGS" not in coverage_build
+    assert "install.strip" not in coverage_build
+
+
 def test_ccache_builds_disable_native_arch() -> None:
     """Do not cache -march=native objects across heterogeneous GitHub runners."""
 

@@ -61,11 +61,11 @@ jobs:
       uses: hendrikmuhs/ccache-action@v1
       with:
         key: >-
-          codecov-python-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-${{ hashFiles('CMakeLists.txt',
+          py-unit-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-${{ hashFiles('CMakeLists.txt',
           'python/CMakeLists.txt', 'conanfile.py', 'scripts/conan_build/conan_install.py',
           'scripts/conan_build/conan_profile*', 'cmake/**/*.cmake') }}
         restore-keys: |
-          codecov-python-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-
+          py-unit-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-
 
     - name: Install system dependencies
       run: sudo apt-get install -y gdb libaio-dev
@@ -73,8 +73,7 @@ jobs:
     - name: Build Python coverage environment
       run: |
         export CMAKE_ARGS="-DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DALAYA_NATIVE_ARCH=OFF"
-        export CXXFLAGS="${CXXFLAGS:-} -g1 -fno-omit-frame-pointer"
-        uv sync --dev --locked -Cinstall.strip=false
+        uv sync --dev --locked
 
     - name: Save Conan cache
       if: steps.conan-cache.outputs.cache-hit != 'true'
