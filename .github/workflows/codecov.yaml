@@ -3,8 +3,36 @@ name: Codecov
 on  :
   workflow_dispatch:
   pull_request:
+    paths:
+    - include/**
+    - tests/**
+    - python/src/**
+    - python/tests/**
+    - app/**
+    - app/tests/**
+    - CMakeLists.txt
+    - Makefile
+    - pyproject.toml
+    - python/CMakeLists.txt
+    - cmake/**
+    - scripts/ci/codecov/**
+    - scripts/conan_build/**
   push:
     branches: [main]
+    paths:
+    - include/**
+    - tests/**
+    - python/src/**
+    - python/tests/**
+    - app/**
+    - app/tests/**
+    - CMakeLists.txt
+    - Makefile
+    - pyproject.toml
+    - python/CMakeLists.txt
+    - cmake/**
+    - scripts/ci/codecov/**
+    - scripts/conan_build/**
 
 jobs:
   codecov-python:

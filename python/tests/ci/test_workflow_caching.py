@@ -141,13 +141,28 @@ def test_codecov_python_build_uses_unit_build_configuration() -> None:
     assert "install.strip" not in coverage_build
 
 
-def test_codecov_workflow_replaces_ci_python_trigger_scope() -> None:
+def test_codecov_workflow_keeps_coverage_trigger_scope() -> None:
     workflow = _yaml(WORKFLOWS / "codecov.yaml")
     triggers = workflow.get("on", workflow.get(True))
+    coverage_paths = [
+        "include/**",
+        "tests/**",
+        "python/src/**",
+        "python/tests/**",
+        "app/**",
+        "app/tests/**",
+        "CMakeLists.txt",
+        "Makefile",
+        "pyproject.toml",
+        "python/CMakeLists.txt",
+        "cmake/**",
+        "scripts/ci/codecov/**",
+        "scripts/conan_build/**",
+    ]
 
     assert triggers is not None
-    assert triggers["pull_request"] is None
-    assert triggers["push"] == {"branches": ["main"]}
+    assert triggers["pull_request"] == {"paths": coverage_paths}
+    assert triggers["push"] == {"branches": ["main"], "paths": coverage_paths}
 
 
 def test_ccache_builds_disable_native_arch() -> None:
