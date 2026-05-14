@@ -143,8 +143,9 @@ def test_codecov_python_build_uses_unit_build_configuration() -> None:
 
 def test_codecov_workflow_replaces_ci_python_trigger_scope() -> None:
     workflow = _yaml(WORKFLOWS / "codecov.yaml")
-    triggers = workflow[True]
+    triggers = workflow.get("on", workflow.get(True))
 
+    assert triggers is not None
     assert triggers["pull_request"] is None
     assert triggers["push"] == {"branches": ["main"]}
 
@@ -175,7 +176,8 @@ def test_ccache_keys_are_versioned_for_portable_isa_reset() -> None:
         _uses(_steps("codecov.yaml", "codecov-cpp"), "hendrikmuhs/ccache-action@v1")[0],
     ]
 
-    assert all("portable-v" in step["with"]["key"] for step in ccache_steps)
+    assert "portable-v3" in ccache_steps[0]["with"]["key"]
+    assert "portable-v2" in ccache_steps[1]["with"]["key"]
     assert all("portable-v" in step["with"]["restore-keys"] for step in ccache_steps)
 
 
