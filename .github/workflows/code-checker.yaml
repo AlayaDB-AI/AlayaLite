@@ -81,56 +81,6 @@ jobs       :
           ./python/src/alayalite/**/*.py \
           ./python/tests/**/*.py
 
-  py-unit-test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Restore Conan cache
-      id: conan-cache
-      uses: ./.github/actions/cache-restore
-      with:
-        build-type: Release
-        target-arch: ${{ runner.arch }}
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v5
-      with:
-        enable-cache: true
-        cache-dependency-glob: uv.lock
-
-    - name: Restore compiler cache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: >-
-          py-unit-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-${{ hashFiles('CMakeLists.txt',
-          'python/CMakeLists.txt', 'conanfile.py', 'scripts/conan_build/conan_install.py',
-          'scripts/conan_build/conan_profile*', 'cmake/**/*.cmake') }}
-        restore-keys: |
-          py-unit-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-
-
-    - name: Install system dependencies
-      run: sudo apt-get install -y libaio-dev
-
-    - name: Build Python test environment
-      run: |
-        export CMAKE_ARGS="-DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DALAYA_NATIVE_ARCH=OFF"
-        uv sync --dev --locked
-
-    - name: Save Conan cache
-      if: steps.conan-cache.outputs.cache-hit != 'true'
-      continue-on-error: true
-      uses: ./.github/actions/cache-restore
-      with:
-        mode: save
-        build-type: Release
-        target-arch: ${{ runner.arch }}
-
-    - name: Run Python unit/mock tests
-      run: |
-        uv run pytest -v
-
   py-integration-test:
     runs-on: [self-hosted, laser]
     if: github.event_name == 'workflow_dispatch' && inputs.run_integration

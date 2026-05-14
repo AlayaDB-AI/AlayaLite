@@ -3,36 +3,8 @@ name: Codecov
 on  :
   workflow_dispatch:
   pull_request:
-    paths:
-    - include/**
-    - tests/**
-    - python/src/**
-    - python/tests/**
-    - app/**
-    - app/tests/**
-    - CMakeLists.txt
-    - Makefile
-    - pyproject.toml
-    - python/CMakeLists.txt
-    - cmake/**
-    - scripts/ci/codecov/**
-    - scripts/conan_build/**
   push:
     branches: [main]
-    paths:
-    - include/**
-    - tests/**
-    - python/src/**
-    - python/tests/**
-    - app/**
-    - app/tests/**
-    - CMakeLists.txt
-    - Makefile
-    - pyproject.toml
-    - python/CMakeLists.txt
-    - cmake/**
-    - scripts/ci/codecov/**
-    - scripts/conan_build/**
 
 jobs:
   codecov-python:
@@ -61,10 +33,11 @@ jobs:
       uses: hendrikmuhs/ccache-action@v1
       with:
         key: >-
-          py-unit-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-${{ hashFiles('CMakeLists.txt',
+          codecov-python-portable-v3-${{ runner.os }}-${{ runner.arch }}-Release-${{ hashFiles('CMakeLists.txt',
           'python/CMakeLists.txt', 'conanfile.py', 'scripts/conan_build/conan_install.py',
           'scripts/conan_build/conan_profile*', 'cmake/**/*.cmake') }}
         restore-keys: |
+          codecov-python-portable-v3-${{ runner.os }}-${{ runner.arch }}-Release-
           py-unit-portable-v2-${{ runner.os }}-${{ runner.arch }}-Release-
 
     - name: Install system dependencies
@@ -103,6 +76,7 @@ jobs:
         retention-days: 7
 
     - name: Upload Python coverage to Codecov
+      continue-on-error: true
       uses: codecov/codecov-action@v5
       with:
         files: coverage.xml
