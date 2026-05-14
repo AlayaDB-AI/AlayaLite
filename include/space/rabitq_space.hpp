@@ -275,10 +275,8 @@ class RaBitQSpace {
       throw std::invalid_argument("Data type must be a floating point type!");
     }
 
-    if constexpr (!(std::is_integral_v<IDType> && std::is_unsigned_v<IDType> &&
-                    sizeof(IDType) == 4)) {
-      throw std::invalid_argument("IDType must be a 32-bit unsigned integer!");
-      // otherwise SearchBuffer and LinearPool won't function correctly.
+    if constexpr (!(std::is_integral_v<IDType> && std::is_unsigned_v<IDType>)) {
+      throw std::invalid_argument("IDType must be an unsigned integer!");
     }
 
     if (item_cnt > capacity_) {

@@ -94,7 +94,7 @@ jobs       :
 
     - name: Download qdrant_random_ints_1m
       shell: bash
-      run: uv run python scripts/cross_platform_perf/cross_platform_perf.py download-dataset
+      run: uv run python scripts/ci/cross_platform_perf.py download-dataset
 
     - name: Run Collection.hybrid_query benchmark
       shell: bash
@@ -107,7 +107,7 @@ jobs       :
         BENCHMARK_SELECTIVITY: ${{ github.event.inputs.selectivity }}
         BENCHMARK_BUILD_THREADS: ${{ github.event.inputs.build_threads }}
         BENCHMARK_QUERY_THREADS: ${{ github.event.inputs.query_threads }}
-      run: uv run python scripts/cross_platform_perf/cross_platform_perf.py run-benchmark
+      run: uv run python scripts/ci/cross_platform_perf.py run-benchmark
 
     - name: Upload benchmark artifact
       uses: actions/upload-artifact@v4
@@ -119,7 +119,7 @@ jobs       :
       shell: bash
       env:
         BENCHMARK_LABEL: ${{ matrix.label }}
-      run: uv run python scripts/cross_platform_perf/cross_platform_perf.py append-summary
+      run: uv run python scripts/ci/cross_platform_perf.py append-summary
 
   aggregate-summary:
     name: Aggregate benchmark summary
@@ -147,4 +147,4 @@ jobs       :
 
     - name: Append aggregated benchmark summary
       shell: bash
-      run: uv run --no-project python scripts/cross_platform_perf/cross_platform_perf.py aggregate-summary
+      run: uv run --no-project python scripts/ci/cross_platform_perf.py aggregate-summary

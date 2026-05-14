@@ -13,6 +13,7 @@
 #include <unordered_map>
 #include <utility>
 #include <variant>
+#include "helpers/reg.hpp"
 #include "index.hpp"
 #include "index/graph/fusion_graph.hpp"
 #include "index/graph/graph.hpp"
@@ -21,7 +22,6 @@
 #include "index/graph/nsg/nsg_builder.hpp"
 #include "index/index_type.hpp"
 #include "params.hpp"
-#include "reg.hpp"
 #include "space/raw_space.hpp"
 #include "space/sq4_space.hpp"
 #include "space/sq8_space.hpp"

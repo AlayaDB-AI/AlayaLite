@@ -83,6 +83,12 @@ dev = [
 [tool.scikit-build]
 cmake.version = ">=3.15,<=3.31"
 cmake.build-type = "Release"
+# Persist the CMake build tree per wheel tag instead of using a throwaway
+# /tmp directory. Repeated `uv sync` / `uv build` then reuse the CMake cache
+# and object files — ninja skips recompiling unchanged sources, and an
+# editable re-sync after touching only Python files becomes near-instant.
+# `{wheel_tag}` keeps per-interpreter builds isolated; `build/` is gitignored.
+build-dir = "build/{wheel_tag}"
 wheel.packages = ["python/src/alayalite"]
 
 [tool.scikit-build.cmake.define]

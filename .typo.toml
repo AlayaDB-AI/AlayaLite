@@ -1,6 +1,8 @@
 [files]
 # exclude file list
-extend-exclude = []
+extend-exclude = [
+    "scripts/abi/baseline.txt",
+]
 
 [default.extend-words]
 secon = "secon" # keep don't change it

@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- `refactor-pybind-split-structure`: refactored Python pybind layout by
+  splitting bindings/submodules structure, generating shard instantiation TUs
+  from a CMake manifest, and physically splitting `index_impl.hpp` into
+  `index_impl_core.hpp` + `index_impl_search.hpp`. Python API surface remains
+  unchanged, and compile-time strategy is data-validated against baseline.
 - `disk-collection-single-writer-lock`: `DiskCollection` now holds a
   process-level single-writer lock at `<collection>/.lock`; concurrent opens
   of the same collection raise with a stable dual-substring error containing

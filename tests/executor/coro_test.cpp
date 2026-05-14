@@ -42,10 +42,12 @@ class HNSWCoroutineTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    scheduler_->join();  // Ensure all tasks are processed
+    if (scheduler_) {
+      scheduler_->join();  // Ensure all tasks are processed
+    }
   }
 
-  std::filesystem::path dir_name_ = "/home/zijian/zijian/AlayaLite/build/bin/siftsmall";
+  std::filesystem::path dir_name_ = "/home/zijian/zijian/AlayaLite/build/bin/siftsmall"; // TODO fix it
   std::shared_ptr<RawSpace<>> space_;
   std::shared_ptr<Graph<>> graph_;
   std::unique_ptr<Scheduler> scheduler_;

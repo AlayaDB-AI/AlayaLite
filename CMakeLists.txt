@@ -51,6 +51,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Route compilation through ccache when it is available. This mainly speeds up rebuilds of the heavy pybind translation
+# units (clean rebuild after a header change, or switching build directories). Silently skipped when ccache is not
+# installed — e.g. the manylinux CI images — so it never breaks `configure`. Override with
+# -DCMAKE_CXX_COMPILER_LAUNCHER=... (e.g. to use sccache or "").
+if(NOT DEFINED CMAKE_CXX_COMPILER_LAUNCHER)
+  find_program(CCACHE_PROGRAM ccache)
+  if(CCACHE_PROGRAM)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    message(STATUS "Using ccache: ${CCACHE_PROGRAM}")
+  endif()
+endif()
+
 if(MSVC)
   add_compile_options(/EHsc /utf-8 /O2)
 else()
@@ -84,6 +97,26 @@ find_package(Eigen3 REQUIRED)
 find_package(OpenMP QUIET)
 find_package(RocksDB REQUIRED)
 if(BUILD_PYTHON)
+  if(SKBUILD
+     AND DEFINED Python3_ROOT_DIR
+     AND DEFINED PYTHON_EXECUTABLE
+     AND NOT EXISTS "${PYTHON_EXECUTABLE}"
+  )
+    find_program(
+      ALAYA_STABLE_PYTHON_EXECUTABLE
+      NAMES python python3
+      PATHS "${Python3_ROOT_DIR}/bin"
+      NO_DEFAULT_PATH
+    )
+    if(ALAYA_STABLE_PYTHON_EXECUTABLE)
+      unset(Python_EXECUTABLE CACHE)
+      unset(Python3_EXECUTABLE CACHE)
+      set(PYTHON_EXECUTABLE
+          "${ALAYA_STABLE_PYTHON_EXECUTABLE}"
+          CACHE FILEPATH "Python executable" FORCE
+      )
+    endif()
+  endif()
   find_package(pybind11 REQUIRED)
 endif()
 

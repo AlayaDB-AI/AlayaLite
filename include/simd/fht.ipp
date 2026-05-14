@@ -46,7 +46,7 @@ inline auto fwht_generic_template(float *buf) -> void {
 
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX2
-auto helper_float_6_avx2(float *buf) -> void {  // NOLINT
+inline auto helper_float_6_avx2(float *buf) -> void {  // NOLINT
   for (int j = 0; j < 64; j += 32) {
     for (int k = 0; k < 4; k += 4) {
       __asm__ volatile(
@@ -311,7 +311,7 @@ auto helper_float_6_avx2(float *buf) -> void {  // NOLINT
 
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX2
-auto helper_float_7_avx2(float *buf) -> void {  // NOLINT
+inline auto helper_float_7_avx2(float *buf) -> void {  // NOLINT
   for (int j = 0; j < 128; j += 32) {
     for (int k = 0; k < 4; k += 4) {
       __asm__ volatile(
@@ -594,7 +594,7 @@ auto helper_float_7_avx2(float *buf) -> void {  // NOLINT
 
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX2
-auto helper_float_8_avx2(float *buf) -> void {  // NOLINT
+inline auto helper_float_8_avx2(float *buf) -> void {  // NOLINT
   for (int j = 0; j < 256; j += 32) {
     for (int k = 0; k < 4; k += 4) {
       __asm__ volatile(
@@ -921,7 +921,7 @@ auto helper_float_8_avx2(float *buf) -> void {  // NOLINT
 
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX2
-auto helper_float_9_avx2(float *buf) -> void {  // NOLINT
+inline auto helper_float_9_avx2(float *buf) -> void {  // NOLINT
   for (int j = 0; j < 512; j += 32) {
     for (int k = 0; k < 4; k += 4) {
       __asm__ volatile(
@@ -1279,7 +1279,7 @@ auto helper_float_9_avx2(float *buf) -> void {  // NOLINT
 
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX2
-auto helper_float_10_avx2(float *buf) -> void {  // NOLINT
+inline auto helper_float_10_avx2(float *buf) -> void {  // NOLINT
   for (int j = 0; j < 1024; j += 32) {
     for (int k = 0; k < 4; k += 4) {
       __asm__ volatile(
@@ -1655,7 +1655,7 @@ auto helper_float_10_avx2(float *buf) -> void {  // NOLINT
 
 ALAYA_NOINLINE
 ALAYA_TARGET_AVX2
-auto helper_float_11_avx2(float *buf) -> void {  // NOLINT
+inline auto helper_float_11_avx2(float *buf) -> void {  // NOLINT
   for (int j = 0; j < 2048; j += 32) {
     for (int k = 0; k < 4; k += 4) {
       __asm__ volatile(

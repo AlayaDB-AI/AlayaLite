@@ -1,0 +1,300 @@
+// SPDX-FileCopyrightText: 2025 AlayaDB.AI
+//
+// SPDX-License-Identifier: AGPL-3.0-only
+
+#pragma once
+
+#include "index.hpp"
+#include "index/graph/fusion_graph.hpp"
+#include "index/graph/hnsw/hnsw_builder.hpp"
+#include "index/graph/nsg/nsg_builder.hpp"
+#include "space/rabitq_space.hpp"
+#include "space/raw_space.hpp"
+#include "space/sq4_space.hpp"
+#include "space/sq8_space.hpp"
+#include "storage/sequential_storage.hpp"
+#include "utils/scalar_data.hpp"
+
+namespace alaya {
+
+#define ALAYA_PYINDEX_TYPE(...) __VA_ARGS__
+
+#define ALAYA_PYINDEX_SEARCH_RAW_SPACE(DataT, IDT, ScalarT) \
+  RawSpace<DataT, float, IDT, SequentialStorage<DataT, IDT>, ScalarT>
+
+#define ALAYA_PYINDEX_BUILD_RAW_SEARCH_SCALAR_SPACE(DataT, IDT, ScalarT) \
+  RawSpace<DataT, float, IDT, SequentialStorage<DataT, IDT>, ScalarT>
+
+#define ALAYA_PYINDEX_BUILD_RAW_EMPTY_SCALAR_SPACE(DataT, IDT) \
+  RawSpace<DataT, float, IDT, SequentialStorage<DataT, IDT>, EmptyScalarData>
+
+#define ALAYA_PYINDEX_SEARCH_SQ8_SPACE(DataT, IDT, ScalarT) \
+  SQ8Space<DataT, float, IDT, SequentialStorage<uint8_t, IDT>, ScalarT>
+
+#define ALAYA_PYINDEX_SEARCH_SQ4_SPACE(DataT, IDT, ScalarT) \
+  SQ4Space<DataT, float, IDT, SequentialStorage<uint8_t, IDT>, ScalarT>
+
+#define ALAYA_PYINDEX_RABITQ_SPACE(IDT, ScalarT) RaBitQSpace<float, float, IDT, ScalarT>
+
+#define ALAYA_PYINDEX_GRAPH_HNSW(BuildSpaceT) HNSWBuilder<BuildSpaceT>
+
+#define ALAYA_PYINDEX_GRAPH_NSG(BuildSpaceT) NSGBuilder<BuildSpaceT>
+
+#define ALAYA_PYINDEX_GRAPH_FUSION(BuildSpaceT) \
+  FusionGraphBuilder<BuildSpaceT, HNSWBuilder<BuildSpaceT>, NSGBuilder<BuildSpaceT>>
+
+// build-space × search-space cross-product macro row:
+//   BuildSpaceType is selected by DISPATCH_BUILD_SPACE_TYPE.
+//   SearchSpaceType is selected by DISPATCH_SEARCH_SPACE_TYPE.
+// These are nested runtime branches, so template instantiation sees the Cartesian product.
+#define ALAYA_PYINDEX_ROW(GraphMacro, BuildSpaceT, SearchSpaceT, X) \
+  X((GraphMacro(ALAYA_PYINDEX_TYPE BuildSpaceT)), (ALAYA_PYINDEX_TYPE SearchSpaceT))
+
+#define ALAYA_PYINDEX_SEARCH_RAW_TYPE(DataT, IDT, ScalarT) \
+  ALAYA_PYINDEX_SEARCH_RAW_SPACE(DataT, IDT, ScalarT)
+
+#define ALAYA_PYINDEX_SEARCH_SQ8_TYPE(DataT, IDT, ScalarT) \
+  ALAYA_PYINDEX_SEARCH_SQ8_SPACE(DataT, IDT, ScalarT)
+
+#define ALAYA_PYINDEX_SEARCH_SQ4_TYPE(DataT, IDT, ScalarT) \
+  ALAYA_PYINDEX_SEARCH_SQ4_SPACE(DataT, IDT, ScalarT)
+
+#define ALAYA_PYINDEX_SEARCH_RABITQ_TYPE(DataT, IDT, ScalarT) \
+  ALAYA_PYINDEX_RABITQ_SPACE(IDT, ScalarT)
+
+// ScalarData path emits both raw-search-scalar and raw-empty build spaces.
+#define ALAYA_PYINDEX_SEARCH_COMBOS_NONFLOAT_SCALAR(GraphMacro, X, DataT, IDT, SearchSpaceMacro) \
+  ALAYA_PYINDEX_ROW(GraphMacro,                                                                  \
+                    (ALAYA_PYINDEX_BUILD_RAW_SEARCH_SCALAR_SPACE(DataT, IDT, ScalarData)),       \
+                    (SearchSpaceMacro(DataT, IDT, ScalarData)),                                  \
+                    X)                                                                           \
+  ALAYA_PYINDEX_ROW(GraphMacro,                                                                  \
+                    (ALAYA_PYINDEX_BUILD_RAW_EMPTY_SCALAR_SPACE(DataT, IDT)),                    \
+                    (SearchSpaceMacro(DataT, IDT, ScalarData)),                                  \
+                    X)
+
+// EmptyScalarData path keeps only one raw build-space form to avoid duplicate template types.
+#define ALAYA_PYINDEX_SEARCH_COMBOS_NONFLOAT_EMPTY(GraphMacro, X, DataT, IDT, SearchSpaceMacro) \
+  ALAYA_PYINDEX_ROW(GraphMacro,                                                                 \
+                    (ALAYA_PYINDEX_BUILD_RAW_EMPTY_SCALAR_SPACE(DataT, IDT)),                   \
+                    (SearchSpaceMacro(DataT, IDT, EmptyScalarData)),                            \
+                    X)
+
+#define ALAYA_PYINDEX_SEARCH_COMBOS_FLOAT_SCALAR(GraphMacro, X, IDT, SearchSpaceMacro)     \
+  ALAYA_PYINDEX_ROW(GraphMacro,                                                            \
+                    (ALAYA_PYINDEX_BUILD_RAW_SEARCH_SCALAR_SPACE(float, IDT, ScalarData)), \
+                    (SearchSpaceMacro(float, IDT, ScalarData)),                            \
+                    X)                                                                     \
+  ALAYA_PYINDEX_ROW(GraphMacro,                                                            \
+                    (ALAYA_PYINDEX_BUILD_RAW_EMPTY_SCALAR_SPACE(float, IDT)),              \
+                    (SearchSpaceMacro(float, IDT, ScalarData)),                            \
+                    X)                                                                     \
+  ALAYA_PYINDEX_ROW(GraphMacro,                                                            \
+                    (ALAYA_PYINDEX_RABITQ_SPACE(IDT, ScalarData)),                         \
+                    (SearchSpaceMacro(float, IDT, ScalarData)),                            \
+                    X)
+
+#define ALAYA_PYINDEX_SEARCH_COMBOS_FLOAT_EMPTY(GraphMacro, X, IDT, SearchSpaceMacro) \
+  ALAYA_PYINDEX_ROW(GraphMacro,                                                       \
+                    (ALAYA_PYINDEX_BUILD_RAW_EMPTY_SCALAR_SPACE(float, IDT)),         \
+                    (SearchSpaceMacro(float, IDT, EmptyScalarData)),                  \
+                    X)                                                                \
+  ALAYA_PYINDEX_ROW(GraphMacro,                                                       \
+                    (ALAYA_PYINDEX_RABITQ_SPACE(IDT, EmptyScalarData)),               \
+                    (SearchSpaceMacro(float, IDT, EmptyScalarData)),                  \
+                    X)
+
+#define ALAYA_PYINDEX_FOR_NONFLOAT_ID(SearchSpaceMacro, GraphMacro, X, DataT, IDT)         \
+  ALAYA_PYINDEX_SEARCH_COMBOS_NONFLOAT_SCALAR(GraphMacro, X, DataT, IDT, SearchSpaceMacro) \
+  ALAYA_PYINDEX_SEARCH_COMBOS_NONFLOAT_EMPTY(GraphMacro, X, DataT, IDT, SearchSpaceMacro)
+
+#define ALAYA_PYINDEX_FOR_FLOAT_ID(SearchSpaceMacro, GraphMacro, X, IDT)         \
+  ALAYA_PYINDEX_SEARCH_COMBOS_FLOAT_SCALAR(GraphMacro, X, IDT, SearchSpaceMacro) \
+  ALAYA_PYINDEX_SEARCH_COMBOS_FLOAT_EMPTY(GraphMacro, X, IDT, SearchSpaceMacro)
+
+#define ALAYA_PYINDEX_SEARCH_FOR_GRAPH_ID(SearchSpaceMacro, GraphMacro, X, IDT) \
+  ALAYA_PYINDEX_FOR_NONFLOAT_ID(SearchSpaceMacro, GraphMacro, X, uint8_t, IDT)  \
+  ALAYA_PYINDEX_FOR_NONFLOAT_ID(SearchSpaceMacro, GraphMacro, X, int8_t, IDT)   \
+  ALAYA_PYINDEX_FOR_NONFLOAT_ID(SearchSpaceMacro, GraphMacro, X, int32_t, IDT)  \
+  ALAYA_PYINDEX_FOR_NONFLOAT_ID(SearchSpaceMacro, GraphMacro, X, uint32_t, IDT) \
+  ALAYA_PYINDEX_FOR_NONFLOAT_ID(SearchSpaceMacro, GraphMacro, X, double, IDT)   \
+  ALAYA_PYINDEX_FOR_FLOAT_ID(SearchSpaceMacro, GraphMacro, X, IDT)
+
+#define ALAYA_PYINDEX_RAW_SEARCH_FOR_GRAPH_U32(GraphMacro, X) \
+  ALAYA_PYINDEX_SEARCH_FOR_GRAPH_ID(ALAYA_PYINDEX_SEARCH_RAW_TYPE, GraphMacro, X, uint32_t)
+
+#define ALAYA_PYINDEX_RAW_SEARCH_FOR_GRAPH_U64(GraphMacro, X) \
+  ALAYA_PYINDEX_SEARCH_FOR_GRAPH_ID(ALAYA_PYINDEX_SEARCH_RAW_TYPE, GraphMacro, X, uint64_t)
+
+#define ALAYA_PYINDEX_SQ8_SEARCH_FOR_GRAPH_U32(GraphMacro, X) \
+  ALAYA_PYINDEX_SEARCH_FOR_GRAPH_ID(ALAYA_PYINDEX_SEARCH_SQ8_TYPE, GraphMacro, X, uint32_t)
+
+#define ALAYA_PYINDEX_SQ8_SEARCH_FOR_GRAPH_U64(GraphMacro, X) \
+  ALAYA_PYINDEX_SEARCH_FOR_GRAPH_ID(ALAYA_PYINDEX_SEARCH_SQ8_TYPE, GraphMacro, X, uint64_t)
+
+#define ALAYA_PYINDEX_SQ4_SEARCH_FOR_GRAPH_U32(GraphMacro, X) \
+  ALAYA_PYINDEX_SEARCH_FOR_GRAPH_ID(ALAYA_PYINDEX_SEARCH_SQ4_TYPE, GraphMacro, X, uint32_t)
+
+#define ALAYA_PYINDEX_SQ4_SEARCH_FOR_GRAPH_U64(GraphMacro, X) \
+  ALAYA_PYINDEX_SEARCH_FOR_GRAPH_ID(ALAYA_PYINDEX_SEARCH_SQ4_TYPE, GraphMacro, X, uint64_t)
+
+#define ALAYA_PYINDEX_RABITQ_SEARCH_FOR_GRAPH_U32(GraphMacro, X) \
+  ALAYA_PYINDEX_FOR_FLOAT_ID(ALAYA_PYINDEX_SEARCH_RABITQ_TYPE, GraphMacro, X, uint32_t)
+
+#define ALAYA_PYINDEX_RABITQ_SEARCH_FOR_GRAPH_U64(GraphMacro, X) \
+  ALAYA_PYINDEX_FOR_FLOAT_ID(ALAYA_PYINDEX_SEARCH_RABITQ_TYPE, GraphMacro, X, uint64_t)
+
+#define ALAYA_PYINDEX_HNSW_RAW_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RAW_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_HNSW, X)
+
+#define ALAYA_PYINDEX_HNSW_RAW_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RAW_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_HNSW, X)
+
+#define ALAYA_PYINDEX_HNSW_SQ8_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ8_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_HNSW, X)
+
+#define ALAYA_PYINDEX_HNSW_SQ8_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ8_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_HNSW, X)
+
+#define ALAYA_PYINDEX_HNSW_SQ4_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ4_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_HNSW, X)
+
+#define ALAYA_PYINDEX_HNSW_SQ4_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ4_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_HNSW, X)
+
+#define ALAYA_PYINDEX_HNSW_RABITQ_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RABITQ_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_HNSW, X)
+
+#define ALAYA_PYINDEX_HNSW_RABITQ_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RABITQ_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_HNSW, X)
+
+#define ALAYA_PYINDEX_NSG_RAW_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RAW_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_NSG, X)
+
+#define ALAYA_PYINDEX_NSG_RAW_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RAW_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_NSG, X)
+
+#define ALAYA_PYINDEX_NSG_SQ8_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ8_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_NSG, X)
+
+#define ALAYA_PYINDEX_NSG_SQ8_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ8_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_NSG, X)
+
+#define ALAYA_PYINDEX_NSG_SQ4_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ4_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_NSG, X)
+
+#define ALAYA_PYINDEX_NSG_SQ4_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ4_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_NSG, X)
+
+#define ALAYA_PYINDEX_NSG_RABITQ_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RABITQ_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_NSG, X)
+
+#define ALAYA_PYINDEX_NSG_RABITQ_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RABITQ_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_NSG, X)
+
+#define ALAYA_PYINDEX_FUSION_RAW_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RAW_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_FUSION, X)
+
+#define ALAYA_PYINDEX_FUSION_RAW_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RAW_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_FUSION, X)
+
+#define ALAYA_PYINDEX_FUSION_SQ8_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ8_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_FUSION, X)
+
+#define ALAYA_PYINDEX_FUSION_SQ8_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ8_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_FUSION, X)
+
+#define ALAYA_PYINDEX_FUSION_SQ4_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ4_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_FUSION, X)
+
+#define ALAYA_PYINDEX_FUSION_SQ4_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_SQ4_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_FUSION, X)
+
+#define ALAYA_PYINDEX_FUSION_RABITQ_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RABITQ_SEARCH_FOR_GRAPH_U32(ALAYA_PYINDEX_GRAPH_FUSION, X)
+
+#define ALAYA_PYINDEX_FUSION_RABITQ_U64_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_RABITQ_SEARCH_FOR_GRAPH_U64(ALAYA_PYINDEX_GRAPH_FUSION, X)
+
+#define ALAYA_PYINDEX_HNSW_RAW_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_HNSW_RAW_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_HNSW_RAW_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_HNSW_SQ8_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_HNSW_SQ8_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_HNSW_SQ8_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_HNSW_SQ4_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_HNSW_SQ4_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_HNSW_SQ4_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_HNSW_RABITQ_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_HNSW_RABITQ_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_HNSW_RABITQ_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_NSG_RAW_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_NSG_RAW_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_NSG_RAW_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_NSG_SQ8_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_NSG_SQ8_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_NSG_SQ8_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_NSG_SQ4_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_NSG_SQ4_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_NSG_SQ4_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_NSG_RABITQ_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_NSG_RABITQ_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_NSG_RABITQ_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_FUSION_RAW_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_FUSION_RAW_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_FUSION_RAW_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_FUSION_SQ8_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_FUSION_SQ8_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_FUSION_SQ8_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_FUSION_SQ4_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_FUSION_SQ4_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_FUSION_SQ4_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_FUSION_RABITQ_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_FUSION_RABITQ_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_FUSION_RABITQ_U64_INSTANTIATIONS(X)
+
+#define ALAYA_PYINDEX_INSTANTIATIONS(X)             \
+  ALAYA_PYINDEX_HNSW_RAW_U32_INSTANTIATIONS(X)      \
+  ALAYA_PYINDEX_HNSW_RAW_U64_INSTANTIATIONS(X)      \
+  ALAYA_PYINDEX_HNSW_SQ8_U32_INSTANTIATIONS(X)      \
+  ALAYA_PYINDEX_HNSW_SQ8_U64_INSTANTIATIONS(X)      \
+  ALAYA_PYINDEX_HNSW_SQ4_U32_INSTANTIATIONS(X)      \
+  ALAYA_PYINDEX_HNSW_SQ4_U64_INSTANTIATIONS(X)      \
+  ALAYA_PYINDEX_HNSW_RABITQ_U32_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_HNSW_RABITQ_U64_INSTANTIATIONS(X)   \
+  ALAYA_PYINDEX_NSG_RAW_U32_INSTANTIATIONS(X)       \
+  ALAYA_PYINDEX_NSG_RAW_U64_INSTANTIATIONS(X)       \
+  ALAYA_PYINDEX_NSG_SQ8_U32_INSTANTIATIONS(X)       \
+  ALAYA_PYINDEX_NSG_SQ8_U64_INSTANTIATIONS(X)       \
+  ALAYA_PYINDEX_NSG_SQ4_U32_INSTANTIATIONS(X)       \
+  ALAYA_PYINDEX_NSG_SQ4_U64_INSTANTIATIONS(X)       \
+  ALAYA_PYINDEX_NSG_RABITQ_U32_INSTANTIATIONS(X)    \
+  ALAYA_PYINDEX_NSG_RABITQ_U64_INSTANTIATIONS(X)    \
+  ALAYA_PYINDEX_FUSION_RAW_U32_INSTANTIATIONS(X)    \
+  ALAYA_PYINDEX_FUSION_RAW_U64_INSTANTIATIONS(X)    \
+  ALAYA_PYINDEX_FUSION_SQ8_U32_INSTANTIATIONS(X)    \
+  ALAYA_PYINDEX_FUSION_SQ8_U64_INSTANTIATIONS(X)    \
+  ALAYA_PYINDEX_FUSION_SQ4_U32_INSTANTIATIONS(X)    \
+  ALAYA_PYINDEX_FUSION_SQ4_U64_INSTANTIATIONS(X)    \
+  ALAYA_PYINDEX_FUSION_RABITQ_U32_INSTANTIATIONS(X) \
+  ALAYA_PYINDEX_FUSION_RABITQ_U64_INSTANTIATIONS(X)
+
+#define ALAYA_DECLARE_EXTERN(GraphBuilderT, SearchSpaceT) \
+  extern template class PyIndex<ALAYA_PYINDEX_TYPE GraphBuilderT, ALAYA_PYINDEX_TYPE SearchSpaceT>;
+
+ALAYA_PYINDEX_INSTANTIATIONS(ALAYA_DECLARE_EXTERN)
+
+#undef ALAYA_DECLARE_EXTERN
+
+}  // namespace alaya

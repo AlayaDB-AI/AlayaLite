@@ -45,6 +45,7 @@ repos:
     exclude: \.(yaml|yml)$
   - id: check-added-large-files
     args: [--maxkb=1000]
+    exclude: ^scripts/abi/baseline\.txt$
   - id: check-merge-conflict
   - id: check-yaml
 
@@ -89,6 +90,7 @@ repos:
   hooks:
   - id: typos
     args: [-c, .typo.toml]
+    exclude: ^scripts/abi/baseline\.txt$
 
 
 #===========================================================================
@@ -140,7 +142,7 @@ repos:
   hooks:
   - id: no-chinese-characters
     name: Check for Chinese characters in code
-    entry: python scripts/check_chinese.py
+    entry: python scripts/ci/check_chinese.py
     language: python
     files: (Makefile|\.(c|cc|cpp|cxx|h|hpp|hxx|ipp|py|yaml|yml|sh|cmake|txt))$
     exclude: ^(docs/|build/)
