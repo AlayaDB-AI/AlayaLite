@@ -55,14 +55,7 @@ set_tests_properties(laser_test_page_layout_round_trip PROPERTIES LABELS laser)
 add_executable(laser_simd_dispatch_test ${CMAKE_CURRENT_SOURCE_DIR}/simd_dispatch_test.cpp)
 target_link_libraries(laser_simd_dispatch_test PRIVATE alaya_laser ${GTEST_LIBS})
 target_compile_features(laser_simd_dispatch_test PRIVATE cxx_std_20)
-target_compile_options(
-  laser_simd_dispatch_test
-  PRIVATE -O3
-          -DNDEBUG
-          -Wall
-          -Wextra
-          ${_ALAYA_LASER_CONSUMER_OPTIONS}
-)
+target_compile_options(laser_simd_dispatch_test PRIVATE -Wall -Wextra ${_ALAYA_LASER_CONSUMER_OPTIONS})
 
 add_test(NAME laser_test_simd_dispatch COMMAND $<TARGET_FILE:laser_simd_dispatch_test>)
 set_tests_properties(laser_test_simd_dispatch PROPERTIES LABELS "laser;simd")

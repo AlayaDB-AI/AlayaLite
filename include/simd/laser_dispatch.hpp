@@ -266,6 +266,11 @@ inline void convert_accum_to_float_avx512(size_t count,
                                           const uint16_t *__restrict__ result,
                                           int32_t sumq,
                                           float *__restrict__ result_float) {
+  // FastScan accumulators are stored as uint16 but carry int16 bit patterns
+  // (the _mm*_sub_epi16 in accumulate_impl_* can produce negatives). The SIMD
+  // path uses _mm*_cvtepi16_epi32 to sign-extend; the scalar tail mirrors this
+  // via static_cast<int16_t> -- changing it to int32_t would zero-extend and
+  // diverge from the SIMD output.
   const __m512i qq = _mm512_set1_epi32(sumq);
   size_t i = 0;
   const size_t simd_count = count - (count % 32);
@@ -334,31 +339,6 @@ inline auto rotate_loop_avx2(const float *__restrict__ src,
   return idx;
 }
 
-inline auto rotate_loop_scalar(const float *__restrict__ src,
-                               const float *__restrict__ mat,
-                               size_t dim,
-                               float *__restrict__ dst) -> size_t {
-  for (size_t idx = 0; idx < dim; ++idx) {
-    dst[idx] = src[idx] * mat[idx];
-  }
-  return dim;
-}
-
-inline void data_range_scalar(const float *__restrict__ vec, size_t dim, float &lo, float &hi) {
-  if (dim == 0) {
-    lo = 0.0F;
-    hi = 0.0F;
-    return;
-  }
-  lo = FLT_MAX;
-  hi = -FLT_MAX;
-  for (size_t i = 0; i < dim; ++i) {
-    const float tmp = vec[i];
-    lo = tmp < lo ? tmp : lo;
-    hi = tmp > hi ? tmp : hi;
-  }
-}
-
 ALAYA_TARGET_AVX512_BW
 inline void data_range_avx512(const float *__restrict__ vec, size_t dim, float &lo, float &hi) {
   if (dim == 0) {
@@ -404,8 +384,8 @@ inline void data_range_avx2(const float *__restrict__ vec, size_t dim, float &lo
   } else {
     alignas(32) std::array<float, 8> max_values{};
     alignas(32) std::array<float, 8> min_values{};
-    _mm256_storeu_ps(max_values.data(), max_q);
-    _mm256_storeu_ps(min_values.data(), min_q);
+    _mm256_store_ps(max_values.data(), max_q);
+    _mm256_store_ps(min_values.data(), min_q);
     hi = max_values[0];
     lo = min_values[0];
     for (size_t lane = 1; lane < max_values.size(); ++lane) {

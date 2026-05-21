@@ -117,6 +117,11 @@ else()
         OUTPUT_VARIABLE ALAYA_ASAN_RUNTIME
         OUTPUT_STRIP_TRAILING_WHITESPACE
       )
+      # GCC echoes the input name verbatim when the file is not on its search path; clear it so downstream LD_PRELOAD
+      # guards stay correct.
+      if(NOT EXISTS "${ALAYA_ASAN_RUNTIME}")
+        set(ALAYA_ASAN_RUNTIME)
+      endif()
     endif()
   endif()
 
