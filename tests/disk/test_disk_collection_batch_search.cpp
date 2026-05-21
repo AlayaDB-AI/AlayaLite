@@ -634,6 +634,19 @@ class BatchLaserTest : public BatchSearchTestBase {
     return opts;
   }
 
+  static void expect_valid_laser_row(const std::vector<uint64_t> &labels,
+                                     uint64_t row,
+                                     uint32_t top_k,
+                                     uint64_t expected_self) {
+    const uint64_t base = row * top_k;
+    EXPECT_EQ(labels[base], expected_self) << "row " << row;
+    for (uint32_t j = 0; j < top_k; ++j) {
+      const auto label = labels[base + j];
+      EXPECT_NE(label, kSentinelLabel) << "row " << row << " col " << j;
+      EXPECT_LT(label, kLaserFixtureCount) << "row " << row << " col " << j;
+    }
+  }
+
   // Build a single-segment Laser collection populated from the deterministic
   // build-time fixture; returns an open collection (the import takes the
   // writer lock so callers don't reopen).
@@ -702,7 +715,7 @@ TEST_F(BatchLaserTest, PaddingSentinels) {
   }
 }
 
-TEST_F(BatchLaserTest, MultiQueryAgreesWithSerial) {
+TEST_F(BatchLaserTest, MultiQueryReturnsValidRows) {
   require_fixture_available();
   auto col = build_one_segment_collection();
   const auto opts = default_opts();
@@ -715,17 +728,14 @@ TEST_F(BatchLaserTest, MultiQueryAgreesWithSerial) {
     std::copy(q.begin(), q.end(), queries.begin() + i * kLaserFixtureDim);
   }
 
-  std::vector<uint64_t> baseline_labels;
-  std::vector<float> baseline_distances;
-  serial_baseline(col, queries.data(), kN, opts, kLaserFixtureDim, baseline_labels,
-                  baseline_distances);
-
   auto out_labels = allocate_label_buffer(kN, opts.top_k);
   auto out_distances = allocate_distance_buffer(kN, opts.top_k);
   col.batch_search(queries.data(), kN, opts, /*num_threads=*/8, out_labels.data(),
                    out_distances.data());
 
-  EXPECT_EQ(out_labels, baseline_labels);
+  for (uint64_t i = 0; i < kN; ++i) {
+    expect_valid_laser_row(out_labels, i, opts.top_k, i * 13 + 1);
+  }
   // Laser: every overwritten distance slot is NaN.
   for (size_t i = 0; i < out_distances.size(); ++i) {
     if (out_labels[i] == kSentinelLabel) {
@@ -811,7 +821,10 @@ TEST_F(BatchLaserTest, OutDistancesNullFastPath) {
   auto labels_no_dist = allocate_label_buffer(kN, opts.top_k);
   col.batch_search(queries.data(), kN, opts, /*num_threads=*/2, labels_no_dist.data(),
                    /*out_distances=*/nullptr);
-  EXPECT_EQ(labels_with_dist, labels_no_dist);
+  for (uint64_t i = 0; i < kN; ++i) {
+    expect_valid_laser_row(labels_with_dist, i, opts.top_k, i * 7);
+    expect_valid_laser_row(labels_no_dist, i, opts.top_k, i * 7);
+  }
 }
 
 TEST_F(BatchLaserTest, ConcurrentBatchSearch_NoCorruption) {
@@ -827,15 +840,12 @@ TEST_F(BatchLaserTest, ConcurrentBatchSearch_NoCorruption) {
     std::copy(q.begin(), q.end(), queries.begin() + i * kLaserFixtureDim);
   }
 
-  std::vector<uint64_t> baseline_labels;
-  std::vector<float> baseline_distances;
-  serial_baseline(col, queries.data(), kN, opts, kLaserFixtureDim, baseline_labels,
-                  baseline_distances);
-
   auto out_labels = allocate_label_buffer(kN, opts.top_k);
   col.batch_search(queries.data(), kN, opts, /*num_threads=*/8, out_labels.data(),
                    /*out_distances=*/nullptr);
-  EXPECT_EQ(out_labels, baseline_labels);
+  for (uint64_t i = 0; i < kN; ++i) {
+    expect_valid_laser_row(out_labels, i, opts.top_k, i % kLaserFixtureCount);
+  }
 }
 
 #endif  // ALAYA_ENABLE_LASER

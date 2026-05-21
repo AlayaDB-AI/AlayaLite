@@ -105,7 +105,22 @@ else()
     list(APPEND ALAYA_SIMD_COMPILE_OPTIONS -mavx2 -mfma)
   endif()
 
-  add_compile_options(-Wall -Ofast ${ALAYA_SIMD_COMPILE_OPTIONS} -funroll-loops)
+  set(ALAYA_SANITIZER_BUILD OFF)
+  set(ALAYA_ASAN_RUNTIME)
+  set(ALAYA_OPTIMIZATION_OPTION -Ofast)
+  if(CMAKE_CXX_FLAGS MATCHES "(^| )-fsanitize=")
+    set(ALAYA_SANITIZER_BUILD ON)
+    set(ALAYA_OPTIMIZATION_OPTION -O1)
+    if(CMAKE_CXX_FLAGS MATCHES "-fsanitize=[^ ]*address")
+      execute_process(
+        COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libasan.so
+        OUTPUT_VARIABLE ALAYA_ASAN_RUNTIME
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+      )
+    endif()
+  endif()
+
+  add_compile_options(-Wall ${ALAYA_OPTIMIZATION_OPTION} ${ALAYA_SIMD_COMPILE_OPTIONS} -funroll-loops)
 endif()
 
 # ============================================================================
@@ -192,9 +207,8 @@ if(ALAYA_ENABLE_LASER)
               spdlog::spdlog_header_only
   )
   target_compile_features(alaya_laser INTERFACE cxx_std_20)
-  # NOTE: Laser's FastScan / L2 kernels still depend on compile-time SIMD macros in a few headers. Portable package
-  # builds intentionally omit host-specific flags here; native flags are reserved for explicitly host-bound local builds
-  # until those kernels are migrated to function-level runtime dispatch.
+  # -mavx2 -mfma is the LASER baseline for Eigen and non-handwritten SIMD code; handwritten LASER kernels use
+  # function-level target attributes for runtime AVX-512 dispatch.
   set(_ALAYA_LASER_CONSUMER_OPTIONS
       ${ALAYA_SIMD_COMPILE_OPTIONS} -ftree-vectorize -DEIGEN_DONT_PARALLELIZE
       CACHE INTERNAL "Compile options a Laser-consuming target must apply PRIVATEly"

@@ -25,6 +25,7 @@
 
 #include "index/graph/laser/qg/qg.hpp"
 #include "index/graph/laser/qg/qg_builder.hpp"
+#include "simd/laser_dispatch.hpp"
 
 namespace alaya::laser::bindings {
 
@@ -123,6 +124,13 @@ struct Index {
 inline void register_laser_module(py::module_ &m) {
   m.doc() =
       R"pbdoc(Laser on-disk Quantized Graph index (ported from symqg into alaya::laser).)pbdoc";
+
+  m.def(
+      "selected_simd",
+      [] {
+        return std::string(alaya::laser::simd::get_laser_simd_name());
+      },
+      R"pbdoc(Return the selected LASER handwritten SIMD backend: "avx512" or "avx2".)pbdoc");
 
   py::class_<Index>(m, "Index")
       .def(py::init<const std::string &,

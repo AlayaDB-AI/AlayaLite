@@ -43,6 +43,10 @@ if(ALAYA_ENABLE_LASER)
       ${ALAYA_LASER_SEGMENT_FIXTURE_DIR}/${ALAYA_LASER_SEGMENT_FIXTURE_PREFIX}_medoids
       ${ALAYA_LASER_SEGMENT_FIXTURE_DIR}/${ALAYA_LASER_SEGMENT_FIXTURE_PREFIX}_medoids_indices
   )
+  set(ALAYA_LASER_SEGMENT_FIXTURE_ENV ALAYALITE_LASER_BUILD_DIR=${CMAKE_BINARY_DIR})
+  if(ALAYA_ASAN_RUNTIME)
+    list(APPEND ALAYA_LASER_SEGMENT_FIXTURE_ENV LD_PRELOAD=${ALAYA_ASAN_RUNTIME} ASAN_OPTIONS=detect_leaks=0)
+  endif()
 
   add_custom_command(
     OUTPUT ${ALAYA_LASER_SEGMENT_FIXTURE_OUTPUTS}
@@ -52,7 +56,7 @@ if(ALAYA_ENABLE_LASER)
     COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target _alayalitepy
     COMMAND ${CMAKE_COMMAND} -E make_directory ${ALAYA_LASER_SEGMENT_FIXTURE_DIR}
     COMMAND
-      ${CMAKE_COMMAND} -E env ALAYALITE_LASER_BUILD_DIR=${CMAKE_BINARY_DIR} ${Python3_EXECUTABLE}
+      ${CMAKE_COMMAND} -E env ${ALAYA_LASER_SEGMENT_FIXTURE_ENV} ${Python3_EXECUTABLE}
       ${CMAKE_SOURCE_DIR}/tests/disk/fixtures/build_laser_fixture.py --output-dir ${ALAYA_LASER_SEGMENT_FIXTURE_DIR}
       --prefix ${ALAYA_LASER_SEGMENT_FIXTURE_PREFIX} --count 2048 --dim 128 --R 64 --seed 42 --optional-sidecars
     DEPENDS ${CMAKE_SOURCE_DIR}/tests/disk/fixtures/build_laser_fixture.py
@@ -91,6 +95,11 @@ if(ALAYA_ENABLE_LASER)
       )
       add_coverage_to_target(${_laser_segment_test_target})
       add_test(NAME ${_laser_segment_test_target} COMMAND $<TARGET_FILE:${_laser_segment_test_target}>)
+      if(_laser_segment_test_target STREQUAL "test_laser_adapter_overhead")
+        set_tests_properties(${_laser_segment_test_target} PROPERTIES LABELS "laser;performance")
+      else()
+        set_tests_properties(${_laser_segment_test_target} PROPERTIES LABELS "laser")
+      endif()
       list(APPEND ALAYA_LASER_SEGMENT_TEST_TARGETS ${_laser_segment_test_target})
     endforeach()
     add_custom_target(test_laser_segment DEPENDS ${ALAYA_LASER_SEGMENT_TEST_TARGETS})

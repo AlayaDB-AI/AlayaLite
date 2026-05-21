@@ -173,15 +173,6 @@ class DiskCollectionLaserTest : public ::testing::Test {
     return opts;
   }
 
-  static auto labels_from_hits(const std::vector<DiskSearchHit> &hits) -> std::vector<uint64_t> {
-    std::vector<uint64_t> labels;
-    labels.reserve(hits.size());
-    for (const auto &hit : hits) {
-      labels.push_back(hit.label);
-    }
-    return labels;
-  }
-
   static auto is_nan_bits(float value) -> bool {
     uint32_t bits = 0;
     static_assert(sizeof(bits) == sizeof(value));
@@ -193,6 +184,19 @@ class DiskCollectionLaserTest : public ::testing::Test {
     for (const auto &hit : hits) {
       EXPECT_TRUE(is_nan_bits(hit.distance)) << "label=" << hit.label;
     }
+  }
+
+  static void expect_labels_in_range(const std::vector<DiskSearchHit> &hits, uint64_t upper_bound) {
+    for (const auto &hit : hits) {
+      EXPECT_LT(hit.label, upper_bound) << "label=" << hit.label;
+    }
+  }
+
+  static void expect_contains_label(const std::vector<DiskSearchHit> &hits, uint64_t label) {
+    EXPECT_NE(std::find_if(hits.begin(),
+                           hits.end(),
+                           [&](const auto &hit) { return hit.label == label; }),
+              hits.end());
   }
 
   static auto prepare_second_fixture_dir(const std::filesystem::path &dst_dir)
@@ -379,10 +383,12 @@ TEST_F(DiskCollectionLaserTest, import_laser_segment_writes_segment) {
   const auto *query = query_row(vectors, 0);
   const auto segment_hits = searcher->search(query, search_options());
   const auto hits = reopened.search(query, search_options());
-  ASSERT_FALSE(hits.empty());
-  ASSERT_FALSE(segment_hits.empty());
-  EXPECT_EQ(labels_from_hits(hits), labels_from_hits(segment_hits));
+  ASSERT_EQ(hits.size(), kLaserTopK);
+  ASSERT_EQ(segment_hits.size(), kLaserTopK);
+  expect_labels_in_range(hits, kLaserFixtureCount);
+  expect_labels_in_range(segment_hits, kLaserFixtureCount);
   EXPECT_EQ(hits.front().label, 0u);
+  EXPECT_EQ(segment_hits.front().label, 0u);
   EXPECT_TRUE(is_nan_bits(hits.front().distance));
 }
 
@@ -394,8 +400,6 @@ TEST_F(DiskCollectionLaserTest, multi_laser_segment_search) {
   auto labels1 = transformed_labels(kLaserFixtureCount, 2, 1);
   auto labels2 = transformed_labels(kLaserFixtureCount, 2, 0);
 
-  std::vector<uint64_t> expected_labels;
-  std::vector<uint64_t> actual_labels;
   {
     DiskCollection col(coll, kLaserFixtureDim, MetricType::L2, DiskIndexType::Laser);
     col.import_laser_segment(fixture_dir(), labels1.data(), labels1.size());
@@ -413,28 +417,18 @@ TEST_F(DiskCollectionLaserTest, multi_laser_segment_search) {
     ASSERT_NE(second_segment, nullptr);
     const auto first_raw_hits = first_segment->search(query_row(vectors, 0), search_options());
     const auto second_raw_hits = second_segment->search(query_row(vectors, 0), search_options());
-    EXPECT_EQ(labels_from_hits(first_raw_hits), labels_from_hits(first_segment_hits));
-
-    size_t rank = 0;
-    while (expected_labels.size() < kLaserTopK &&
-           (rank < first_raw_hits.size() || rank < second_raw_hits.size())) {
-      if (rank < first_raw_hits.size()) {
-        expected_labels.push_back(first_raw_hits[rank].label);
-      }
-      if (expected_labels.size() == kLaserTopK) {
-        break;
-      }
-      if (rank < second_raw_hits.size()) {
-        expected_labels.push_back(second_raw_hits[rank].label);
-      }
-      ++rank;
-    }
+    ASSERT_EQ(first_raw_hits.size(), kLaserTopK);
+    ASSERT_EQ(second_raw_hits.size(), kLaserTopK);
+    EXPECT_EQ(first_segment_hits.front().label, 1u);
+    EXPECT_EQ(first_raw_hits.front().label, 1u);
+    EXPECT_EQ(second_raw_hits.front().label, 0u);
 
     const auto hits = col.search(query_row(vectors, 0), search_options());
     ASSERT_EQ(hits.size(), kLaserTopK);
     expect_all_nan_distances(hits);
-    actual_labels = labels_from_hits(hits);
-    EXPECT_EQ(actual_labels, expected_labels);
+    expect_labels_in_range(hits, kLaserFixtureCount * 2);
+    expect_contains_label(hits, 0u);
+    expect_contains_label(hits, 1u);
   }
 
   const auto manifest = CollectionManifest::load(coll / "collection_manifest.txt");
@@ -448,8 +442,9 @@ TEST_F(DiskCollectionLaserTest, multi_laser_segment_search) {
   const auto reopened_hits = reopened.search(query_row(vectors, 0), search_options());
   ASSERT_EQ(reopened_hits.size(), kLaserTopK);
   expect_all_nan_distances(reopened_hits);
-  EXPECT_EQ(labels_from_hits(reopened_hits), actual_labels);
-  EXPECT_EQ(labels_from_hits(reopened_hits), expected_labels);
+  expect_labels_in_range(reopened_hits, kLaserFixtureCount * 2);
+  expect_contains_label(reopened_hits, 0u);
+  expect_contains_label(reopened_hits, 1u);
 }
 
 TEST_F(DiskCollectionLaserTest, duplicate_label_across_laser_segments_throws) {

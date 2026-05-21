@@ -131,6 +131,21 @@ def test_codecov_python_replaces_unit_test_gate_without_upload_flakes() -> None:
     assert upload_step["uses"] == "codecov/codecov-action@v5"
 
 
+def test_codecov_python_logs_laser_simd_selection() -> None:
+    codecov_script = (ROOT / "scripts" / "ci" / "codecov" / "python_coverage_with_crash_diagnostics.sh").read_text(
+        encoding="utf-8"
+    )
+
+    assert "laser_simd=" in codecov_script
+    assert "laser.selected_simd()" in codecov_script
+
+
+def test_codecov_cpp_builds_laser_simd_dispatch_test() -> None:
+    codecov_script = (ROOT / "scripts" / "ci" / "codecov" / "gnu_codecoverage.sh").read_text(encoding="utf-8")
+
+    assert "laser_simd_dispatch_test" in codecov_script
+
+
 def test_codecov_python_build_uses_unit_build_configuration() -> None:
     coverage_build = _named_step(_steps("codecov.yaml", "codecov-python"), "Build Python coverage environment")["run"]
 
@@ -183,6 +198,14 @@ def test_cibuildwheel_builds_portable_package_targets() -> None:
 
     assert "-DALAYA_NATIVE_ARCH=OFF" in cmake_args
     assert "-DBUILD_TOOLS=OFF" in cmake_args
+
+
+def test_cibuildwheel_logs_laser_simd_selection_on_linux_x86() -> None:
+    pyproject_text = PYPROJECT.read_text(encoding="utf-8")
+
+    assert "laser.selected_simd()" in pyproject_text
+    assert "laser_simd=" in pyproject_text
+    assert "is_linux_x86" in pyproject_text
 
 
 def test_ccache_keys_are_versioned_for_portable_isa_reset() -> None:

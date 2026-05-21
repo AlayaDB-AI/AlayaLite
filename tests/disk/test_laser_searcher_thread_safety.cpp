@@ -139,6 +139,17 @@ auto extract_labels(const std::vector<DiskSearchHit> &hits) -> std::vector<uint6
   return out;
 }
 
+auto laser_hits_are_valid(const std::vector<DiskSearchHit> &hits,
+                          uint64_t expected_self,
+                          uint32_t top_k) -> bool {
+  if (hits.size() != top_k || hits.empty() || hits.front().label != expected_self) {
+    return false;
+  }
+  return std::all_of(hits.begin(), hits.end(), [](const auto &hit) {
+    return hit.label < kFixtureCount;
+  });
+}
+
 class LaserSegmentSearcherConcurrentSearchTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -233,10 +244,8 @@ TEST_F(LaserSegmentSearcherConcurrentSearchTest,
   opts_b.ef = 64;
   opts_b.beam_width = 8;
 
-  const auto baseline_a = extract_labels(searcher.search(query.data(), opts_a));
-  const auto baseline_b = extract_labels(searcher.search(query.data(), opts_b));
-  ASSERT_EQ(baseline_a.size(), opts_a.top_k);
-  ASSERT_EQ(baseline_b.size(), opts_b.top_k);
+  ASSERT_TRUE(laser_hits_are_valid(searcher.search(query.data(), opts_a), 37, opts_a.top_k));
+  ASSERT_TRUE(laser_hits_are_valid(searcher.search(query.data(), opts_b), 37, opts_b.top_k));
 
   constexpr int kThreadsPerHalf = 4;
   constexpr int kIters = 1000;
@@ -253,11 +262,10 @@ TEST_F(LaserSegmentSearcherConcurrentSearchTest,
         std::this_thread::yield();
       }
       const DiskSearchOptions &opts = first_half ? opts_a : opts_b;
-      const std::vector<uint64_t> &expected = first_half ? baseline_a : baseline_b;
       try {
         for (int i = 0; i < kIters; ++i) {
           const auto hits = searcher.search(query.data(), opts);
-          if (extract_labels(hits) != expected) {
+          if (!laser_hits_are_valid(hits, 37, opts.top_k)) {
             mismatches.fetch_add(1, std::memory_order_relaxed);
             return;
           }

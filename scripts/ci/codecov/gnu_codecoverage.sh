@@ -34,6 +34,7 @@ COVERAGE_TARGETS=(
   ip_test
   fht_test
   cpu_features_test
+  laser_simd_dispatch_test
   quant_test
   quant_sq8_test
   raw_space_test

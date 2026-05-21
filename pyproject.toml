@@ -100,7 +100,7 @@ skip = ["*-musllinux*", "*-manylinux_i686"]
 before-build = "python {project}/scripts/conan_build/conan_install.py --project-dir {project}"
 container-engine = "docker; create_args: -v ~/.conan2:/root/.conan2"
 test-requires = ["pytest", "pytest-asyncio", "httpx", "fastapi", "pyyaml"]
-test-command = "python -c \"import platform, sys, alayalite; from alayalite import laser, vamana; assert not (sys.platform.startswith('linux') and platform.machine() in {'x86_64', 'AMD64'} and laser.RawIndex is None); print(alayalite.__version__)\""
+test-command = "python -c \"import platform, sys, alayalite; from alayalite import laser, vamana; is_linux_x86 = sys.platform.startswith('linux') and platform.machine() in {'x86_64', 'AMD64'}; assert not (is_linux_x86 and laser.RawIndex is None); simd = laser.selected_simd() if is_linux_x86 else 'not-tested'; print(alayalite.__version__); print(f'laser_simd={simd}', flush=True); assert (not is_linux_x86) or simd in {'avx512', 'avx2'}\""
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"

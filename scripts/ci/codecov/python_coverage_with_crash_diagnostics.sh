@@ -21,6 +21,19 @@ dump_python_environment() {
   echo "::endgroup::"
 }
 
+dump_laser_simd() {
+  echo "::group::LASER SIMD"
+  "$python_bin" - <<'PY' || true
+from alayalite import laser
+
+try:
+    print(f"laser_simd={laser.selected_simd()}", flush=True)
+except Exception as exc:  # noqa: BLE001 - diagnostic only; pytest still owns failure handling.
+    print(f"laser_simd=unavailable ({exc})", flush=True)
+PY
+  echo "::endgroup::"
+}
+
 dump_native_crash() {
   echo "::group::Native crash backtrace"
   shopt -s nullglob
@@ -49,6 +62,7 @@ dump_native_crash() {
 
 ulimit -c unlimited
 sudo sysctl -w "kernel.core_pattern=${PWD}/core.%e.%p" || true
+dump_laser_simd
 
 set +e
 "${pytest_cmd[@]}" 2>&1 | tee "$log_path"

@@ -52,6 +52,21 @@ The `laser` dependency group installs the Python-side runtime needed for
 building/searching Laser indexes (`scikit-learn`, `faiss-cpu`, `psutil`,
 and supporting packages).
 
+## SIMD Dispatch
+
+LASER's handwritten SIMD kernels select their ISA at runtime. A single x86_64
+wheel carries AVX-512F+BW and AVX2+FMA implementations for FastScan,
+approximate-distance conversion, rotation, scalar range scans, and single-vector
+L2 norm. On CPUs with both AVX-512F and AVX-512BW, LASER selects the AVX-512
+path; otherwise it uses AVX2+FMA. AVX2+FMA remains the minimum x86 baseline and
+LASER does not provide a scalar fallback below that baseline.
+
+The baseline `-mavx2 -mfma` flags are still used for Eigen and other
+non-handwritten code. Function-level target attributes do not change Eigen's
+template-selected SIMD path, so PCA matrix-vector work remains tied to the wheel
+baseline even on AVX-512 hosts. The expected impact is limited to that Eigen
+portion of the search path.
+
 ## Python API
 
 Use the unified wrapper for normal code:

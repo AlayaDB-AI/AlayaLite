@@ -36,6 +36,15 @@ TEST(CpuFeaturesTest, GetSimdLevelNameMatchesEachEnum) {
   EXPECT_STREQ(get_simd_level_name(SimdLevel::kAvx512), "AVX-512");
 }
 
+TEST(CpuFeaturesTest, ExposesAvx512BwCapability) {
+  CpuFeatures features;
+  features.avx512f_ = true;
+  features.avx512bw_ = true;
+
+  EXPECT_TRUE(features.avx512f_);
+  EXPECT_TRUE(features.avx512bw_);
+}
+
 TEST(CpuFeaturesTest, RuntimeHelpersStayConsistent) {
   const auto &features = get_cpu_features();
   const auto level = get_simd_level();
@@ -54,6 +63,14 @@ TEST(CpuFeaturesTest, RuntimeHelpersStayConsistent) {
   }
 #else
   EXPECT_EQ(level, SimdLevel::kGeneric);
+#endif
+}
+
+TEST(CpuFeaturesTest, PlatformDefinesLaserAvx512BwTargetAttribute) {
+#ifdef ALAYA_TARGET_AVX512_BW
+  SUCCEED();
+#else
+  FAIL() << "ALAYA_TARGET_AVX512_BW must be available on every platform";
 #endif
 }
 

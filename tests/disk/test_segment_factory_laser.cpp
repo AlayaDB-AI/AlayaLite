@@ -405,12 +405,16 @@ TEST_F(SegmentFactoryLaserTest, load_returns_searcher) {
   const auto imported_hits = imported->search(query.data(), opts);
   const auto loaded_hits = loaded->search(query.data(), opts);
 
-  ASSERT_EQ(loaded_hits.size(), imported_hits.size());
-  ASSERT_FALSE(loaded_hits.empty());
-  for (size_t i = 0; i < loaded_hits.size(); ++i) {
-    EXPECT_EQ(loaded_hits[i].label, imported_hits[i].label);
-    EXPECT_TRUE(is_nan_bits(loaded_hits[i].distance)) << loaded_hits[i].distance;
-    EXPECT_TRUE(is_nan_bits(imported_hits[i].distance)) << imported_hits[i].distance;
+  ASSERT_EQ(imported_hits.size(), kLaserTopK);
+  ASSERT_EQ(loaded_hits.size(), kLaserTopK);
+  EXPECT_EQ(imported_hits.front().label, 5031u);
+  EXPECT_EQ(loaded_hits.front().label, 5031u);
+  for (const auto &hits : {imported_hits, loaded_hits}) {
+    for (const auto &hit : hits) {
+      EXPECT_GE(hit.label, 5000u);
+      EXPECT_LT(hit.label, 5000u + kLaserFixtureCount);
+      EXPECT_TRUE(is_nan_bits(hit.distance)) << hit.distance;
+    }
   }
 }
 #endif

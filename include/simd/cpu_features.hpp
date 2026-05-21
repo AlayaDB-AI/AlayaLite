@@ -16,6 +16,7 @@ namespace alaya::simd {
 // ============================================================================
 struct CpuFeatures {
   bool avx512f_ = false;
+  bool avx512bw_ = false;
   bool avx2_ = false;
   bool fma_ = false;
   bool sse4_1_ = false;
@@ -27,6 +28,9 @@ struct CpuFeatures {
   #if defined(__GNUC__) || defined(__clang__)
     if (__builtin_cpu_supports("avx512f")) {
       features.avx512f_ = true;
+    }
+    if (__builtin_cpu_supports("avx512bw")) {
+      features.avx512bw_ = true;
     }
     if (__builtin_cpu_supports("avx2")) {
       features.avx2_ = true;
@@ -50,6 +54,7 @@ struct CpuFeatures {
     if (max_func >= 7) {
       __cpuidex(cpu_info, 7, 0);
       features.avx512f_ = (cpu_info[1] & (1 << 16)) != 0;
+      features.avx512bw_ = (cpu_info[1] & (1 << 30)) != 0;
       features.avx2_ = (cpu_info[1] & (1 << 5)) != 0;
     }
   #endif

@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- LASER SIMD rotation and scalar range kernels now use unaligned load/store
+  instructions in the runtime-dispatched paths, avoiding potential aligned
+  AVX-512 stores into Eigen buffers that are only 32-byte aligned under the
+  wheel's AVX2 baseline.
 - Disk LASER index now supports `node_per_page_ > 1` (low-dim datasets like
   SIFT-1M); previously refused at construction. Fixes the upstream
   `qg_builder.hpp` write/read page-layout mismatch.
@@ -23,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `neighbor_offset_ > full_page_size` there.
 
 ### Changed
+- LASER handwritten SIMD kernels now use runtime dispatch: wheels keep the
+  AVX2+FMA x86 baseline while selecting AVX-512F+BW kernels automatically on
+  capable hosts.
 - `pybind-dispatch-codegen`: replaced the hand-written
   `python/include/dispatch.hpp` macro dispatch chain with a codegen-driven
   pipeline. Single source of truth lives in `tools/codegen/dispatch.yaml`,

@@ -13,42 +13,17 @@
 
 #pragma once
 
-#include <immintrin.h>
-
-#include <cfloat>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
+
+#include "simd/laser_dispatch.hpp"
 
 namespace alaya::laser::scalar {
 
 /** @brief Computes min/max values of a vector for quantization range. */
 inline void data_range(const float *__restrict__ vec, size_t dim, float &lo, float &hi) {
-#if defined(__AVX512F__)
-  __m512 max_q = _mm512_setzero_ps();
-  __m512 min_q = _mm512_setzero_ps();
-  size_t mul16 = dim - (dim & 0b1111);
-  size_t i;
-  for (i = 0; i < mul16; i += 16) {
-    __m512 y1 = _mm512_load_ps(&vec[i]);
-    max_q = _mm512_max_ps(y1, max_q);
-    min_q = _mm512_min_ps(y1, min_q);
-  }
-  hi = _mm512_reduce_max_ps(max_q);
-  lo = _mm512_reduce_min_ps(min_q);
-  for (i = 0; i < dim; ++i) {
-    float tmp = vec[i];
-    lo = tmp < lo ? tmp : lo;
-    hi = tmp > hi ? tmp : hi;
-  }
-#else
-  lo = FLT_MAX;
-  hi = FLT_MIN;
-  for (size_t i = 0; i < dim; ++i) {
-    float tmp = vec[i];
-    lo = tmp < lo ? tmp : lo;
-    hi = tmp > hi ? tmp : hi;
-  }
-#endif
+  simd::get_data_range_func()(vec, dim, lo, hi);
 }
 
 /**

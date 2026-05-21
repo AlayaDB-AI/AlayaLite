@@ -28,6 +28,7 @@
 
 #include "index/graph/laser/utils/array.hpp"
 #include "index/graph/laser/utils/memory.hpp"
+#include "simd/laser_dispatch.hpp"
 #include "third_party/ffht/fht_avx.hpp"
 
 namespace alaya::laser {
@@ -43,8 +44,6 @@ class FHTRotator {
 
  private:
   std::function<void(float *)> fht_float_ = helper_float_6;
-  size_t iter_ = 0;
-  size_t remain_ = 0;
   size_t dimension_ = 0;
   size_t paded_dim_ = 0;
   data_type mat_;
@@ -67,16 +66,6 @@ class FHTRotator {
       mat_[i] =
           static_cast<float>((2 * bernoulli(gen)) - 1) / std::sqrt(static_cast<float>(paded_dim_));
     }
-#if defined(__AVX512F__)
-    remain_ = dimension_ & 0b1111;
-    iter_ = dimension_ - remain_;
-#elif defined(__AVX2__)
-    remain_ = dimension_ & 0b111;
-    iter_ = dimension_ - remain_;
-#else
-    remain_ = dimension_ & 0b11;
-    iter_ = dimension_ - remain_;
-#endif
     switch (log_b) {
       case 6:
         this->fht_float_ = helper_float_6;
@@ -108,29 +97,10 @@ class FHTRotator {
    * @brief       rotate the scr vector by FHTRotator
    *
    * @param src   raw query vector, length dimension_
-   * @param dst   rotated query vector, length B, must be aligned to 64 bytes
+   * @param dst   rotated query vector, length B
    */
   void rotate(const float *__restrict__ src, float *__restrict__ dst) const {
-    size_t idx = 0;
-#if defined(__AVX512F__)
-    for (; idx < iter_; idx += 16) {
-      __m512 ss = _mm512_loadu_ps(&src[idx]);
-      __m512 mm = _mm512_load_ps(&mat_.at(idx));  // notice alignment requirement
-      ss = _mm512_mul_ps(ss, mm);
-      _mm512_store_ps(&dst[idx], ss);
-    }
-#elif defined(__AVX2__)
-    for (; idx < iter_; idx += 8) {
-      __m256 ss = _mm256_loadu_ps(&src[idx]);
-      __m256 mm = _mm256_load_ps(&mat_.at(idx));
-      ss = _mm256_mul_ps(ss, mm);
-      _mm256_store_ps(&dst[idx], ss);
-    }
-#else
-    for (idx = 0; idx < iter_; ++idx) {
-      dst[idx] = src[idx] * mat_.at(idx);
-    }
-#endif
+    size_t idx = simd::get_rotate_loop_func()(src, mat_.data(), dimension_, dst);
     for (; idx < dimension_; ++idx) {
       dst[idx] = src[idx] * mat_.at(idx);
     }

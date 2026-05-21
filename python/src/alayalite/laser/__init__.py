@@ -104,6 +104,12 @@ def _require_raw_laser():
     return _raw_laser_mod
 
 
+def selected_simd() -> str:
+    """Return the selected LASER handwritten SIMD backend: ``"avx512"`` or ``"avx2"``."""
+
+    return str(_require_raw_laser().selected_simd())
+
+
 def _canonical_metric(metric: str) -> str:
     normalized = str(metric).lower()
     if normalized in {"l2", "euclidean"}:
@@ -453,4 +459,4 @@ class Index:
 RawIndex = _raw_laser_mod.Index if _raw_laser_mod is not None else None
 
 
-__all__ = ["BuildParams", "Index", "RawIndex"]
+__all__ = ["BuildParams", "Index", "RawIndex", "selected_simd"]
