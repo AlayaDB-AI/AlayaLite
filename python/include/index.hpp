@@ -53,6 +53,7 @@
 #include "storage/rocksdb_storage.hpp"
 #include "utils/binary_io.hpp"
 #include "utils/index_encoding.hpp"
+#include "utils/locks.hpp"
 #include "utils/log.hpp"
 #include "utils/metadata_filter.hpp"
 #include "utils/metric_type.hpp"
@@ -257,6 +258,7 @@ class PyIndex : public BasePyIndex {
       return;
     }
 
+    alaya::FileLock snapshot_lock(recovery_manager_->snapshot_lock_path());
     auto snapshot_dir = recovery_manager_->create_snapshot_dir();
     auto snapshot_id = snapshot_dir.filename().string();
 

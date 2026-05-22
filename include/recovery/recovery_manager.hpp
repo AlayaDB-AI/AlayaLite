@@ -4,15 +4,20 @@
 
 #pragma once
 
+#include <atomic>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
 #include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
+#ifndef _WIN32
+  #include <unistd.h>
+#endif
 
 #include "recovery/snapshot_manifest.hpp"
 #include "recovery/write_ahead_log.hpp"
+#include "utils/locks.hpp"
 #include "utils/log.hpp"
 #include "utils/platform_fs.hpp"
 
@@ -65,11 +70,33 @@ class RecoveryManager {
   [[nodiscard]] auto create_snapshot_dir() const -> fs::path {
     ensure_layout();
     auto now = SnapshotManifest::current_unix_ms();
-    std::ostringstream name;
-    name << "snapshot-" << now;
-    auto snapshot_dir = snapshots_dir_ / name.str();
-    fs::create_directories(snapshot_dir);
-    return snapshot_dir;
+    static std::atomic<uint64_t> snapshot_sequence{0};
+#ifdef _WIN32
+    const auto pid = 0;
+#else
+    const auto pid = static_cast<int64_t>(::getpid());
+#endif
+
+    for (int attempt = 0; attempt < 100; ++attempt) {
+      std::ostringstream name;
+      name << "snapshot-" << now << "-" << pid << "-"
+           << snapshot_sequence.fetch_add(1, std::memory_order_relaxed);
+      auto snapshot_dir = snapshots_dir_ / name.str();
+      std::error_code ec;
+      if (fs::create_directory(snapshot_dir, ec)) {
+        return snapshot_dir;
+      }
+      if (ec) {
+        throw std::runtime_error("Failed to create snapshot directory " + snapshot_dir.string() +
+                                 ": " + ec.message());
+      }
+    }
+    throw std::runtime_error("Failed to allocate a unique recovery snapshot directory");
+  }
+
+  [[nodiscard]] auto snapshot_lock_path() const -> fs::path {
+    ensure_layout();
+    return root_dir_ / "SNAPSHOT_LOCK";
   }
 
   // TODO(P2): The snapshot directory is only published after graph files and the RocksDB
@@ -87,6 +114,7 @@ class RecoveryManager {
   auto publish_snapshot(const SnapshotManifest &manifest, const fs::path &snapshot_dir) const
       -> void {
     ensure_layout();
+    validate_snapshot_complete(manifest, snapshot_dir);
     auto manifest_path = snapshot_dir / "manifest.txt";
     write_text_atomically(manifest_path, manifest.serialize());
     write_text_atomically(current_path_, manifest.snapshot_id_ + "\n");
@@ -156,8 +184,10 @@ class RecoveryManager {
    * @brief Replaces the active RocksDB directory with the checkpoint stored in a snapshot.
    *
    * If RocksDB recovery is not configured or the snapshot does not include a checkpoint, the method
-   * exits without modifying the active directory. Existing active contents are removed before the
-   * checkpoint is copied into place.
+   * exits without modifying the active directory. Restore is cross-process serialized and skipped
+   * when the active directory already corresponds to the requested snapshot, so concurrent readers
+   * do not repeatedly delete and recopy the same RocksDB files while other readers are opening
+   * them.
    */
   auto restore_active_rocksdb_from_snapshot(const SnapshotManifest &manifest,
                                             const fs::path &snapshot_dir) const -> void {
@@ -171,15 +201,104 @@ class RecoveryManager {
       return;
     }
 
-    fs::create_directories(active_rocksdb_path_.parent_path());
+    if (active_rocksdb_matches_snapshot(manifest)) {
+      LOG_DEBUG("recovery: active rocksdb already restored from snapshot id={}",
+                manifest.snapshot_id_);
+      return;
+    }
+
+    alaya::FileLock restore_lock(snapshot_lock_path());
+    if (active_rocksdb_matches_snapshot(manifest)) {
+      LOG_DEBUG("recovery: active rocksdb already restored from snapshot id={}",
+                manifest.snapshot_id_);
+      return;
+    }
+
+    auto parent = active_rocksdb_path_.parent_path();
+    if (!parent.empty()) {
+      fs::create_directories(parent);
+    }
+
+    auto staging_path = restore_staging_path();
     std::error_code ec;
-    fs::remove_all(active_rocksdb_path_, ec);
-    ec.clear();
-    copy_directory_recursive(source, active_rocksdb_path_);
+    fs::remove_all(staging_path, ec);
+    if (ec) {
+      throw std::runtime_error("Failed to remove stale RocksDB restore staging directory " +
+                               staging_path.string() + ": " + ec.message());
+    }
+
+    copy_directory_recursive(source, staging_path);
+    publish_staged_rocksdb_restore(staging_path);
+    write_text_atomically(restored_rocksdb_marker_path(), manifest.snapshot_id_ + "\n");
     LOG_INFO("recovery: restored rocksdb checkpoint from {}", source.string());
   }
 
  private:
+  [[nodiscard]] auto restored_rocksdb_marker_path() const -> fs::path {
+    return root_dir_ / "ACTIVE_ROCKSDB_SNAPSHOT";
+  }
+
+  [[nodiscard]] auto restore_staging_path() const -> fs::path {
+    auto staging_path = active_rocksdb_path_;
+    staging_path += ".restore.tmp";
+    return staging_path;
+  }
+
+  [[nodiscard]] auto active_rocksdb_matches_snapshot(const SnapshotManifest &manifest) const
+      -> bool {
+    if (!fs::is_directory(active_rocksdb_path_) || !fs::exists(active_rocksdb_path_ / "CURRENT")) {
+      return false;
+    }
+
+    auto marker = read_text(restored_rocksdb_marker_path());
+    return marker.has_value() && trim(marker.value()) == manifest.snapshot_id_;
+  }
+
+  auto publish_staged_rocksdb_restore(const fs::path &staging_path) const -> void {
+    std::error_code ec;
+    fs::remove_all(active_rocksdb_path_, ec);
+    if (ec) {
+      std::error_code cleanup_ec;
+      fs::remove_all(staging_path, cleanup_ec);
+      throw std::runtime_error("Failed to remove active RocksDB directory " +
+                               active_rocksdb_path_.string() + ": " + ec.message());
+    }
+
+    fs::rename(staging_path, active_rocksdb_path_, ec);
+    if (ec) {
+      std::error_code cleanup_ec;
+      fs::remove_all(staging_path, cleanup_ec);
+      throw std::runtime_error("Failed to publish restored RocksDB directory " +
+                               active_rocksdb_path_.string() + ": " + ec.message());
+    }
+
+    auto parent = active_rocksdb_path_.parent_path();
+    if (!parent.empty()) {
+      platform::sync_directory(parent);
+    }
+  }
+
+  static auto require_snapshot_component(const fs::path &snapshot_dir,
+                                         const std::string &relative_path,
+                                         const char *component_name) -> void {
+    if (relative_path.empty()) {
+      return;
+    }
+    auto component_path = snapshot_dir / relative_path;
+    if (!fs::exists(component_path)) {
+      throw std::runtime_error(std::string("Recovery snapshot is incomplete: missing ") +
+                               component_name + " at " + component_path.string());
+    }
+  }
+
+  static auto validate_snapshot_complete(const SnapshotManifest &manifest,
+                                         const fs::path &snapshot_dir) -> void {
+    require_snapshot_component(snapshot_dir, manifest.graph_file_, "graph snapshot");
+    require_snapshot_component(snapshot_dir, manifest.data_file_, "data snapshot");
+    require_snapshot_component(snapshot_dir, manifest.quant_file_, "quant snapshot");
+    require_snapshot_component(snapshot_dir, manifest.rocksdb_dir_, "RocksDB checkpoint");
+  }
+
   /**
    * @brief Removes stale snapshot directories after a new snapshot is published.
    *
