@@ -87,7 +87,7 @@ class PyIndex : public BasePyIndex {
                                       const SearchInfo &search_info,
                                       const MetadataFilter &filter,
                                       bool brute_force_requested,
-                                      std::string *item_ids) const {
+                                      std::string *item_ids) {
     if (materialized_view_manager_
             .try_hybrid_search(query, ids, search_info, filter, brute_force_requested, item_ids)) {
       return;
@@ -130,7 +130,7 @@ class PyIndex : public BasePyIndex {
                                            SearchInfo search_info,
                                            const MetadataFilter &filter,
                                            bool brute_force_requested,
-                                           std::string *item_ids) const -> coro::task<> {
+                                           std::string *item_ids) -> coro::task<> {
     execute_hybrid_search_dispatch(query,
                                    ids,
                                    search_info,

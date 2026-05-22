@@ -18,6 +18,7 @@ from ._alayalitepy import IndexParams as _IndexParams
 from .common import (
     IDType,
     VectorDType,
+    _assert,
     assert_valid_index_type,
     assert_valid_metric_type,
     assert_valid_quantization_type,
@@ -47,6 +48,7 @@ class IndexParams:
     max_nbrs: int = None
     build_threads: Optional[int] = None
     materialized_view_build_threads: Optional[int] = None
+    materialized_view_mode: str = "eager"
     rocksdb_path: str = ""  # Path for RocksDB storage (for scalar data)
     has_scalar_data: bool = False  # Whether to enable scalar data storage
     indexed_fields: list = None  # Fields to create secondary indexes for (for fast filtering)
@@ -89,6 +91,11 @@ class IndexParams:
         max_nbrs = valid_max_nbrs(self.max_nbrs)
         build_threads = valid_thread_count(self.build_threads)
         materialized_view_build_threads = valid_thread_count(self.materialized_view_build_threads)
+        materialized_view_mode = str(self.materialized_view_mode or "eager").strip().lower()
+        _assert(
+            materialized_view_mode in ("off", "lazy", "eager"),
+            "materialized_view_mode must be one of: 'off', 'lazy', 'eager'",
+        )
 
         return _IndexParams(
             index_type_=native_index_type,
@@ -100,6 +107,7 @@ class IndexParams:
             max_nbrs_=max_nbrs,
             build_threads_=build_threads or 0,
             materialized_view_build_threads_=materialized_view_build_threads or 0,
+            materialized_view_mode_=materialized_view_mode,
             rocksdb_path_=self.rocksdb_path if self.rocksdb_path else "",
             has_scalar_data_=self.has_scalar_data,
             indexed_fields_=self.indexed_fields if self.indexed_fields else [],
@@ -116,6 +124,7 @@ class IndexParams:
             "max_nbrs": self.max_nbrs,
             "build_threads": self.build_threads,
             "materialized_view_build_threads": self.materialized_view_build_threads,
+            "materialized_view_mode": self.materialized_view_mode,
             "rocksdb_path": self.rocksdb_path,
             "has_scalar_data": self.has_scalar_data,
             "indexed_fields": self.indexed_fields if self.indexed_fields else [],
@@ -134,6 +143,7 @@ class IndexParams:
             max_nbrs=data["max_nbrs"],
             build_threads=data.get("build_threads") or None,
             materialized_view_build_threads=data.get("materialized_view_build_threads") or None,
+            materialized_view_mode=data.get("materialized_view_mode", "eager"),
             rocksdb_path=data.get("rocksdb_path", ""),
             has_scalar_data=data.get("has_scalar_data", False),  # Default to False for backward compatibility
             indexed_fields=data.get("indexed_fields", []),  # Default to empty list for backward compatibility
@@ -150,6 +160,7 @@ class IndexParams:
         max_nbrs = None
         build_threads = None
         materialized_view_build_threads = None
+        materialized_view_mode = "eager"
         rocksdb_path = ""
         indexed_fields = None
 
@@ -177,6 +188,8 @@ class IndexParams:
             build_threads = valid_thread_count(kwargs.get("build_threads"))
         if kwargs.get("materialized_view_build_threads") is not None:
             materialized_view_build_threads = valid_thread_count(kwargs.get("materialized_view_build_threads"))
+        if kwargs.get("materialized_view_mode") is not None:
+            materialized_view_mode = str(kwargs.get("materialized_view_mode")).strip().lower()
         if kwargs.get("rocksdb_path") is not None:
             rocksdb_path = str(kwargs.get("rocksdb_path"))
         if kwargs.get("indexed_fields") is not None:
@@ -191,6 +204,7 @@ class IndexParams:
             max_nbrs=max_nbrs,
             build_threads=build_threads,
             materialized_view_build_threads=materialized_view_build_threads,
+            materialized_view_mode=materialized_view_mode,
             rocksdb_path=rocksdb_path,
             indexed_fields=indexed_fields,
         )

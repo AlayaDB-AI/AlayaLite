@@ -26,6 +26,7 @@ struct IndexParams {
   uint32_t max_nbrs_ = 32;
   uint32_t build_threads_ = 0;
   uint32_t materialized_view_build_threads_ = 0;
+  std::string materialized_view_mode_ = "eager";
   std::string rocksdb_path_ = "";            // Path for RocksDB storage (for scalar data)
   bool has_scalar_data_ = false;             // Whether to enable scalar data storage
   std::vector<std::string> indexed_fields_;  // Fields to create secondary indexes for
@@ -39,6 +40,7 @@ struct IndexParams {
               uint32_t max_nbrs = 32,
               uint32_t build_threads = 0,
               uint32_t materialized_view_build_threads = 0,
+              std::string materialized_view_mode = "eager",
               std::string rocksdb_path = "",
               bool has_scalar_data = false,
               std::vector<std::string> indexed_fields = {})
@@ -51,6 +53,7 @@ struct IndexParams {
         max_nbrs_(max_nbrs),
         build_threads_(build_threads),
         materialized_view_build_threads_(materialized_view_build_threads),
+        materialized_view_mode_(std::move(materialized_view_mode)),
         rocksdb_path_(std::move(rocksdb_path)),
         has_scalar_data_(has_scalar_data),
         indexed_fields_(std::move(indexed_fields)) {}

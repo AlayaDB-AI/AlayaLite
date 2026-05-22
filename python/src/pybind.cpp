@@ -135,6 +135,7 @@ PYBIND11_MODULE(_alayalitepy, m) {
                     uint32_t,
                     uint32_t,
                     std::string,
+                    std::string,
                     bool,
                     std::vector<std::string>>(),
            py::arg("index_type_") = alaya::IndexType::HNSW,
@@ -146,6 +147,7 @@ PYBIND11_MODULE(_alayalitepy, m) {
            py::arg("max_nbrs_") = 32,
            py::arg("build_threads_") = 0,
            py::arg("materialized_view_build_threads_") = 0,
+           py::arg("materialized_view_mode_") = "eager",
            py::arg("rocksdb_path_") = "",
            py::arg("has_scalar_data_") = false,
            py::arg("indexed_fields_") = std::vector<std::string>{})
@@ -159,6 +161,7 @@ PYBIND11_MODULE(_alayalitepy, m) {
       .def_readwrite("build_threads_", &alaya::IndexParams::build_threads_)
       .def_readwrite("materialized_view_build_threads_",
                      &alaya::IndexParams::materialized_view_build_threads_)
+      .def_readwrite("materialized_view_mode_", &alaya::IndexParams::materialized_view_mode_)
       .def_readwrite("rocksdb_path_", &alaya::IndexParams::rocksdb_path_)
       .def_readwrite("has_scalar_data_", &alaya::IndexParams::has_scalar_data_)
       .def_readwrite("indexed_fields_", &alaya::IndexParams::indexed_fields_);
