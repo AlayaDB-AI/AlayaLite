@@ -174,6 +174,32 @@ omitted from the Windows compiler line.
   on-disk page layout and is superset-acceptable for both 512n and 4Kn
   drives. Consumer code does not need to special-case any backend.
 
+- **`num_threads` only controls query parallelism, not I/O fan-out**
+  (thread-pool backend — macOS default, portable Linux fallback). The
+  `Index.set_params(num_threads=N)` knob bounds the OpenMP loop that
+  dispatches queries (`#pragma omp parallel for` over the query batch).
+  Each query's per-page disk reads then fan out to a backend-owned I/O
+  worker pool sized `min(MAX_IO_DEPTH=128, 2 * hardware_concurrency)`,
+  which is **independent** from `num_threads`. So on an 8-core mac,
+  `set_params(num_threads=1)` still uses up to 16 I/O worker threads
+  for one query's beam search — the measured QPS is higher than a
+  "truly single-thread" baseline. Linux libaio does not have this
+  asymmetry: a single query thread there gets a single io_context with
+  kernel-async inflight requests; no user-space I/O workers.
+
+  Override the I/O pool via the `ALAYA_LASER_IO_THREADS` env var (see
+  the build-flags section above). For a strict single-thread benchmark,
+  set `ALAYA_LASER_IO_THREADS=1`; to match libaio's per-thread
+  MAX_IO_DEPTH ceiling, set it to `128`.
+
+  *Planned follow-up*: the thread-pool backend will be reworked so that
+  `set_params(num_threads=N)` also caps the I/O worker pool to `N`
+  (and the env var becomes an explicit override). This will make the
+  macOS / portable backend's `num_threads` semantics match libaio, so
+  cross-backend QPS comparisons at the same `num_threads` are
+  apples-to-apples. Tracking under a separate change in
+  `openspec/changes/`.
+
 ## Python API
 
 Use the unified wrapper for normal code:
