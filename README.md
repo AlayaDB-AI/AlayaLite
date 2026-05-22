@@ -70,6 +70,27 @@ recall = calc_recall(result, gt)
 print(recall)
 ```
 
+### Hybrid search in Collection: quick start
+
+Use `Collection` when you want ANN results together with document IDs,
+documents, and metadata filters.
+
+```python
+collection = client.create_collection("docs", indexed_fields=["category"])
+collection.insert([
+    ("doc-1", "Vector database overview", vectors[0], {"category": "database"}),
+    ("doc-2", "Cooking notes", vectors[1], {"category": "life"}),
+])
+
+result = collection.hybrid_query(
+    vectors=[vectors[0]],
+    limit=1,
+    metadata_filter={"category": "database"},
+    ef_search=10,
+)
+print(result["id"][0])
+```
+
 ### LASER on-disk index: quick start
 
 For datasets that exceed RAM, the **LASER** on-disk Quantized Graph index keeps
@@ -151,6 +172,16 @@ open `-march=native` in your `CMakeLists.txt` to reproduce the results).
 |     ![Fashion-MNIST	784 Euclidean](https://raw.githubusercontent.com/AlayaDB-AI/AlayaLite/main/.assets/fashion-mnist-784-euclidean.png)     |    ![Gist 960 Euclidean](https://raw.githubusercontent.com/AlayaDB-AI/AlayaLite/main/.assets/gist-960-euclidean.png)    |
 | :---------------------------------------------------------: | :-----------------------------------------------------------: |
 | <div style="text-align: center;">**Fashion-MNIST	784 Euclidean**</div> | <div style="text-align: center;">**Gist 960 Euclidean**</div> |
+
+The same in-memory path powers `Collection` hybrid search when metadata filters
+are involved. We evaluate this filtered retrieval workflow using
+[VectorDBBench](https://github.com/zilliztech/VectorDBBench); the following
+results report QPS under integer and string-equality filters at 0.1%
+selectivity.
+
+|     ![INT 0.1% selectivity QPS](./.assets/int-0p1p_qps_c1_c80.png)     |    ![String equality 0.1% selectivity QPS](./.assets/strequ-0p1p_qps_c1_c80.png)    |
+| :---------------------------------------------------------: | :-----------------------------------------------------------: |
+| <div style="text-align: center;">**INT Filter, 0.1% Selectivity**</div> | <div style="text-align: center;">**String Equality Filter, 0.1% Selectivity**</div> |
 
 ### On-disk LASER vs. other large-scale systems
 
