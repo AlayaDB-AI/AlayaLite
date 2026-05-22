@@ -46,10 +46,8 @@ namespace fs = std::filesystem;
 
 #ifdef _WIN32
 using native_fd_t = HANDLE;
-inline constexpr native_fd_t kInvalidFd = nullptr;
 #else
 using native_fd_t = int;
-inline constexpr native_fd_t kInvalidFd = -1;
 #endif
 
 // Process id wrapper. POSIX `getpid()` returns `pid_t` (commonly 32-bit);

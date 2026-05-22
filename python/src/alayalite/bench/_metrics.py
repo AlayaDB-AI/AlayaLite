@@ -22,11 +22,6 @@ from typing import Iterable, Optional
 
 import numpy as np
 
-if sys.platform == "win32":
-    import psutil
-else:
-    import resource
-
 SCHEMA_VERSION = 1
 
 
@@ -76,9 +71,16 @@ def segment_count(col_path: Path) -> int:
 
 def peak_rss_kb_and_unit() -> tuple[int, str]:
     if sys.platform == "win32":
+        # Lazy import: psutil lives in the optional `laser` extras, so importing
+        # at module scope would break `from alayalite.bench import _metrics` on
+        # a default Windows install.
+        import psutil  # pylint: disable=import-outside-toplevel
+
         info = psutil.Process().memory_info()
         peak_bytes = int(getattr(info, "peak_wset", info.rss))
         return int((peak_bytes + 1023) // 1024), "bytes_converted_to_kb"
+    import resource  # pylint: disable=import-outside-toplevel
+
     rss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
     if sys.platform == "darwin":
         return int((rss + 1023) // 1024), "bytes_converted_to_kb"

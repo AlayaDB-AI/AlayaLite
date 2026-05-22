@@ -56,6 +56,13 @@ else()
   set(ALAYA_LASER_USE_IOCP_DEFAULT OFF)
 endif()
 option(ALAYA_LASER_USE_IOCP "Use the Windows IOCP LASER I/O backend" ${ALAYA_LASER_USE_IOCP_DEFAULT})
+if(ALAYA_LASER_USE_IOCP AND NOT (CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64"
+                                )
+)
+  message(FATAL_ERROR "ALAYA_LASER_USE_IOCP=ON requires Windows AMD64/x86_64. On other platforms use "
+                      "-DALAYA_LASER_USE_THREADPOOL=ON or the libaio default."
+  )
+endif()
 
 # ============================================================================
 # Build accelerators: ccache + fast linker (auto-detected)

@@ -252,9 +252,12 @@ class IOCPFileReader : public AlignedFileReader {
   void open(const std::string &fname) override {
     close();
 
-    // Convert UTF-8 path to wide-char for CreateFileW. The caller passes
-    // path strings from std::filesystem::path::string() which is UTF-8 on
-    // both POSIX and Windows under MSVC 19.30+.
+    // Convert the narrow path to wide-char for CreateFileW. `fname` is
+    // assumed ASCII: MSVC's `std::filesystem::path::string()` uses
+    // CP_THREAD_ACP, not UTF-8, so a non-ASCII path would be decoded
+    // incorrectly here. Non-ASCII paths on Windows require extending
+    // the AlignedFileReader interface to accept `std::filesystem::path`
+    // and forwarding `path::c_str()` (wide) directly.
     int wide_len = ::MultiByteToWideChar(CP_UTF8, 0, fname.c_str(), -1, nullptr, 0);
     if (wide_len <= 0) {
       throw std::runtime_error("IOCPFileReader::open: invalid UTF-8 in path: " + fname);
