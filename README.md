@@ -14,7 +14,7 @@
   <a href="https://github.com/AlayaDB-AI/AlayaLite/blob/main/LICENSE"><img height="20" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="LICENSE"></a>
   <a href="https://codecov.io/github/AlayaDB-AI/AlayaLite"><img height="20" src="https://codecov.io/github/AlayaDB-AI/AlayaLite/graph/badge.svg?token=KA6V0DHHUU" alt="codecov"></a>
   <a href="https://github.com/AlayaDB-AI/AlayaLite/actions/workflows/code-checker.yaml"><img height="20" src="https://github.com/AlayaDB-AI/AlayaLite/actions/workflows/code-checker.yaml/badge.svg?branch=main" alt="CI"></a>
-  <a href="https://discord.gg/AtRJNh4w5"><img height="20" src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
+  <a href="https://discord.gg/ReEHqSx97"><img height="20" src="https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
   <a href="https://x.com/home"><img height="20" src="https://img.shields.io/badge/X-Follow-000000?logo=x&logoColor=white" alt="X"></a>
 </div>
 
