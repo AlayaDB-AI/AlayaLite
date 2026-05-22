@@ -111,6 +111,10 @@ def test_laser_perf_summary_and_aggregate_lines(tmp_path: Path) -> None:
             "label": label,
             "platform": platform_info,
             "backend": backend,
+            "build_phase": {
+                "build_wall_s": 1.5,
+                "build_rss_increment_kb": 8192,
+            },
             "dataset": {
                 "distribution": "synthetic_gmm_l2norm",
                 "n": 256,
@@ -139,6 +143,10 @@ def test_laser_perf_summary_and_aggregate_lines(tmp_path: Path) -> None:
                 "median_disk_collection_p99_us": 900.0,
                 "median_laser_api_p50_us": 250.0,
                 "median_laser_api_p95_us": 400.0,
+                "median_laser_api_p99_us": 450.0,
+                "median_laser_api_recall_at_10": 0.98,
+                "median_disk_collection_recall_at_10": 0.97,
+                "median_query_peak_rss_kb": 65536,
                 "median_recall_delta": 0.0,
                 "max_abs_recall_delta": 0.01,
             },
@@ -155,6 +163,9 @@ def test_laser_perf_summary_and_aggregate_lines(tmp_path: Path) -> None:
                     "laser_api_p50_us": 250.0,
                     "laser_api_p95_us": 400.0,
                     "laser_api_p99_us": 450.0,
+                    "laser_api_recall_at_10": 0.98,
+                    "disk_collection_recall_at_10": 0.97,
+                    "query_peak_rss_kb": 65536,
                     "p50_delta_us": 250.0,
                     "p95_delta_us": 400.0,
                     "p99_delta_us": 450.0,
@@ -178,14 +189,20 @@ def test_laser_perf_summary_and_aggregate_lines(tmp_path: Path) -> None:
 
     single_lines = helper._single_summary_lines(macos_result)  # pylint: disable=protected-access
     assert "## LASER Cross-platform Benchmark (Darwin / arm64)" in single_lines
-    assert "| Backend | `threadpool` |" in single_lines
-    assert any("LASER Python API" in line and "60.000" not in line for line in single_lines)
-    # The 60.0 dc_qps surfaces in the DiskCollection row.
-    assert any("DiskCollection" in line and "60.000" in line for line in single_lines)
-    # p50 / p95 latency rendered.
-    assert any("p50" in line and "500" in line for line in single_lines)
-    assert any("p95" in line and "800" in line for line in single_lines)
-    assert any("Max abs recall delta" in line and "0.0100" in line for line in single_lines)
+    # Header carries label/backend/dataset shape in one line.
+    assert any("macos-threadpool-arm64" in line and "threadpool" in line for line in single_lines)
+    # recall@10 row has `collection(native)` pair -- DC 0.97, native 0.98.
+    assert any("recall@10" in line and "0.970" in line and "0.980" in line for line in single_lines)
+    # QPS row: DC 60, native 120 (in `dc_qps * 2` pattern).
+    assert any(line.startswith("| QPS |") and "60.0" in line and "120.0" in line for line in single_lines)
+    # Latency p50/p95/p99 expressed in ms with collection(native).
+    assert any("p50 (ms)" in line and "0.50" in line and "0.25" in line for line in single_lines)
+    assert any("p95 (ms)" in line and "0.80" in line and "0.40" in line for line in single_lines)
+    assert any("p99 (ms)" in line and "0.90" in line and "0.45" in line for line in single_lines)
+    # Build + query memory rows.
+    assert any("build wall (s)" in line and "1.5" in line for line in single_lines)
+    assert any("build RSS" in line and "8.0" in line for line in single_lines)  # 8192 KB = 8.0 MB
+    assert any("query peak RSS" in line and "64.0" in line for line in single_lines)  # 65536 KB = 64.0 MB
 
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
