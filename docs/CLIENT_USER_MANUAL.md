@@ -1,6 +1,6 @@
 # AlayaLite Client User Guide
 
-This guide is based on `python/src/alayalite/client.py`, the main Python entry point for managing AlayaLite objects.
+This guide is based on [`python/src/alayalite/client.py`](https://github.com/AlayaDB-AI/AlayaLite/blob/main/python/src/alayalite/client.py), the main Python entry point for managing AlayaLite objects.
 
 `Client` manages two kinds of objects:
 
@@ -107,7 +107,7 @@ ids, distances = index.batch_search_with_distance(queries, topk=2, ef_search=50,
 
 ## LASER On-Disk ANN
 
-LASER is AlayaLite's on-disk Quantized Graph index for large-scale ANN search. It is not created through `Client.create_index(...)`; use the dedicated `alayalite.laser` API instead:
+LASER is AlayaLite's on-disk Quantized Graph index for large-scale ANN search. It is not created through `Client.create_index(...)`; use the dedicated `alayalite.laser` API instead. For full build and tuning details, see [LASER.md](https://github.com/AlayaDB-AI/AlayaLite/blob/main/docs/LASER.md).
 
 ```python
 from alayalite.laser import BuildParams, Index
@@ -317,7 +317,7 @@ idx.set_params(
 
 ### CLI
 
-`examples/laser/main.py` provides a TOML-driven build/search CLI:
+[`examples/laser/main.py`](https://github.com/AlayaDB-AI/AlayaLite/blob/main/examples/laser/main.py) provides a TOML-driven build/search CLI:
 
 ```bash
 # Build and search

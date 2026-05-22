@@ -31,8 +31,8 @@
 
 ## Documentation
 
-- [Client User Guide](docs/CLIENT_USER_MANUAL.md)
-- [LASER Guide](docs/LASER.md)
+- [Client User Guide](https://github.com/AlayaDB-AI/AlayaLite/blob/main/docs/CLIENT_USER_MANUAL.md)
+- [LASER Guide](https://github.com/AlayaDB-AI/AlayaLite/blob/main/docs/LASER.md)
 
 ## Quick Start
 
@@ -107,7 +107,7 @@ LASER is available on Linux x86_64 (libaio backend, default), macOS
   the **Desktop development with C++** workload installed; MSVC provides the
   OpenMP runtime used by LASER.
 
-See [`docs/LASER.md`](https://github.com/AlayaDB-AI/AlayaLite/blob/main/docs/LASER.md) for build flags, tuning notes, and the
+See [LASER.md](https://github.com/AlayaDB-AI/AlayaLite/blob/main/docs/LASER.md) for build flags, tuning notes, and the
 TOML-driven CLI.
 
 LASER `Index.fit` pulls in PCA / k-means / progress-bar helpers (`scikit-learn`,
@@ -129,7 +129,7 @@ from alayalite.laser import BuildParams, Index
 from alayalite.utils import calc_gt, calc_recall
 
 # Smoke-scale demo (~10-20s end-to-end on a modern laptop). Tuning details,
-# paper-aligned configs and the on-disk layout live in docs/LASER.md.
+# paper-aligned configs and the on-disk layout are covered in the LASER guide above.
 output_dir = "/tmp/alaya_laser"
 shutil.rmtree(output_dir, ignore_errors=True)
 
@@ -164,7 +164,7 @@ print(f"QPS:       {len(queries) / elapsed:.1f}  ({len(queries)} queries in {ela
 # idx = Index.from_prefix("/tmp/alaya_laser/demo", dram_budget_gb=2.0)
 ```
 
-LASER requires a LASER-enabled build. See the [LASER Guide](docs/LASER.md) for platform requirements and build options.
+LASER requires a LASER-enabled build. See the [LASER Guide](https://github.com/AlayaDB-AI/AlayaLite/blob/main/docs/LASER.md) for platform requirements and build options.
 
 ## Benchmark
 
@@ -187,9 +187,9 @@ are involved. We evaluate this filtered retrieval workflow using
 **Medium Cohere** dataset (1M vectors, 768 dimensions). The following results
 report QPS under 0.1% selectivity filters at concurrency 1 and 80.
 
-![Integer filter 0.1% selectivity QPS](./.assets/int-0p1p_qps_c1_c80.png)
+![Integer filter 0.1% selectivity QPS](https://raw.githubusercontent.com/AlayaDB-AI/AlayaLite/main/.assets/int-0p1p_qps_c1_c80.png)
 
-![String equality filter 0.1% selectivity QPS](./.assets/strequ-0p1p_qps_c1_c80.png)
+![String equality filter 0.1% selectivity QPS](https://raw.githubusercontent.com/AlayaDB-AI/AlayaLite/main/.assets/strequ-0p1p_qps_c1_c80.png)
 
 ### On-disk LASER vs. other large-scale systems
 
