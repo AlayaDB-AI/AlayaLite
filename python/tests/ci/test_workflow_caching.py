@@ -173,6 +173,7 @@ def test_codecov_workflow_keeps_coverage_trigger_scope() -> None:
         "cmake/**",
         "scripts/ci/codecov/**",
         "scripts/conan_build/**",
+        "codecov.yml",
     ]
 
     assert triggers is not None
