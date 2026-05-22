@@ -117,6 +117,39 @@ def _canonical_metric(metric: str) -> str:
     raise ValueError(f"LASER supports metric='l2' only, got {metric!r}")
 
 
+def _require_laser_extras() -> None:
+    """Verify the optional LASER runtime extras are importable.
+
+    `_pca.py` and `_medoid.py` are imported lazily by ``Index.fit`` and pull in
+    ``scikit-learn``, ``faiss-cpu``, and ``tqdm``. These are declared in the
+    ``[project.optional-dependencies].laser`` extra (PEP 621) so the base
+    ``pip install alayalite`` stays lean. If a user reaches ``Index.fit``
+    without installing the extra, we want a single actionable error instead of
+    a bare ``ModuleNotFoundError`` from deep inside the build pipeline.
+    """
+    missing: list[str] = []
+    for module_name, extra_pkg in (
+        ("sklearn", "scikit-learn"),
+        ("faiss", "faiss-cpu"),
+        ("tqdm", "tqdm"),
+    ):
+        try:
+            __import__(module_name)
+        except ImportError:
+            missing.append(extra_pkg)
+    if missing:
+        # pylint: disable=inconsistent-quotes  # ruff format prefers single quotes
+        # around strings containing double quotes; the join separator below is a
+        # genuine f-string interpolation and not a style miss.
+        raise ImportError(
+            "LASER Index.fit() requires the optional [laser] extras "
+            f"(missing: {', '.join(missing)}). Install with one of:\n"
+            '    pip install "alayalite[laser]"\n'
+            '    uv pip install "alayalite[laser]"    # if using uv\n'
+            '    uv add "alayalite[laser]"            # in a uv project'
+        )
+
+
 def _effective_threads(num_threads: int) -> int:
     if int(num_threads) > 0:
         return int(num_threads)
@@ -226,6 +259,7 @@ class Index:
         path may print ``Warning: PCA file not found: ...`` to stderr; this is
         expected behaviour.
         """
+        _require_laser_extras()
         bp = build_params if build_params is not None else BuildParams()
         metric = _canonical_metric(bp.metric)
         output = Path(output_dir)

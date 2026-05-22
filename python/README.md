@@ -10,7 +10,11 @@ This page introduces the Python interfaces in AlayaLite, which include two layer
 
 For the LASER on-disk QG path, use `alayalite.laser.Index.fit(...)` as the
 single entrypoint for build + optional load. All build-time hyperparameters
-live on the `BuildParams` dataclass:
+live on the `BuildParams` dataclass.
+
+`Index.fit` requires the optional `[laser]` runtime extras (`scikit-learn`,
+`faiss-cpu`, `tqdm`); install with `pip install 'alayalite[laser]'` (or
+`uv pip install 'alayalite[laser]'`) on top of the base wheel.
 
 ```python
 import numpy as np

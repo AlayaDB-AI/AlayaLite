@@ -23,6 +23,22 @@ dependencies = [
     "pandas>=1.3.3",
 ]
 
+# Runtime extras for `pip install alayalite[<extra>]`. dependency-groups below
+# (PEP 735) are uv-only and do NOT install for pip / pip-tools consumers.
+[project.optional-dependencies]
+# Minimum set the LASER fit/search Python path imports at runtime:
+#   - scikit-learn  -> alayalite.laser._pca (IncrementalPCA)
+#   - faiss-cpu     -> alayalite.laser._medoid (kmeans)
+#   - tqdm          -> alayalite.laser._pca (progress bar)
+# Dev-only extras (matplotlib, psutil, tomli for examples/laser CLI) stay in
+# the `laser` dependency-group below; this extra only covers what `import
+# alayalite.laser` and `Index.fit(...)` need.
+laser = [
+    "scikit-learn>=1.3",
+    "faiss-cpu>=1.7",
+    "tqdm>=4.65",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/AlayaDB-AI/AlayaLite"
 

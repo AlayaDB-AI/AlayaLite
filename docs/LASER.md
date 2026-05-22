@@ -66,6 +66,20 @@ The `laser` dependency group installs the Python-side runtime needed for
 building/searching Laser indexes (`scikit-learn`, `faiss-cpu`, `psutil`,
 and supporting packages).
 
+Wheel consumers (people installing the published `alayalite` wheel rather
+than working in this repo) should use the PEP 621 `[laser]` extra instead,
+since dependency-groups (PEP 735) are uv-only:
+
+```bash
+pip install 'alayalite[laser]'
+# or, with uv outside a project:
+uv pip install 'alayalite[laser]'
+```
+
+The `[laser]` extra only covers the runtime imports of `alayalite.laser`
+(`scikit-learn`, `faiss-cpu`, `tqdm`). Examples / CLI / plotting tooling
+(matplotlib, psutil, tomli backport) stay in the dev-only `laser` group.
+
 On macOS, install OpenMP before configuring:
 
 ```bash

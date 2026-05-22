@@ -34,7 +34,10 @@
 
 Get started with just one command!
 ```bash
-pip install alayalite # install the python package.
+pip install alayalite             # with pip
+# or
+uv pip install alayalite          # with uv (standalone)
+uv add alayalite                  # in a uv-managed project
 ```
 
 
@@ -78,6 +81,16 @@ LASER is available on Linux x86_64 (libaio backend, default), macOS
 need `libaio` headers — `sudo apt-get install libaio-dev` on Debian/Ubuntu.
 See [`docs/LASER.md`](./docs/LASER.md) for build flags, tuning notes, and the
 TOML-driven CLI.
+
+LASER `Index.fit` pulls in PCA / k-means / progress-bar helpers (`scikit-learn`,
+`faiss-cpu`, `tqdm`), which are declared as the `[laser]` extra so the base
+install stays lean. Install them on top of the base wheel:
+
+```bash
+pip install 'alayalite[laser]'
+# or, with uv:
+uv pip install 'alayalite[laser]'
+```
 
 ```python
 from alayalite.laser import BuildParams, Index

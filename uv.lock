@@ -16,6 +16,16 @@ dependencies = [
     { name = "pandas" },
 ]
 
+[package.optional-dependencies]
+laser = [
+    { name = "faiss-cpu", version = "1.13.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "faiss-cpu", version = "1.13.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "scikit-learn", version = "1.6.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.10.*'" },
+    { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "tqdm" },
+]
+
 [package.dev-dependencies]
 api = [
     { name = "fastapi" },
@@ -82,7 +92,13 @@ test = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pandas", specifier = ">=1.3.3" }]
+requires-dist = [
+    { name = "faiss-cpu", marker = "extra == 'laser'", specifier = ">=1.7" },
+    { name = "pandas", specifier = ">=1.3.3" },
+    { name = "scikit-learn", marker = "extra == 'laser'", specifier = ">=1.3" },
+    { name = "tqdm", marker = "extra == 'laser'", specifier = ">=4.65" },
+]
+provides-extras = ["laser"]
 
 [package.metadata.requires-dev]
 api = [
