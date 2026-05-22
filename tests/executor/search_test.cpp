@@ -73,9 +73,7 @@ struct ScopedTempDbDir {
   std::filesystem::path path_;
 };
 
-auto max_thread_num() -> uint32_t {
-  return configured_thread_limit();
-}
+auto max_thread_num() -> uint32_t { return configured_thread_limit(); }
 
 auto make_test_metadata(uint32_t item_cnt) -> std::vector<ScalarData> {
   std::vector<ScalarData> metadata(item_cnt);
@@ -212,7 +210,8 @@ auto run_parallel_search(SearchJobPtr &search_job, Dataset &ds, uint32_t topk, u
   Timer timer{};
   std::vector<std::vector<uint32_t>> res_pool(ds.query_num_, std::vector<uint32_t>(topk));
   const size_t search_thread_num =
-      std::min<size_t>(cap_thread_count(16), std::max<size_t>(1, static_cast<size_t>(ds.query_num_)));
+      std::min<size_t>(cap_thread_count(16),
+                       std::max<size_t>(1, static_cast<size_t>(ds.query_num_)));
   std::vector<std::thread> tasks(search_thread_num);
 
   auto search_knn = [&](uint32_t i) {
@@ -825,6 +824,44 @@ TEST(GraphHybridSearchJobUnitTest, FilterMatchingAllRowsFallsBackToPlainSearch) 
   space->close_db();
 }
 
+TEST(GraphHybridSearchJobUnitTest, SimpleIndexedBitsetPlanDoesNotMaterializeCandidateIds) {
+  ScopedTempDbDir db_dir("hybrid_direct_bitset");
+  auto space = make_one_dim_scalar_space({10.0F, 11.0F, 12.0F, 0.0F, 1.0F}, db_dir.path_, {"id"});
+  auto graph = make_graph_from_edges({{1, 2}, {2}, {}, {4}, {}});
+  using HybridJobType = GraphHybridSearchJob<RawSpaceWithScalarType>;
+  HybridJobType hybrid_job(space, graph, space);
+
+  MetadataFilter filter;
+  filter.add_ge("id", static_cast<int64_t>(1));
+
+  auto plan =
+      hybrid_job.prepare_hybrid_search_plan(filter, SearchInfo{1, 1, FilterExecHint::kAuto});
+  EXPECT_EQ(plan.mode_, HybridJobType::Mode::kBitsetPrefilter);
+  ASSERT_TRUE(plan.prefilter_result_.has_value());
+  EXPECT_EQ(plan.prefilter_result_->matched_count_, 4U);
+  EXPECT_FALSE(plan.filter_executor_.has_index_fast_path());
+  EXPECT_TRUE(plan.filter_executor_.indexed_ids().empty());
+  space->close_db();
+}
+
+TEST(GraphHybridSearchJobUnitTest, CostModelUsesIndexedExactWhenCandidatesFitWithinEf) {
+  ScopedTempDbDir db_dir("hybrid_cost_model_exact");
+  auto space = make_one_dim_scalar_space({10.0F, 11.0F, 12.0F, 0.0F, 1.0F}, db_dir.path_, {"id"});
+  auto graph = make_graph_from_edges({{1, 2}, {2}, {}, {4}, {}});
+  using HybridJobType = GraphHybridSearchJob<RawSpaceWithScalarType>;
+  HybridJobType hybrid_job(space, graph, space);
+
+  MetadataFilter filter;
+  filter.add_ge("id", static_cast<int64_t>(1));
+
+  auto plan =
+      hybrid_job.prepare_hybrid_search_plan(filter, SearchInfo{1, 5, FilterExecHint::kAuto});
+  EXPECT_EQ(plan.mode_, HybridJobType::Mode::kIndexedExact);
+  EXPECT_TRUE(plan.filter_executor_.has_index_fast_path());
+  EXPECT_EQ(plan.filter_executor_.indexed_count(), 4U);
+  space->close_db();
+}
+
 TEST(GraphHybridSearchJobUnitTest, UnderfilledBitsetPrefilterFallsBackToBruteForce) {
   ScopedTempDbDir db_dir("hybrid_underfilled_bitset");
   auto space = make_one_dim_scalar_space({10.0F, 11.0F, 12.0F, 0.0F, 1.0F}, db_dir.path_, {"id"});
@@ -851,6 +888,53 @@ TEST(GraphHybridSearchJobUnitTest, UnderfilledBitsetPrefilterFallsBackToBruteFor
   EXPECT_EQ(results, brute_force_results);
   EXPECT_EQ(ids[0], 3U);
   EXPECT_EQ(ids[1], 4U);
+  space->close_db();
+}
+
+TEST(GraphHybridSearchJobUnitTest, PreparedPlanReusesIndexedResidualBitset) {
+  ScopedTempDbDir db_dir("hybrid_prepared_plan");
+  auto space = make_one_dim_scalar_space({10.0F, 11.0F, 12.0F, 0.0F, 1.0F}, db_dir.path_, {"id"});
+  auto graph = make_graph_from_edges({
+      {1, 2, 3, 4},
+      {0, 2, 3, 4},
+      {0, 1, 3, 4},
+      {0, 1, 2, 4},
+      {0, 1, 2, 3},
+  });
+  GraphHybridSearchJob<RawSpaceWithScalarType> hybrid_job(space, graph, space);
+
+  MetadataFilter filter;
+  filter.add_ge("id", static_cast<int64_t>(0)).add_eq("group", static_cast<int64_t>(1));
+
+  SearchInfo search_info{1, 5, FilterExecHint::kAuto};
+  auto plan = hybrid_job.prepare_hybrid_search_plan(filter, search_info);
+  EXPECT_EQ(plan.mode_, GraphHybridSearchJob<RawSpaceWithScalarType>::Mode::kBitsetPrefilter);
+  EXPECT_TRUE(plan.prefilter_result_.has_value());
+  EXPECT_TRUE(plan.filter_executor_.has_index_fast_path());
+  EXPECT_FALSE(plan.filter_executor_.index_fast_path_is_exact());
+  EXPECT_EQ(plan.prefilter_result_->matched_count_, 2U);
+
+  std::vector<float> query_near_group_first = {0.1F};
+  std::vector<uint32_t> first_ids(1, std::numeric_limits<uint32_t>::max());
+  std::vector<std::string> first_results(1);
+  hybrid_job.execute_prepared_hybrid_search(query_near_group_first.data(),
+                                            first_ids.data(),
+                                            search_info,
+                                            plan,
+                                            first_results.data());
+  EXPECT_EQ(first_ids[0], 3U);
+  EXPECT_EQ(first_results[0], "id_3");
+
+  std::vector<float> query_near_group_second = {0.9F};
+  std::vector<uint32_t> second_ids(1, std::numeric_limits<uint32_t>::max());
+  std::vector<std::string> second_results(1);
+  hybrid_job.execute_prepared_hybrid_search(query_near_group_second.data(),
+                                            second_ids.data(),
+                                            search_info,
+                                            plan,
+                                            second_results.data());
+  EXPECT_EQ(second_ids[0], 4U);
+  EXPECT_EQ(second_results[0], "id_4");
   space->close_db();
 }
 
