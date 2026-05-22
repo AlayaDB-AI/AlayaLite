@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import json
-import resource
 import statistics
 import sys
 from copy import deepcopy
@@ -22,6 +21,11 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 import numpy as np
+
+if sys.platform == "win32":
+    import psutil
+else:
+    import resource
 
 SCHEMA_VERSION = 1
 
@@ -71,6 +75,10 @@ def segment_count(col_path: Path) -> int:
 
 
 def peak_rss_kb_and_unit() -> tuple[int, str]:
+    if sys.platform == "win32":
+        info = psutil.Process().memory_info()
+        peak_bytes = int(getattr(info, "peak_wset", info.rss))
+        return int((peak_bytes + 1023) // 1024), "bytes_converted_to_kb"
     rss = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
     if sys.platform == "darwin":
         return int((rss + 1023) // 1024), "bytes_converted_to_kb"
