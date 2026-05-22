@@ -32,7 +32,7 @@
 #include "simd/laser_dispatch.hpp"
 #include "utils/platform.hpp"
 
-#if defined(ALAYA_ARCH_X86)
+#if defined(ALAYA_ARCH_X86) && (defined(__GNUC__) || defined(__clang__))
   #include "third_party/ffht/fht_avx.hpp"
 #endif
 
@@ -59,7 +59,7 @@ inline void fht_float_portable(float *buf, size_t log_n) {
 
 inline auto select_fht_float(size_t log_b) -> std::function<void(float *)> {
   switch (log_b) {
-#if defined(ALAYA_ARCH_X86)
+#if defined(ALAYA_ARCH_X86) && (defined(__GNUC__) || defined(__clang__))
     case 6:
       return helper_float_6;
     case 7:
