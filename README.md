@@ -22,6 +22,9 @@
 - **High Performance**: Modern vector techniques integrated into a well-designed architecture.
 - **Elastic Scalability**: Seamlessly scale across multiple threads, which is optimized by C++20 coroutines.
 - **Adaptive Flexibility**: Easy customization for quantization methods, metrics, and data types.
+- **Two index paths in one package**: an in-memory graph + RaBitQ path for low-latency
+  retrieval, and the **LASER** on-disk Quantized Graph index for billion-scale workloads
+  that do not fit in RAM.
 - **Ease of Use**: [Intuitive APIs](https://github.com/AlayaDB-AI/AlayaLite/blob/main/python/README.md) in Python.
 
 
@@ -33,6 +36,8 @@ pip install alayalite # install the python package.
 ```
 
 
+
+### In-memory index: quick start
 
 Access your vectors using simple APIs.
 ```python
@@ -60,13 +65,73 @@ recall = calc_recall(result, gt)
 print(recall)
 ```
 
+### LASER on-disk index: quick start
+
+For datasets that exceed RAM, the **LASER** on-disk Quantized Graph index keeps
+hot data on SSD and only the search-time working set in memory. Vectors must be
+`float32` with `raw_dim >= 128`; L2 is the only supported metric in v1.
+
+LASER is available on Linux x86_64 (libaio backend, default), macOS
+(thread-pool backend), and Windows x64 (IOCP backend). Linux x86_64 builds
+need `libaio` headers — `sudo apt-get install libaio-dev` on Debian/Ubuntu.
+See [`docs/LASER.md`](./docs/LASER.md) for build flags, tuning notes, and the
+TOML-driven CLI.
+
+```python
+from alayalite.laser import BuildParams, Index
+import numpy as np
+
+# Build artifacts (PCA, medoids, Vamana graph, LASER index) land in `output_dir/`.
+vectors = np.random.rand(100_000, 128).astype(np.float32)
+queries = np.random.rand(100, 128).astype(np.float32)
+
+idx = Index.fit(
+    vectors,
+    output_dir="/tmp/alaya_laser",
+    name="demo",
+    build_params=BuildParams(metric="l2", R=64, L=200, alpha=1.2, ef_indexing=200),
+    seed=42,
+    num_threads=16,
+    dram_budget_gb=2.0,
+)
+
+# Search-time knobs are separate from build params.
+idx.set_params(ef_search=200, num_threads=8, beam_width=16)
+ids = idx.batch_search(queries, 10)
+
+# Reopen an existing build later without rebuilding:
+# idx = Index.from_prefix("/tmp/alaya_laser/demo", dram_budget_gb=2.0)
+```
+
 ## Benchmark
 
-We evaluate the performance of AlayaLite against other vector database systems using [ANN-Benchmark](https://github.com/erikbern/ann-benchmarks) (compile locally and open `-march=native` in your `CMakeLists.txt` to reproduce the results). Several experimental results are presented below.
+AlayaLite ships two complementary index paths. The benchmarks below cover both.
+
+### In-memory index vs. ANN-Benchmarks
+
+We evaluate the in-memory path against other vector database systems using
+[ANN-Benchmark](https://github.com/erikbern/ann-benchmarks) (compile locally and
+open `-march=native` in your `CMakeLists.txt` to reproduce the results).
 
 |     ![Fashion-MNIST	784 Euclidean](./.assets/fashion-mnist-784-euclidean.png)     |    ![Gist 960 Euclidean](./.assets/gist-960-euclidean.png)    |
 | :---------------------------------------------------------: | :-----------------------------------------------------------: |
 | <div style="text-align: center;">**Fashion-MNIST	784 Euclidean**</div> | <div style="text-align: center;">**Gist 960 Euclidean**</div> |
+
+### On-disk LASER vs. other large-scale systems
+
+For the on-disk path, we compare LASER against other disk-resident vector
+systems on **DPR100M** (101M vectors × 768 dimensions, L2). Numbers are read
+directly from the benchmark output — see the
+[AlayaLaser paper](https://arxiv.org/abs/2602.23342) (SIGMOD 2026) for the
+algorithm details.
+
+![LASER vs other on-disk systems on DPR100M](./.assets/laser-vs-disk-anns.png)
+
+At Recall@10 ≈ 0.97, LASER serves about **725 QPS** — roughly 4.4× DiskANN
+(165), 9.2× Qdrant (79), and 66× LanceDB (11) on this dataset, while Milvus
+(3) does not reach this recall band reliably. The search-phase resident set
+is **22.5 GiB**, an order of magnitude below Qdrant (309.2 GiB) and Milvus
+(382.1 GiB) on the same workload.
 
 
 

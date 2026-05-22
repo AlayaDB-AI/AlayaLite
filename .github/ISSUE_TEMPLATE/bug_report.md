@@ -14,7 +14,7 @@ A clear and concise description of what the bug is.
 
 - **OS**: [e.g., Ubuntu 22.04, macOS 14.0, Windows 11]
 - **Python version**: [e.g., 3.10]
-- **AlayaLite version**: [e.g., 0.1.1a1]
+- **AlayaLite version**: [e.g., 1.0.0]
 - **Installation method**: [pip / source build]
 - **CPU**: [e.g., Intel i7-12700, Apple M2]
 

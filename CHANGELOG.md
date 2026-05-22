@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-05-22
+
+First stable release of AlayaLite. Highlights since the 0.1.x alpha line:
+
+- LASER on-disk Quantized Graph index reaches production status across the
+  full wheel matrix (Linux x86_64 / aarch64, macOS x86_64 / arm64, Windows
+  x86_64), with three I/O backends (Linux libaio, Windows IOCP, portable
+  thread pool).
+- `DiskCollection` gains a single-writer lock, atomic ctor / open
+  contract, and a `SegmentFactory` dispatch layer; the LASER engine is
+  reachable end-to-end through `DiskCollection` on Linux+libaio builds.
+- Codegen-driven dispatch (`tools/codegen/dispatch.yaml`) replaces the
+  hand-written macro chain; `_alayalitepy` binary drops from ~43 MiB to
+  ~26 MiB. **Breaking**: the supported vector dtype matrix is narrowed
+  to `{np.float32, np.int8, np.uint8}` at the engine boundary.
+
 ### Added
 - LASER on-disk index is now buildable and runnable on Windows x64 via the
   new IOCP (I/O Completion Ports) I/O backend
@@ -261,7 +277,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - RAG components (embedders, chunkers)
 - Basic CI/CD pipeline
 
-[Unreleased]: https://github.com/AlayaDB-AI/AlayaLite/compare/v0.1.1a1...HEAD
+[Unreleased]: https://github.com/AlayaDB-AI/AlayaLite/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/AlayaDB-AI/AlayaLite/compare/v0.1.1a1...v1.0.0
 [0.1.1-alpha1]: https://github.com/AlayaDB-AI/AlayaLite/compare/v0.1.0a3...v0.1.1a1
 [0.1.0-alpha3]: https://github.com/AlayaDB-AI/AlayaLite/compare/v0.1.0a2...v0.1.0a3
 [0.1.0-alpha2]: https://github.com/AlayaDB-AI/AlayaLite/compare/v0.1.0a1...v0.1.0a2

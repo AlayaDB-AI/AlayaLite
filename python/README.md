@@ -9,24 +9,33 @@ This page introduces the Python interfaces in AlayaLite, which include two layer
 ## LASER Unified Build API
 
 For the LASER on-disk QG path, use `alayalite.laser.Index.fit(...)` as the
-single entrypoint for build + optional load:
+single entrypoint for build + optional load. All build-time hyperparameters
+live on the `BuildParams` dataclass:
 
 ```python
 import numpy as np
-from alayalite import laser
+from alayalite.laser import BuildParams, Index
 
 vectors = np.random.default_rng(42).normal(size=(10000, 128)).astype(np.float32)
 
-idx = laser.Index.fit(
+idx = Index.fit(
     vectors,
     output_dir="/tmp/laser_idx",
     name="demo",
-    metric="l2",
-    main_dim=128,
-    R=64,
-    ef_indexing=200,
-    num_threads=8,
+    build_params=BuildParams(
+        metric="l2",
+        # main_dim=None means "no PCA" (use the raw dim, here 128).
+        # Set e.g. main_dim=256 to PCA-reduce a 768-D dataset.
+        main_dim=None,
+        R=64,
+        L=200,
+        alpha=1.2,
+        ef_indexing=200,
+        ep_num=300,
+    ),
     seed=42,
+    num_threads=8,
+    dram_budget_gb=1.0,
     auto_load=True,  # default
 )
 
