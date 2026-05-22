@@ -26,6 +26,7 @@
 #include "index/graph/vamana/vamana_writer.hpp"
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
+#include "utils/platform.hpp"
 #include "utils/platform_fs.hpp"
 
 namespace alaya::disk {
@@ -72,9 +73,7 @@ class VamanaSegmentBuilder {
           "VamanaSegmentBuilder: add_batch with n>0 requires non-null buffers");
     }
     size_t vec_components = 0;
-    if (__builtin_mul_overflow(static_cast<size_t>(n),
-                               static_cast<size_t>(dim_),
-                               &vec_components)) {
+    if (alaya_mul_overflow(static_cast<size_t>(n), static_cast<size_t>(dim_), &vec_components)) {
       throw std::invalid_argument("VamanaSegmentBuilder: n * dim overflows size_t (n=" +
                                   std::to_string(n) + ", dim=" + std::to_string(dim_) + ")");
     }

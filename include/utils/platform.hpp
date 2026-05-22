@@ -9,6 +9,7 @@
 // ============================================================================
 
 #include <cstdlib>
+#include <type_traits>
 #if defined(_WIN32)
   #define ALAYA_OS_WINDOWS
   #include <malloc.h>  // _aligned_malloc required header
@@ -120,6 +121,33 @@ inline void alaya_aligned_free_impl(void *ptr) {
   _aligned_free(ptr);
 #else
   std::free(ptr);
+#endif
+}
+
+// ============================================================================
+// 4b. Checked arithmetic (unsigned-only). GCC/Clang lower to overflow-detecting
+//     intrinsics; MSVC gets a portable reverse-division check.
+// ============================================================================
+
+template <typename T>
+inline bool alaya_mul_overflow(T a, T b, T *out) {
+  static_assert(std::is_unsigned_v<T>, "alaya_mul_overflow requires unsigned operands");
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_mul_overflow(a, b, out);
+#else
+  *out = a * b;
+  return a != 0 && *out / a != b;
+#endif
+}
+
+template <typename T>
+inline bool alaya_add_overflow(T a, T b, T *out) {
+  static_assert(std::is_unsigned_v<T>, "alaya_add_overflow requires unsigned operands");
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_add_overflow(a, b, out);
+#else
+  *out = a + b;
+  return *out < a;
 #endif
 }
 

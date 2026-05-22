@@ -35,8 +35,10 @@ inline PID exact_nn(const float *data,
                     const DistFunc<float> &dist_func_) {
   std::vector<Candidate<float>> best_entries(num_threads, Candidate(0, FLT_MAX));
 
+  const int64_t num_points_signed = static_cast<int64_t>(num_points);
 #pragma omp parallel for schedule(dynamic)
-  for (size_t i = 0; i < num_points; ++i) {
+  for (int64_t ii = 0; ii < num_points_signed; ++ii) {
+    const size_t i = static_cast<size_t>(ii);
     auto tid = omp_get_thread_num();
     Candidate<float> &cur_entry = best_entries[tid];
     const float *cur_data = data + (dim * i);
@@ -63,8 +65,10 @@ inline PID exact_nn(const float *data,
 inline auto compute_centroid(const float *data, size_t num_points, size_t dim, size_t num_threads) {
   std::vector<std::vector<double>> all_results(num_threads, std::vector<double>(dim, 0));
 
+  const int64_t num_points_signed = static_cast<int64_t>(num_points);
 #pragma omp parallel for schedule(dynamic)
-  for (size_t i = 0; i < num_points; ++i) {
+  for (int64_t ii = 0; ii < num_points_signed; ++ii) {
+    const size_t i = static_cast<size_t>(ii);
     auto tid = omp_get_thread_num();
     std::vector<double> &cur_results = all_results[tid];
     const float *cur_data = data + (dim * i);

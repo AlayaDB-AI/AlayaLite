@@ -28,6 +28,7 @@
 #include "index/disk/types.hpp"
 #include "storage/mmap_file.hpp"
 #include "utils/metric_type.hpp"
+#include "utils/platform.hpp"
 #include "utils/platform_fs.hpp"
 
 #if defined(ALAYA_ENABLE_LASER) && ALAYA_ENABLE_LASER != 0
@@ -105,7 +106,7 @@ inline auto laser_parse_float_extra_default(const SegmentManifest &manifest,
 inline auto laser_compute_expected_ids_bytes(uint64_t count, const std::filesystem::path &seg_dir)
     -> uint64_t {
   uint64_t bytes = 0;
-  if (__builtin_mul_overflow(count, static_cast<uint64_t>(sizeof(uint64_t)), &bytes)) {
+  if (alaya_mul_overflow(count, static_cast<uint64_t>(sizeof(uint64_t)), &bytes)) {
     throw std::runtime_error("LaserSegmentSearcher: manifest count×8 exceeds uint64 range in " +
                              seg_dir.string());
   }

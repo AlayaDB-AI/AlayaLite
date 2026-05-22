@@ -47,6 +47,7 @@
 #include "storage/mmap_file.hpp"
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
+#include "utils/platform.hpp"
 #include "utils/platform_fs.hpp"
 
 namespace alaya::disk {
@@ -848,8 +849,8 @@ class DiskCollection {
     // and bypass the cap check. (Final Codex review flagged this as the
     // first of two archive blockers.)
     uint64_t single_batch_bytes = 0;
-    if (__builtin_mul_overflow(2ULL, n, &single_batch_bytes) ||
-        __builtin_mul_overflow(single_batch_bytes, per_row, &single_batch_bytes)) {
+    if (alaya_mul_overflow(uint64_t{2}, n, &single_batch_bytes) ||
+        alaya_mul_overflow(single_batch_bytes, per_row, &single_batch_bytes)) {
       throw std::runtime_error("DiskCollection: pending size arithmetic overflows uint64 (n=" +
                                std::to_string(n) + ", dim=" + std::to_string(manifest_.dim) + ")");
     }
@@ -864,9 +865,9 @@ class DiskCollection {
     const uint64_t current_total = 2ULL * current_rows * per_row;
     uint64_t total_rows = 0;
     uint64_t new_total = 0;
-    if (__builtin_add_overflow(current_rows, n, &total_rows) ||
-        __builtin_mul_overflow(2ULL, total_rows, &new_total) ||
-        __builtin_mul_overflow(new_total, per_row, &new_total)) {
+    if (alaya_add_overflow(current_rows, n, &total_rows) ||
+        alaya_mul_overflow(uint64_t{2}, total_rows, &new_total) ||
+        alaya_mul_overflow(new_total, per_row, &new_total)) {
       throw std::runtime_error(
           "DiskCollection: pending+batch arithmetic overflows uint64 (current_rows=" +
           std::to_string(current_rows) + ", n=" + std::to_string(n) + ")");

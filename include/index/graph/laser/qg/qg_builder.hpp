@@ -243,8 +243,9 @@ class QGBuilder {
 
     // Create a bounded pool of thread-local scratch buffers.
     ConcurrentQueue<ThreadData> thread_data;
-#pragma omp parallel for num_threads(static_cast<int>(num_threads_))
-    for (size_t thread = 0; thread < num_threads_; thread++) {
+    const int num_threads_signed = static_cast<int>(num_threads_);
+#pragma omp parallel for num_threads(num_threads_signed)
+    for (int thread = 0; thread < num_threads_signed; thread++) {
 #pragma omp critical
       {
         vector_reader->register_thread();
@@ -266,8 +267,10 @@ class QGBuilder {
     // Process all nodes in parallel with dynamic scheduling.
     // Each iteration processes ONE node: reads its neighbors, computes quantization, writes to
     // disk.
+    const int64_t qg_num_points_signed = static_cast<int64_t>(qg_.num_points_);
 #pragma omp parallel for schedule(dynamic)
-    for (size_t i = 0; i < qg_.num_points_; ++i) {
+    for (int64_t ii = 0; ii < qg_num_points_signed; ++ii) {
+      const size_t i = static_cast<size_t>(ii);
       // Progress bar
       if (i % 10000 == 0) {
         float progress = static_cast<float>(i) * 100 / qg_.num_points_;

@@ -49,8 +49,10 @@ inline void read_freq(std::vector<puu> &freq_list,
 void relayout_adj(vpu &freq_nei_list, vvu &full_graph) {
   std::vector<unsigned> tmp_adj(100);
   std::unordered_set<unsigned> vis;
+  const int64_t graph_size_signed = static_cast<int64_t>(full_graph.size());
 #pragma omp parallel for schedule(dynamic, 1000) private(tmp_adj, vis)
-  for (unsigned i = 0; i < full_graph.size(); i++) {
+  for (int64_t ii = 0; ii < graph_size_signed; ii++) {
+    const unsigned i = static_cast<unsigned>(ii);
     std::sort(freq_nei_list[i].begin(), freq_nei_list[i].end(), [](puu &left, puu &right) -> bool {
       return left.second > right.second;
     });

@@ -33,12 +33,12 @@ namespace detail {
 
 inline auto compute_expected_vectors_bytes(uint64_t count, uint64_t dim) -> uint64_t {
   uint64_t cd = 0;
-  if (__builtin_mul_overflow(count, dim, &cd)) {
+  if (alaya_mul_overflow(count, dim, &cd)) {
     throw std::runtime_error(
         "DiskFlatSegmentSearcher: manifest dim×count exceeds uint64 range (overflow)");
   }
   uint64_t bytes = 0;
-  if (__builtin_mul_overflow(cd, static_cast<uint64_t>(sizeof(float)), &bytes)) {
+  if (alaya_mul_overflow(cd, static_cast<uint64_t>(sizeof(float)), &bytes)) {
     throw std::runtime_error(
         "DiskFlatSegmentSearcher: manifest dim×count×4 exceeds uint64 range (overflow)");
   }
@@ -47,7 +47,7 @@ inline auto compute_expected_vectors_bytes(uint64_t count, uint64_t dim) -> uint
 
 inline auto compute_expected_ids_bytes(uint64_t count) -> uint64_t {
   uint64_t bytes = 0;
-  if (__builtin_mul_overflow(count, static_cast<uint64_t>(sizeof(uint64_t)), &bytes)) {
+  if (alaya_mul_overflow(count, static_cast<uint64_t>(sizeof(uint64_t)), &bytes)) {
     throw std::runtime_error(
         "DiskFlatSegmentSearcher: manifest count×8 exceeds uint64 range (overflow)");
   }

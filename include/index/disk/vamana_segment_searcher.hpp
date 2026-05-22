@@ -21,6 +21,7 @@
 #include "index/graph/vamana/vamana_reader.hpp"
 #include "storage/mmap_file.hpp"
 #include "utils/metric_type.hpp"
+#include "utils/platform.hpp"
 
 namespace alaya::disk {
 
@@ -236,12 +237,12 @@ class VamanaSegmentSearcher : public SegmentSearcher {
 
   auto compute_expected_vectors_bytes() const -> uint64_t {
     uint64_t cd = 0;
-    if (__builtin_mul_overflow(manifest_.count, manifest_.dim, &cd)) {
+    if (alaya_mul_overflow(manifest_.count, manifest_.dim, &cd)) {
       throw std::runtime_error(
           "VamanaSegmentSearcher: manifest dim×count exceeds uint64 range (overflow)");
     }
     uint64_t bytes = 0;
-    if (__builtin_mul_overflow(cd, static_cast<uint64_t>(sizeof(float)), &bytes)) {
+    if (alaya_mul_overflow(cd, static_cast<uint64_t>(sizeof(float)), &bytes)) {
       throw std::runtime_error(
           "VamanaSegmentSearcher: manifest dim×count×4 exceeds uint64 range (overflow)");
     }
@@ -250,7 +251,7 @@ class VamanaSegmentSearcher : public SegmentSearcher {
 
   auto compute_expected_ids_bytes() const -> uint64_t {
     uint64_t bytes = 0;
-    if (__builtin_mul_overflow(manifest_.count, static_cast<uint64_t>(sizeof(uint64_t)), &bytes)) {
+    if (alaya_mul_overflow(manifest_.count, static_cast<uint64_t>(sizeof(uint64_t)), &bytes)) {
       throw std::runtime_error(
           "VamanaSegmentSearcher: manifest count×8 exceeds uint64 range (overflow)");
     }

@@ -320,8 +320,9 @@ inline void QuantizedGraph::set_params(size_t ef_search, size_t num_threads, int
   }
   aligned_file_reader_->open(index_file_name_);
 
-#pragma omp parallel for num_threads(static_cast<int>(nthreads_))
-  for (size_t thread = 0; thread < nthreads_; thread++) {
+  const int nthreads_signed = static_cast<int>(nthreads_);
+#pragma omp parallel for num_threads(nthreads_signed)
+  for (int thread = 0; thread < nthreads_signed; thread++) {
 #pragma omp critical
     {
       this->aligned_file_reader_->register_thread();
@@ -354,8 +355,11 @@ inline void QuantizedGraph::batch_search(const float *ALAYA_RESTRICT query,
                                          uint32_t knn,
                                          uint32_t *ALAYA_RESTRICT results,
                                          size_t num_queries) {
-#pragma omp parallel for schedule(dynamic) num_threads(static_cast<int>(nthreads_))
-  for (size_t i = 0; i < num_queries; ++i) {
+  const int64_t num_queries_signed = static_cast<int64_t>(num_queries);
+  const int nthreads_signed = static_cast<int>(nthreads_);
+#pragma omp parallel for schedule(dynamic) num_threads(nthreads_signed)
+  for (int64_t ii = 0; ii < num_queries_signed; ++ii) {
+    const size_t i = static_cast<size_t>(ii);
     disk_search_qg(query + i * (dimension_ + residual_dimension_), knn, results + i * knn);
   }
 }
@@ -728,8 +732,9 @@ inline void QuantizedGraph::initialize() {
 inline void QuantizedGraph::init_workspace() {
   aligned_file_reader_->open(index_file_name_);
 
-#pragma omp parallel for num_threads(static_cast<int>(nthreads_))
-  for (size_t thread = 0; thread < nthreads_; thread++) {
+  const int nthreads_signed = static_cast<int>(nthreads_);
+#pragma omp parallel for num_threads(nthreads_signed)
+  for (int thread = 0; thread < nthreads_signed; thread++) {
 #pragma omp critical
     {
       this->aligned_file_reader_->register_thread();

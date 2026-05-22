@@ -20,6 +20,7 @@
 #include "index/disk/types.hpp"
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
+#include "utils/platform.hpp"
 #include "utils/platform_fs.hpp"
 
 namespace alaya::disk {
@@ -132,9 +133,7 @@ class DiskFlatBuilder {
     // archive blocker — without the check, a hostile n could wrap and
     // produce a small product that bypasses cap checks downstream.)
     size_t vec_components = 0;
-    if (__builtin_mul_overflow(static_cast<size_t>(n),
-                               static_cast<size_t>(dim_),
-                               &vec_components)) {
+    if (alaya_mul_overflow(static_cast<size_t>(n), static_cast<size_t>(dim_), &vec_components)) {
       throw std::invalid_argument("DiskFlatBuilder: n * dim overflows size_t (n=" +
                                   std::to_string(n) + ", dim=" + std::to_string(dim_) + ")");
     }
