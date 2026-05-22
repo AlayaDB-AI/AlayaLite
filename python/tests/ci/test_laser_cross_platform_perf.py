@@ -221,13 +221,12 @@ def test_laser_perf_summary_and_aggregate_lines(tmp_path: Path) -> None:
     assert any("`linux-libaio-x86_64`" in line and "`libaio`" in line for line in aggregate_lines)
     assert any("`macos-threadpool-arm64`" in line and "`threadpool`" in line for line in aggregate_lines)
     assert any("`macos-threadpool-x86_64`" in line for line in aggregate_lines)
-    assert any("DC vs libaio baseline" in line for line in aggregate_lines)
-    # macos dc_qps 60.0 vs linux baseline 120.0 → ratio 0.5
-    assert any("0.500" in line and "`macos-threadpool-arm64`" in line for line in aggregate_lines)
-    # Latency columns surface.
-    assert any("DC p50" in line for line in aggregate_lines)
-    # Caveat must be present so the reader doesn't misread cross-CPU ratios.
-    assert any("Caveat" in line and "page cache" in line for line in aggregate_lines)
+    # Each row carries collection(native) pairs for recall + QPS + latency.
+    # macos: dc_qps=60, native_qps=120, dc_p50=500us=0.50ms, native_p50=250us=0.25ms.
+    assert any("`macos-threadpool-arm64`" in line and "60.0" in line and "120.0" in line for line in aggregate_lines)
+    assert any("`macos-threadpool-arm64`" in line and "0.50" in line and "0.25" in line for line in aggregate_lines)
+    # Build phase + query RSS columns surface in every row.
+    assert any("`macos-threadpool-arm64`" in line and "8.0" in line and "64.0" in line for line in aggregate_lines)
 
 
 def test_generate_vectors_shape_and_l2_norm_and_reproducibility() -> None:

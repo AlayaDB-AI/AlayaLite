@@ -400,16 +400,22 @@ def append_summary(args: argparse.Namespace) -> int:
 def _aggregate_summary_lines(result_paths: list[Path], expected_labels: list[str], baseline_label: str) -> list[str]:
     if not result_paths:
         raise SystemExit("No LASER benchmark artifacts found to aggregate.")
+    # baseline_label is retained in the signature for backwards compatibility
+    # with the workflow yaml's --baseline-label flag, but the new compact
+    # aggregate table no longer renders cross-runner QPS ratios (they were
+    # CPU-dominated noise on smoke n=10k, not backend signal).
+    del baseline_label
 
     label_order = {label: index for index, label in enumerate(expected_labels)}
-    results: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
     for result_path in result_paths:
         result = json.loads(result_path.read_text(encoding="utf-8"))
         platform_info = result["platform"]
         benchmark = result["benchmark"]
         params = result["params"]
         dataset = result["dataset"]
-        results.append(
+        build_phase = result.get("build_phase") or {}
+        rows.append(
             {
                 "label": result["label"],
                 "platform": f"{platform_info['system']} / {platform_info['machine']}",
@@ -421,70 +427,55 @@ def _aggregate_summary_lines(result_paths: list[Path], expected_labels: list[str
                 "ef": params["ef"],
                 "beam_width": params["beam_width"],
                 "rounds": params["rounds"],
-                "laser_api_qps": benchmark["median_laser_api_qps"],
-                "disk_collection_qps": benchmark["median_disk_collection_qps"],
-                "dc_vs_laser_qps_ratio": benchmark["median_dc_vs_laser_qps_ratio"],
-                "dc_p50_us": benchmark["median_disk_collection_p50_us"],
-                "dc_p95_us": benchmark["median_disk_collection_p95_us"],
-                "dc_p99_us": benchmark["median_disk_collection_p99_us"],
-                "adapter_overhead_pct": benchmark["median_adapter_overhead_pct"],
-                "recall_delta": benchmark["median_recall_delta"],
-                "max_abs_recall_delta": benchmark["max_abs_recall_delta"],
+                "dc_recall": benchmark.get("median_disk_collection_recall_at_10"),
+                "native_recall": benchmark.get("median_laser_api_recall_at_10"),
+                "dc_qps": benchmark.get("median_disk_collection_qps"),
+                "native_qps": benchmark.get("median_laser_api_qps"),
+                "dc_p50_ms": _us_to_ms(benchmark.get("median_disk_collection_p50_us")),
+                "native_p50_ms": _us_to_ms(benchmark.get("median_laser_api_p50_us")),
+                "dc_p95_ms": _us_to_ms(benchmark.get("median_disk_collection_p95_us")),
+                "native_p95_ms": _us_to_ms(benchmark.get("median_laser_api_p95_us")),
+                "dc_p99_ms": _us_to_ms(benchmark.get("median_disk_collection_p99_us")),
+                "native_p99_ms": _us_to_ms(benchmark.get("median_laser_api_p99_us")),
+                "build_wall_s": build_phase.get("build_wall_s"),
+                "build_rss_mb": _kb_to_mb(build_phase.get("build_rss_increment_kb")),
+                "query_rss_mb": _kb_to_mb(benchmark.get("median_query_peak_rss_kb")),
             }
         )
 
-    results.sort(key=lambda item: label_order.get(item["label"], len(label_order)))
-    present_labels = {item["label"] for item in results}
+    rows.sort(key=lambda item: label_order.get(item["label"], len(label_order)))
+    present_labels = {item["label"] for item in rows}
     missing_labels = [label for label in expected_labels if label not in present_labels]
-    baseline = next((item for item in results if item["label"] == baseline_label), None)
-    baseline_qps = baseline["disk_collection_qps"] if baseline is not None else None
-    summary_baseline = baseline if baseline is not None else results[0]
+    header = rows[0] if rows else {}
     lines = [
         "## LASER Cross-platform Benchmark Summary",
         "",
-        "**Two paths benchmarked on the same LASER fixture:**",
-        "- `LASER-API QPS` = `alayalite.laser.Index.search` (direct LASER binding).",
-        '- `DC QPS` = `DiskCollection(index_type="disk_laser").search` (wrapper layer).',
+        f"n={header.get('n')}, dim={header.get('dim')}, queries={header.get('queries')}, "
+        f"top_k={header.get('top_k')}, ef={header.get('ef')}, beam_width={header.get('beam_width')}, "
+        f"rounds={header.get('rounds')}",
         "",
-        "Both paths use the *same* on-disk LASER fixture and the *same* I/O backend "
-        "(libaio or threadpool). `DC / LASER-API ratio` measures DiskCollection wrapper "
-        "overhead. It is **not** an in-memory vs disk comparison.",
+        "Each cell `collection(native)` — collection = `DiskCollection(disk_laser).search`, "
+        "native = `alayalite.laser.Index.search`. Both paths share the same on-disk LASER "
+        "fixture; the gap measures DiskCollection wrapper overhead. `build_*` columns are "
+        "single-valued (fixture is shared); `query_RSS_MB` is the DiskCollection subprocess "
+        "high-water during search.",
         "",
-        "| Run settings | Value |",
-        "| --- | --- |",
-        f"| Data size (n / dim) | `{summary_baseline['n']}` / `{summary_baseline['dim']}` |",
-        f"| Queries / Top-k / ef_search / Beam width | `{summary_baseline['queries']}` / "
-        f"`{summary_baseline['top_k']}` / `{summary_baseline['ef']}` / "
-        f"`{summary_baseline['beam_width']}` |",
-        f"| Rounds | `{summary_baseline['rounds']}` |",
-        f"| libaio baseline label | `{baseline_label}{'' if baseline is not None else ' (missing)'}` |",
-        "",
-        "| Platform | Label | Backend | DC QPS | DC p50 us | DC p95 us | "
-        "DC/LASER-API ratio | DC vs libaio baseline QPS | Recall Δ | Max abs Δrecall |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| Lane (platform) | Label | Backend | recall@10 | QPS | p50 ms | p95 ms | p99 ms |"
+        " build_s | build_RSS_MB | query_RSS_MB |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
-    for item in results:
-        if baseline_qps and item["disk_collection_qps"]:
-            vs_baseline = float(item["disk_collection_qps"]) / float(baseline_qps)
-        else:
-            vs_baseline = None
+    for item in rows:
         lines.append(
             f"| {item['platform']} | `{item['label']}` | `{item['backend']}` | "
-            f"{_fmt(item['disk_collection_qps'])} | "
-            f"{_fmt(item['dc_p50_us'])} | {_fmt(item['dc_p95_us'])} | "
-            f"{_fmt(item['dc_vs_laser_qps_ratio'])} | {_fmt(vs_baseline)} | "
-            f"{_fmt(item['recall_delta'], 4)} | {_fmt(item['max_abs_recall_delta'], 4)} |"
+            f"{_fmt_pair(item['dc_recall'], item['native_recall'])} | "
+            f"{_fmt_pair(item['dc_qps'], item['native_qps'], 1)} | "
+            f"{_fmt_pair(item['dc_p50_ms'], item['native_p50_ms'], 2)} | "
+            f"{_fmt_pair(item['dc_p95_ms'], item['native_p95_ms'], 2)} | "
+            f"{_fmt_pair(item['dc_p99_ms'], item['native_p99_ms'], 2)} | "
+            f"{_fmt(item['build_wall_s'], 2)} | "
+            f"{_fmt(item['build_rss_mb'], 1)} | "
+            f"{_fmt(item['query_rss_mb'], 1)} |"
         )
-    lines.extend(
-        [
-            "",
-            "> **Caveat on `DC vs libaio baseline QPS`**: this ratio compares throughput "
-            "across runners with different CPUs. On cached datasets (e.g. smoke n=10k), "
-            "the dataset fits in page cache and the number mainly reflects CPU speed "
-            "rather than the ThreadPool vs libaio backend cost. For real backend perf, "
-            "run with n=1M via `workflow_dispatch`.",
-        ]
-    )
     if missing_labels:
         lines.extend(["", "### Missing results", "", ", ".join(f"`{label}`" for label in missing_labels)])
     return lines
