@@ -52,16 +52,19 @@ def test_laser_perf_workflow_is_manual_macos_first_and_artifacted() -> None:
         "linux-libaio-x86_64",
         "macos-threadpool-arm64",
         "macos-threadpool-x86_64",
+        "windows-iocp-x64",
     }.issubset(enabled_labels)
     backends_by_label = {entry["label"]: entry["backend"] for entry in matrix}
     assert backends_by_label["linux-libaio-x86_64"] == "libaio"
     assert backends_by_label["macos-threadpool-arm64"] == "threadpool"
     assert backends_by_label["macos-threadpool-x86_64"] == "threadpool"
+    assert backends_by_label["windows-iocp-x64"] == "iocp"
 
     steps = benchmark["steps"]
     run_blocks = "\n".join(step.get("run", "") for step in steps)
     assert "brew install libomp" in run_blocks
     assert "libaio-dev" in run_blocks
+    assert "vcpkg.exe" in run_blocks and "llvm-openmp:x64-windows" in run_blocks
     assert "laser_cross_platform_perf.py run-benchmark" in run_blocks
 
     upload = next(step for step in steps if step.get("uses") == "actions/upload-artifact@v4")

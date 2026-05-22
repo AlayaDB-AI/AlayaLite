@@ -5,13 +5,10 @@
 #pragma once
 
 #if defined(ALAYA_ENABLE_LASER) && ALAYA_ENABLE_LASER != 0
-  #include <fcntl.h>
-  #include <sys/stat.h>
-  #include <unistd.h>
-
   #include <cerrno>
   #include <chrono>
   #include <cstddef>
+  #include <cstdio>
   #include <cstring>
   #include <limits>
   #include <sstream>
@@ -21,6 +18,7 @@
   #include <vector>
 
   #include "index/disk/disk_flat_builder.hpp"
+  #include "utils/platform_fs.hpp"
 #endif
 
 #include <filesystem>  // NOLINT(build/c++17)
@@ -59,29 +57,6 @@ class LaserSegmentImporter {
 };
 
 namespace laser_importer_detail {
-
-struct FileDescriptor {
-  explicit FileDescriptor(int fd_in) : fd(fd_in) {}
-  ~FileDescriptor() {
-    if (fd >= 0) {
-      (void)::close(fd);
-    }
-  }
-  FileDescriptor(const FileDescriptor &) = delete;
-  auto operator=(const FileDescriptor &) -> FileDescriptor & = delete;
-  FileDescriptor(FileDescriptor &&other) noexcept : fd(std::exchange(other.fd, -1)) {}
-  auto operator=(FileDescriptor &&other) noexcept -> FileDescriptor & {
-    if (this != &other) {
-      if (fd >= 0) {
-        (void)::close(fd);
-      }
-      fd = std::exchange(other.fd, -1);
-    }
-    return *this;
-  }
-
-  int fd;
-};
 
 struct Artifact {
   std::filesystem::path src;
@@ -125,28 +100,34 @@ inline auto require_parent_dir(const std::filesystem::path &parent,
 }
 
 inline auto reject_existing_segment_dir(const std::filesystem::path &seg_dir) -> void {
-  struct ::stat st{};
-  if (::lstat(seg_dir.c_str(), &st) == 0) {
+  std::error_code ec;
+  if (std::filesystem::exists(seg_dir, ec)) {
     throw std::runtime_error("LaserSegmentImporter: target segment already exists: " +
                              seg_dir.string());
   }
-  if (errno != ENOENT) {
+  if (ec) {
     throw std::runtime_error("LaserSegmentImporter: target segment stat failed: " +
-                             seg_dir.string() + ": " + std::strerror(errno));
+                             seg_dir.string() + ": " + ec.message());
   }
 }
 
 inline auto require_regular_nonempty(const std::filesystem::path &path) -> void {
-  struct ::stat st{};
-  if (::stat(path.c_str(), &st) != 0) {
+  std::error_code ec;
+  const auto status = std::filesystem::symlink_status(path, ec);
+  if (ec || !std::filesystem::exists(status)) {
     throw std::runtime_error("LaserSegmentImporter: required native artifact missing: " +
-                             path.string() + ": " + std::strerror(errno));
+                             path.string() + (ec ? (": " + ec.message()) : ""));
   }
-  if (!S_ISREG(st.st_mode)) {
+  if (!std::filesystem::is_regular_file(status)) {
     throw std::runtime_error(
         "LaserSegmentImporter: required native artifact is not a regular file: " + path.string());
   }
-  if (st.st_size <= 0) {
+  const auto sz = std::filesystem::file_size(path, ec);
+  if (ec) {
+    throw std::runtime_error("LaserSegmentImporter: required native artifact size query failed: " +
+                             path.string() + ": " + ec.message());
+  }
+  if (sz == 0) {
     throw std::runtime_error(
         "LaserSegmentImporter: required native artifact is empty or invalid size: " +
         path.string());
@@ -164,33 +145,17 @@ inline auto optional_exists(const std::filesystem::path &path) -> bool {
 }
 
 inline auto read_index_count(const std::filesystem::path &index_path) -> uint64_t {
-  FileDescriptor fd(::open(index_path.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
-  if (fd.fd < 0) {
-    throw std::runtime_error("LaserSegmentImporter: open index metadata failed: " +
-                             index_path.string() + ": " + std::strerror(errno));
+  // The LASER native index file's first 8 bytes are the u64 num_points
+  // field. The rest of the file is GB-scale, so read only the prefix.
+  std::string buf;
+  try {
+    buf = ::alaya::platform::read_file_prefix(index_path, sizeof(uint64_t));
+  } catch (const std::exception &e) {
+    throw std::runtime_error(std::string("LaserSegmentImporter: read index metadata failed: ") +
+                             e.what());
   }
-
   uint64_t count = 0;
-  auto *dst = reinterpret_cast<char *>(&count);
-  size_t total = 0;
-  while (total < sizeof(count)) {
-    const ssize_t n = ::read(fd.fd, dst + total, sizeof(count) - total);
-    if (n < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      throw std::runtime_error("LaserSegmentImporter: read index metadata failed: " +
-                               index_path.string() + ": " + std::strerror(errno));
-    }
-    if (n == 0) {
-      break;
-    }
-    total += static_cast<size_t>(n);
-  }
-  if (total != sizeof(count)) {
-    throw std::runtime_error("LaserSegmentImporter: short read of index metadata: " +
-                             index_path.string());
-  }
+  std::memcpy(&count, buf.data(), sizeof(count));
   return count;
 }
 
@@ -211,7 +176,7 @@ inline auto copy_or_link_artifact(const std::filesystem::path &src,
 
 inline auto make_tmp_dir(const std::filesystem::path &parent, const std::string &seg_basename)
     -> std::filesystem::path {
-  const auto pid = static_cast<int64_t>(::getpid());
+  const auto pid = ::alaya::platform::get_pid();
   const auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
   const std::string tmp_name =
       ".tmp_" + seg_basename + "_" + std::to_string(pid) + "_" + std::to_string(ts);

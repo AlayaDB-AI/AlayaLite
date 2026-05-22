@@ -16,10 +16,6 @@
 
 #pragma once
 
-#if defined(__SSE2__)
-  #include <immintrin.h>
-#endif
-
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
@@ -31,9 +27,23 @@
 #include "index/graph/laser/utils/tools.hpp"
 #include "utils/platform.hpp"
 
+// _mm_prefetch lives in <xmmintrin.h>/<immintrin.h>; <intrin.h> from platform.hpp
+// already pulls it in on MSVC. GCC/Clang use the same header via <immintrin.h>.
+#if defined(ALAYA_ARCH_X86)
+  #include <immintrin.h>
+  #define ALAYA_HAS_MM_PREFETCH 1
+#else
+  #define ALAYA_HAS_MM_PREFETCH 0
+#endif
+
 namespace alaya::laser::memory {
-#define PORTABLE_ALIGN32 __attribute__((aligned(32)))
-#define PORTABLE_ALIGN64 __attribute__((aligned(64)))
+#if defined(_MSC_VER)
+  #define PORTABLE_ALIGN32 __declspec(align(32))
+  #define PORTABLE_ALIGN64 __declspec(align(64))
+#else
+  #define PORTABLE_ALIGN32 __attribute__((aligned(32)))
+  #define PORTABLE_ALIGN64 __attribute__((aligned(64)))
+#endif
 
 /**
  * @brief STL-compatible allocator with configurable alignment and huge page support.
@@ -149,18 +159,22 @@ inline void *align_allocate(size_t nbytes, bool huge_page = false) {
 inline void align_free(void *ptr) noexcept { alaya_aligned_free_impl(ptr); }
 
 static inline void prefetch_l1(const void *addr) {
-#if defined(__SSE2__)
-  _mm_prefetch(addr, _MM_HINT_T0);
-#else
+#if ALAYA_HAS_MM_PREFETCH
+  _mm_prefetch(reinterpret_cast<const char *>(addr), _MM_HINT_T0);
+#elif defined(__GNUC__) || defined(__clang__)
   __builtin_prefetch(addr, 0, 3);
+#else
+  (void)addr;  // No prefetch on this target; correctness unaffected.
 #endif
 }
 
 static inline void prefetch_l2(const void *addr) {
-#if defined(__SSE2__)
-  _mm_prefetch((const char *)addr, _MM_HINT_T1);
-#else
+#if ALAYA_HAS_MM_PREFETCH
+  _mm_prefetch(reinterpret_cast<const char *>(addr), _MM_HINT_T1);
+#elif defined(__GNUC__) || defined(__clang__)
   __builtin_prefetch(addr, 0, 2);
+#else
+  (void)addr;
 #endif
 }
 

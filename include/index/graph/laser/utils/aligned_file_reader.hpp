@@ -34,12 +34,16 @@
 #include <string>
 #include <thread>
 // #include "tsl/robin_map.h"
-#if defined(ALAYA_LASER_USE_LIBAIO) && defined(ALAYA_LASER_USE_THREADPOOL)
+#if (defined(ALAYA_LASER_USE_LIBAIO) + defined(ALAYA_LASER_USE_THREADPOOL) + \
+     defined(ALAYA_LASER_USE_IOCP)) > 1
   #error "Define only one LASER I/O backend macro"
 #endif
 
-#if !defined(ALAYA_LASER_USE_LIBAIO) && !defined(ALAYA_LASER_USE_THREADPOOL)
-  #if defined(__linux__)
+#if !defined(ALAYA_LASER_USE_LIBAIO) && !defined(ALAYA_LASER_USE_THREADPOOL) && \
+    !defined(ALAYA_LASER_USE_IOCP)
+  #if defined(_WIN32)
+    #define ALAYA_LASER_USE_IOCP 1
+  #elif defined(__linux__)
     #define ALAYA_LASER_USE_LIBAIO 1
   #else
     #define ALAYA_LASER_USE_THREADPOOL 1
@@ -70,6 +74,9 @@
 
 #if defined(ALAYA_LASER_USE_LIBAIO)
 using IOContext = io_context_t;
+#elif defined(ALAYA_LASER_USE_IOCP)
+struct IOCPContext;
+using IOContext = IOCPContext *;
 #else
 struct ThreadPoolContext;
 using IOContext = ThreadPoolContext *;

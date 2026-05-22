@@ -8,9 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- LASER on-disk index is now buildable and runnable on Windows x64 via the
+  new IOCP (I/O Completion Ports) I/O backend
+  (`include/index/graph/laser/utils/iocp_file_reader.hpp`). The release
+  wheel matrix now ships native LASER on all 5 platform lanes
+  (`manylinux_2_28_x86_64`, `manylinux_2_28_aarch64`, `macos x86_64`,
+  `macos arm64`, `windows-2022 AMD64`); Linux ARM remains the only lane
+  with LASER off-by-default (tracked in a separate change). The Windows
+  lane uses MSVC 2022 + vcpkg-installed `llvm-openmp:x64-windows`;
+  `_alayalitepy.pyd` runtime DLLs are bundled into the wheel by
+  `delvewheel`.
 - LASER on-disk index is now buildable and runnable on macOS (M-series and
   Intel) using a portable thread-pool I/O backend. Linux x86_64 continues to
   use the libaio backend with no behavior change.
+
+### Changed
+- Disk/storage/space layer no longer pulls POSIX headers
+  (`<unistd.h>`, `<sys/mman.h>`, `<sys/file.h>`, ...) unconditionally —
+  the LAYER 2 portability sweep routed every previously-POSIX file
+  operation through `include/utils/platform_fs.hpp` helpers
+  (`write_all_fsync`, `read_regular_file_bounded`, `read_file_prefix`,
+  `atomic_replace_no_overwrite`, `sync_file_or_throw`,
+  `sync_directory_or_throw`, `truncate_file`, `get_pid`,
+  `is_readable_regular_file`). The collection lock acquisition in
+  `disk_collection.hpp` is now per-platform: POSIX keeps the existing
+  `flock` + inode-swap defense, Windows uses
+  `LockFileEx(LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY)` plus
+  shared-mode flags that exclude DELETE (the kernel-level analogue of
+  the POSIX KL3 defense).
+- `MMapFile` (`include/storage/mmap_file.hpp`) replaced its
+  `throw "unsupported"` Windows stub with a real
+  `CreateFileMappingW + MapViewOfFile` implementation.
+- LASER sector-size constant raised from 512 to 4096 across all backends
+  (matches the LASER on-disk page layout; 4Kn-drive compatible without
+  reducing 512n correctness).
+- LASER memory.hpp prefetch hint detection no longer relies on the
+  `__SSE2__` macro (which MSVC does not define); uses
+  `ALAYA_ARCH_X86`-gated `_mm_prefetch` with a `__builtin_prefetch`
+  fallback that is itself gated on GCC/Clang availability.
 
 ### Fixed
 - LASER SIMD rotation and scalar range kernels now use unaligned load/store

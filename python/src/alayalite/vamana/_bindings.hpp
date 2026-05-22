@@ -18,13 +18,13 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include <unistd.h>  // access(), R_OK — POSIX-only; the Vamana module is header-only and already Linux/macOS-only via OpenMP
 #include <cstdint>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <string>
 #include <system_error>
 
 #include "index/graph/vamana/build_dispatch.hpp"
+#include "utils/platform_fs.hpp"  // is_readable_regular_file (portable access/R_OK check)
 
 namespace alaya::vamana::bindings {
 
@@ -70,8 +70,8 @@ inline void build_index(const std::string &data_path,
                         .c_str());
     throw py::error_already_set();
   }
-  // access(R_OK) catches permission errors that is_regular_file won't.
-  if (::access(data_path.c_str(), R_OK) != 0) {
+  // R_OK check catches permission errors that is_regular_file won't.
+  if (!::alaya::platform::is_readable_regular_file(data_path)) {
     PyErr_SetString(PyExc_OSError, ("data_path is not readable: " + data_path).c_str());
     throw py::error_already_set();
   }

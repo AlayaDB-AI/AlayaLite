@@ -4,9 +4,6 @@
 
 #pragma once
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <array>
 #include <cerrno>
 #include <cstdint>
@@ -21,6 +18,7 @@
 #include "index/disk/types.hpp"
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
+#include "utils/platform_fs.hpp"
 
 namespace alaya::disk {
 
@@ -122,50 +120,10 @@ struct KvPair {
 inline constexpr size_t kMaxManifestBytes = 1U << 20;  // 1 MiB
 
 inline auto read_manifest_file(const std::filesystem::path &path) -> std::string {
-  int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-  if (fd < 0) {
-    throw std::runtime_error("manifest open failed: " + path.string() + ": " +
-                             std::strerror(errno));
-  }
-  struct ::stat st{};
-  if (::fstat(fd, &st) != 0) {
-    int saved = errno;
-    ::close(fd);
-    throw std::runtime_error("manifest fstat failed: " + path.string() + ": " +
-                             std::strerror(saved));
-  }
-  if (!S_ISREG(st.st_mode)) {
-    ::close(fd);
-    throw std::invalid_argument("manifest path is not a regular file: " + path.string());
-  }
-  if (st.st_size < 0 || static_cast<size_t>(st.st_size) > kMaxManifestBytes) {
-    ::close(fd);
-    throw std::invalid_argument(
-        "manifest file too large or has invalid size: " + std::to_string(st.st_size) +
-        " bytes (max " + std::to_string(kMaxManifestBytes) + ")");
-  }
-  std::string buf(static_cast<size_t>(st.st_size), '\0');
-  size_t total = 0;
-  while (total < buf.size()) {
-    ssize_t n = ::read(fd, buf.data() + total, buf.size() - total);
-    if (n < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      int saved = errno;
-      ::close(fd);
-      throw std::runtime_error("manifest read failed: " + path.string() + ": " +
-                               std::strerror(saved));
-    }
-    if (n == 0) {
-      break;
-    }
-    total += static_cast<size_t>(n);
-  }
-  ::close(fd);
-  if (total != buf.size()) {
-    throw std::runtime_error("manifest short read: " + path.string());
-  }
+  // platform_fs::read_regular_file_bounded preserves the historic exception
+  // contract: malformed user data surfaces as std::invalid_argument (size
+  // overflow, non-regular file, symlink), syscall failures as runtime_error.
+  auto buf = ::alaya::platform::read_regular_file_bounded(path, kMaxManifestBytes);
   if (buf.size() >= 3 && static_cast<unsigned char>(buf[0]) == 0xEF &&
       static_cast<unsigned char>(buf[1]) == 0xBB && static_cast<unsigned char>(buf[2]) == 0xBF) {
     throw std::invalid_argument("manifest rejected: UTF-8 BOM at file start (encoding)");
@@ -175,32 +133,7 @@ inline auto read_manifest_file(const std::filesystem::path &path) -> std::string
 
 inline auto write_manifest_file(const std::filesystem::path &path, std::string_view contents)
     -> void {
-  int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0600);
-  if (fd < 0) {
-    throw std::runtime_error("manifest create failed: " + path.string() + ": " +
-                             std::strerror(errno));
-  }
-  size_t written = 0;
-  while (written < contents.size()) {
-    ssize_t n = ::write(fd, contents.data() + written, contents.size() - written);
-    if (n < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      int saved = errno;
-      ::close(fd);
-      throw std::runtime_error("manifest write failed: " + path.string() + ": " +
-                               std::strerror(saved));
-    }
-    written += static_cast<size_t>(n);
-  }
-  if (::fsync(fd) != 0) {
-    int saved = errno;
-    ::close(fd);
-    throw std::runtime_error("manifest fsync failed: " + path.string() + ": " +
-                             std::strerror(saved));
-  }
-  ::close(fd);
+  ::alaya::platform::write_all_fsync(path, contents.data(), contents.size());
 }
 
 inline auto parse_kv_lines(std::string_view body) -> std::vector<KvPair> {

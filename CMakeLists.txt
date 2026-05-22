@@ -31,10 +31,11 @@ if(BUILD_PYTHON
   )
 endif()
 
-# Laser on-disk QG index module. Linux x86_64 defaults to libaio; macOS defaults to the portable thread-pool backend.
-# Other platforms skip it silently by default.
-if((CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64") OR CMAKE_SYSTEM_NAME STREQUAL
-                                                                                             "Darwin"
+# Laser on-disk QG index module. Linux x86_64 defaults to libaio; macOS defaults to the portable thread-pool backend;
+# Windows x64 defaults to the IOCP backend. Other platforms skip it silently by default.
+if((CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+   OR CMAKE_SYSTEM_NAME STREQUAL "Darwin"
+   OR (CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
 )
   set(ALAYA_ENABLE_LASER_DEFAULT ON)
 else()
@@ -49,6 +50,12 @@ endif()
 option(ALAYA_LASER_USE_THREADPOOL "Use the portable thread-pool LASER I/O backend"
        ${ALAYA_LASER_USE_THREADPOOL_DEFAULT}
 )
+if(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+  set(ALAYA_LASER_USE_IOCP_DEFAULT ON)
+else()
+  set(ALAYA_LASER_USE_IOCP_DEFAULT OFF)
+endif()
+option(ALAYA_LASER_USE_IOCP "Use the Windows IOCP LASER I/O backend" ${ALAYA_LASER_USE_IOCP_DEFAULT})
 
 # ============================================================================
 # Build accelerators: ccache + fast linker (auto-detected)
@@ -180,9 +187,17 @@ if(ALAYA_ENABLE_LASER)
         ON
         CACHE BOOL "Use the portable thread-pool LASER I/O backend" FORCE
     )
+  elseif(CMAKE_SYSTEM_NAME STREQUAL "Windows" AND CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64")
+    set(ALAYA_LASER_USE_IOCP
+        ON
+        CACHE BOOL "Use the Windows IOCP LASER I/O backend" FORCE
+    )
   elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
-    message(FATAL_ERROR "ALAYA_ENABLE_LASER=ON but this platform is not supported yet. "
-                        "Configure with -DALAYA_ENABLE_LASER=OFF to skip the Laser module."
+    message(
+      FATAL_ERROR
+        "ALAYA_ENABLE_LASER=ON but this platform is not supported yet. "
+        "Supported platforms: Linux x86_64 (libaio), macOS (thread pool), Windows x64 (IOCP). "
+        "Configure with -DALAYA_ENABLE_LASER=OFF to skip the Laser module."
     )
   endif()
 
@@ -196,7 +211,9 @@ if(ALAYA_ENABLE_LASER)
     endif()
   endif()
 
-  if(ALAYA_LASER_USE_THREADPOOL)
+  if(ALAYA_LASER_USE_IOCP)
+    set(_alaya_laser_backend_message "IOCP (Windows x64)")
+  elseif(ALAYA_LASER_USE_THREADPOOL)
     if(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
       set(_alaya_laser_backend_message "thread pool (macOS)")
     else()
@@ -226,7 +243,12 @@ if(ALAYA_ENABLE_LASER)
 
   message(STATUS "LASER I/O backend: ${_alaya_laser_backend_message}")
 
-  if(ALAYA_LASER_USE_THREADPOOL)
+  if(ALAYA_LASER_USE_IOCP)
+    # CreateIoCompletionPort / GetQueuedCompletionStatusEx / ReadFile live in kernel32, which MSVC links implicitly; no
+    # extra link libraries are required.
+    set(_alaya_laser_backend_libs)
+    set(_alaya_laser_backend_definition ALAYA_LASER_USE_IOCP=1)
+  elseif(ALAYA_LASER_USE_THREADPOOL)
     set(_alaya_laser_backend_libs)
     set(_alaya_laser_backend_definition ALAYA_LASER_USE_THREADPOOL=1)
   else()
@@ -252,10 +274,19 @@ if(ALAYA_ENABLE_LASER)
   target_compile_features(alaya_laser INTERFACE cxx_std_20)
   # -mavx2 -mfma is the LASER baseline for Eigen and non-handwritten SIMD code; handwritten LASER kernels use
   # function-level target attributes for runtime AVX-512 dispatch.
-  set(_ALAYA_LASER_CONSUMER_OPTIONS
-      ${ALAYA_SIMD_COMPILE_OPTIONS} -ftree-vectorize -DEIGEN_DONT_PARALLELIZE
-      CACHE INTERNAL "Compile options a Laser-consuming target must apply PRIVATEly"
-  )
+  if(MSVC)
+    # MSVC: /arch:AVX2 enables AVX2 + FMA at the codegen level. There is no MSVC analogue of -ftree-vectorize (it
+    # auto-vectorizes under /O2 by default). EIGEN_DONT_PARALLELIZE is passed via /D.
+    set(_ALAYA_LASER_CONSUMER_OPTIONS
+        /arch:AVX2 /DEIGEN_DONT_PARALLELIZE
+        CACHE INTERNAL "Compile options a Laser-consuming target must apply PRIVATEly"
+    )
+  else()
+    set(_ALAYA_LASER_CONSUMER_OPTIONS
+        ${ALAYA_SIMD_COMPILE_OPTIONS} -ftree-vectorize -DEIGEN_DONT_PARALLELIZE
+        CACHE INTERNAL "Compile options a Laser-consuming target must apply PRIVATEly"
+    )
+  endif()
 endif()
 
 # ============================================================================

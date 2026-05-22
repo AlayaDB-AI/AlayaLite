@@ -14,7 +14,12 @@
 #include <type_traits>
 #include <utility>
 
-#ifndef _WIN32
+#ifdef _WIN32
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
+  #include <windows.h>
+#else
   #include <fcntl.h>
   #include <sys/mman.h>
   #include <sys/stat.h>
@@ -101,8 +106,52 @@ class MMapFile {
  private:
   void open_impl(const std::filesystem::path &path) {
 #ifdef _WIN32
-    (void)path;
-    throw std::runtime_error("MMapFile: unsupported on this platform in v1");
+    HANDLE hFile = ::CreateFileW(path.c_str(),
+                                 GENERIC_READ,
+                                 FILE_SHARE_READ,
+                                 nullptr,
+                                 OPEN_EXISTING,
+                                 FILE_ATTRIBUTE_NORMAL,
+                                 nullptr);
+    if (hFile == INVALID_HANDLE_VALUE) {
+      throw std::runtime_error("MMapFile open failed: " + path.string() + ": Win32 error " +
+                               std::to_string(::GetLastError()));
+    }
+    // Read-only mmap rejects directories and non-regular files implicitly:
+    // CreateFileMapping on a directory handle fails with ERROR_INVALID_HANDLE.
+    LARGE_INTEGER li{};
+    if (!::GetFileSizeEx(hFile, &li)) {
+      const auto err = ::GetLastError();
+      ::CloseHandle(hFile);
+      throw std::runtime_error("MMapFile size query failed: " + path.string() + ": Win32 error " +
+                               std::to_string(err));
+    }
+    if (li.QuadPart <= 0) {
+      ::CloseHandle(hFile);
+      throw std::runtime_error("MMapFile rejects empty file: " + path.string());
+    }
+    HANDLE hMap = ::CreateFileMappingW(hFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
+    if (hMap == nullptr) {
+      const auto err = ::GetLastError();
+      ::CloseHandle(hFile);
+      throw std::runtime_error("MMapFile CreateFileMapping failed: " + path.string() +
+                               ": Win32 error " + std::to_string(err));
+    }
+    void *p = ::MapViewOfFile(hMap, FILE_MAP_READ, 0, 0, 0);
+    if (p == nullptr) {
+      const auto err = ::GetLastError();
+      ::CloseHandle(hMap);
+      ::CloseHandle(hFile);
+      throw std::runtime_error("MMapFile MapViewOfFile failed: " + path.string() +
+                               ": Win32 error " + std::to_string(err));
+    }
+    // The view holds a reference on the section; the section holds one on the
+    // file. We can close both handles now and the mapping survives until
+    // UnmapViewOfFile.
+    ::CloseHandle(hMap);
+    ::CloseHandle(hFile);
+    data_ = p;
+    size_ = static_cast<size_t>(li.QuadPart);
 #else
     int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
     if (fd < 0) {
@@ -139,7 +188,11 @@ class MMapFile {
   }
 
   void release() noexcept {
-#ifndef _WIN32
+#ifdef _WIN32
+    if (data_ != nullptr) {
+      ::UnmapViewOfFile(data_);
+    }
+#else
     if (data_ != nullptr) {
       ::munmap(data_, size_);
     }

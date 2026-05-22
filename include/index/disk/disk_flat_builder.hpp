@@ -4,15 +4,6 @@
 
 #pragma once
 
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <unistd.h>
-
-#if defined(__linux__)
-  #include <linux/fs.h>     // RENAME_NOREPLACE
-  #include <sys/syscall.h>  // SYS_renameat2
-#endif
-
 #include <bit>
 #include <cerrno>
 #include <chrono>
@@ -29,6 +20,7 @@
 #include "index/disk/types.hpp"
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
+#include "utils/platform_fs.hpp"
 
 namespace alaya::disk {
 
@@ -74,90 +66,18 @@ inline auto is_finite_f64(double v) -> bool {
 
 inline auto write_all_fsync(const std::filesystem::path &path, const void *data, size_t bytes)
     -> void {
-  int fd = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC | O_NOFOLLOW, 0600);
-  if (fd < 0) {
-    throw std::runtime_error("disk_flat_builder open failed: " + path.string() + ": " +
-                             std::strerror(errno));
-  }
-  const auto *p = static_cast<const char *>(data);
-  size_t written = 0;
-  while (written < bytes) {
-    ssize_t n = ::write(fd, p + written, bytes - written);
-    if (n < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      int saved = errno;
-      ::close(fd);
-      throw std::runtime_error("disk_flat_builder write failed: " + path.string() + ": " +
-                               std::strerror(saved));
-    }
-    written += static_cast<size_t>(n);
-  }
-  if (::fsync(fd) != 0) {
-    int saved = errno;
-    ::close(fd);
-    throw std::runtime_error("disk_flat_builder fsync failed: " + path.string() + ": " +
-                             std::strerror(saved));
-  }
-  if (::close(fd) != 0) {
-    throw std::runtime_error("disk_flat_builder close failed: " + path.string() + ": " +
-                             std::strerror(errno));
-  }
+  ::alaya::platform::write_all_fsync(path, data, bytes);
 }
 
 inline auto fsync_dir(const std::filesystem::path &dir) -> void {
-  // O_NOFOLLOW per design D4: parent directory open MUST refuse symlinks.
-  int fd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-  if (fd < 0) {
-    throw std::runtime_error("disk_flat_builder open dir failed: " + dir.string() + ": " +
-                             std::strerror(errno));
-  }
-  if (::fsync(fd) != 0) {
-    int saved = errno;
-    ::close(fd);
-    throw std::runtime_error("disk_flat_builder fsync dir failed: " + dir.string() + ": " +
-                             std::strerror(saved));
-  }
-  if (::close(fd) != 0) {
-    throw std::runtime_error("disk_flat_builder close dir failed: " + dir.string() + ": " +
-                             std::strerror(errno));
-  }
+  // Strict variant: throws on POSIX failure. On Windows there is no
+  // directory-fsync analogue, so the call is a documented no-op.
+  ::alaya::platform::sync_directory_or_throw(dir);
 }
 
 inline auto rename_no_replace(const std::filesystem::path &from, const std::filesystem::path &to)
     -> void {
-#if defined(__linux__) && defined(SYS_renameat2) && defined(RENAME_NOREPLACE)
-  auto rc = ::syscall(SYS_renameat2,
-                      AT_FDCWD,
-                      from.c_str(),
-                      AT_FDCWD,
-                      to.c_str(),
-                      static_cast<unsigned int>(RENAME_NOREPLACE));
-  if (rc != 0) {
-    int saved = errno;
-    if (saved == EEXIST) {
-      throw std::runtime_error("disk_flat_builder target segment already exists: " + to.string());
-    }
-    throw std::runtime_error("disk_flat_builder renameat2 failed: " + from.string() + " -> " +
-                             to.string() + ": " + std::strerror(saved));
-  }
-#else
-  struct ::stat st{};
-  if (::lstat(to.c_str(), &st) == 0) {
-    throw std::runtime_error("disk_flat_builder target segment already exists: " + to.string());
-  }
-  if (errno != ENOENT) {
-    int saved = errno;
-    throw std::runtime_error("disk_flat_builder rename precheck failed: " + to.string() + ": " +
-                             std::strerror(saved));
-  }
-  if (::rename(from.c_str(), to.c_str()) != 0) {
-    int saved = errno;
-    throw std::runtime_error("disk_flat_builder rename failed: " + from.string() + " -> " +
-                             to.string() + ": " + std::strerror(saved));
-  }
-#endif
+  ::alaya::platform::atomic_replace_no_overwrite(from, to);
 }
 
 class TmpDirGuard {
@@ -268,7 +188,7 @@ class DiskFlatBuilder {
       }
     }
 
-    const auto pid = static_cast<int64_t>(::getpid());
+    const auto pid = ::alaya::platform::get_pid();
     const auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::string tmp_name =
         ".tmp_" + seg_basename + "_" + std::to_string(pid) + "_" + std::to_string(ts);

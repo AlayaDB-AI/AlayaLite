@@ -28,6 +28,7 @@
 #include "index/disk/types.hpp"
 #include "storage/mmap_file.hpp"
 #include "utils/metric_type.hpp"
+#include "utils/platform_fs.hpp"
 
 #if defined(ALAYA_ENABLE_LASER) && ALAYA_ENABLE_LASER != 0
   #include "index/graph/laser/qg/qg.hpp"
@@ -113,62 +114,17 @@ inline auto laser_compute_expected_ids_bytes(uint64_t count, const std::filesyst
 
 inline auto laser_read_index_metadata_count(const std::filesystem::path &index_path,
                                             const std::filesystem::path &seg_dir) -> uint64_t {
-  #ifdef _WIN32
-  (void)index_path;
-  (void)seg_dir;
-  throw std::runtime_error("LaserSegmentSearcher: disk_laser not implemented in v1 on Windows");
-  #else
-  int fd = ::open(index_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-  if (fd < 0) {
-    const int saved = errno;
-    throw std::runtime_error("LaserSegmentSearcher: index metadata open failed for " +
+  std::string buf;
+  try {
+    buf = ::alaya::platform::read_file_prefix(index_path, sizeof(uint64_t));
+  } catch (const std::exception &e) {
+    throw std::runtime_error(std::string("LaserSegmentSearcher: index metadata read failed for ") +
                              index_path.string() + " in segment " + seg_dir.string() + ": " +
-                             std::strerror(saved));
+                             e.what());
   }
-
-  struct ::stat st{};
-  if (::fstat(fd, &st) != 0) {
-    const int saved = errno;
-    ::close(fd);
-    throw std::runtime_error("LaserSegmentSearcher: index metadata fstat failed for " +
-                             index_path.string() + " in segment " + seg_dir.string() + ": " +
-                             std::strerror(saved));
-  }
-  if (!S_ISREG(st.st_mode)) {
-    ::close(fd);
-    throw std::runtime_error("LaserSegmentSearcher: index metadata path is not a regular file: " +
-                             index_path.string() + " in segment " + seg_dir.string());
-  }
-
   uint64_t count = 0;
-  auto *dst = reinterpret_cast<char *>(&count);
-  size_t total = 0;
-  while (total < sizeof(count)) {
-    const ssize_t n = ::read(fd, dst + total, sizeof(count) - total);
-    if (n < 0) {
-      if (errno == EINTR) {
-        continue;
-      }
-      const int saved = errno;
-      ::close(fd);
-      throw std::runtime_error("LaserSegmentSearcher: index metadata read failed for " +
-                               index_path.string() + " in segment " + seg_dir.string() + ": " +
-                               std::strerror(saved));
-    }
-    if (n == 0) {
-      break;
-    }
-    total += static_cast<size_t>(n);
-  }
-  ::close(fd);
-  if (total != sizeof(count)) {
-    throw std::runtime_error("LaserSegmentSearcher: index metadata short read for " +
-                             index_path.string() + " in segment " + seg_dir.string() + " (read " +
-                             std::to_string(total) + " of " + std::to_string(sizeof(count)) +
-                             " bytes)");
-  }
+  std::memcpy(&count, buf.data(), sizeof(count));
   return count;
-  #endif
 }
 
 inline auto laser_validate_manifest_artifact(const SegmentManifest &manifest,
@@ -193,33 +149,22 @@ inline auto laser_validate_manifest_artifact(const SegmentManifest &manifest,
                              "' in segment " + seg_dir.string());
   }
 
-  #ifdef _WIN32
-  throw std::runtime_error("LaserSegmentSearcher: disk_laser not implemented in v1 on Windows");
-  #else
   const auto path = seg_dir / it->second;
-  int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-  if (fd < 0) {
-    const int saved = errno;
-    throw std::runtime_error("LaserSegmentSearcher: native artifact open failed for " +
-                             path.string() + " (" + key + ") in segment " + seg_dir.string() +
-                             ": " + std::strerror(saved));
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(path, ec) || ec) {
+    throw std::runtime_error(
+        "LaserSegmentSearcher: native artifact is missing, empty, or not "
+        "regular for " +
+        path.string() + " (" + key + ") in segment " + seg_dir.string() +
+        (ec ? (": " + ec.message()) : ""));
   }
-  struct ::stat st{};
-  if (::fstat(fd, &st) != 0) {
-    const int saved = errno;
-    ::close(fd);
-    throw std::runtime_error("LaserSegmentSearcher: native artifact fstat failed for " +
-                             path.string() + " (" + key + ") in segment " + seg_dir.string() +
-                             ": " + std::strerror(saved));
-  }
-  ::close(fd);
-  if (!S_ISREG(st.st_mode) || st.st_size <= 0) {
+  const auto sz = std::filesystem::file_size(path, ec);
+  if (ec || sz == 0) {
     throw std::runtime_error(
         "LaserSegmentSearcher: native artifact is missing, empty, or not "
         "regular for " +
         path.string() + " (" + key + ") in segment " + seg_dir.string());
   }
-  #endif
 }
 
 }  // namespace detail

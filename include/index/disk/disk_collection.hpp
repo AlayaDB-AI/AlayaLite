@@ -4,10 +4,6 @@
 
 #pragma once
 
-#include <fcntl.h>
-#include <sys/file.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -31,12 +27,27 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#ifdef _WIN32
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
+  #include <io.h>
+  #include <windows.h>
+#else
+  #include <fcntl.h>
+  #include <sys/file.h>
+  #include <sys/stat.h>
+  #include <unistd.h>
+#endif
+
 #include "index/disk/segment_factory.hpp"
 #include "index/disk/segment_manifest.hpp"
 #include "index/disk/types.hpp"
 #include "storage/mmap_file.hpp"
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
+#include "utils/platform_fs.hpp"
 
 namespace alaya::disk {
 
@@ -48,15 +59,16 @@ inline auto format_segment_id(uint64_t id) -> std::string {
   return std::string(buf);
 }
 
-// Standard POSIX rename: atomically replaces destination if it exists.
-// Used for collection_manifest.txt updates where the destination intentionally
-// exists (segment-publish uses RENAME_NOREPLACE in `disk_flat_builder.hpp`).
+// Standard atomic rename: replaces the destination if it exists. Used for
+// collection_manifest.txt updates where the destination intentionally exists
+// (segment-publish uses atomic_replace_no_overwrite in `disk_flat_builder.hpp`).
 inline auto rename_atomic_replace(const std::filesystem::path &from,
                                   const std::filesystem::path &to) -> void {
-  if (::rename(from.c_str(), to.c_str()) != 0) {
-    int saved = errno;
+  try {
+    ::alaya::platform::atomic_replace(from, to);
+  } catch (const std::exception &e) {
     throw std::runtime_error("collection_manifest rename failed: " + from.string() + " -> " +
-                             to.string() + ": " + std::strerror(saved));
+                             to.string() + ": " + e.what());
   }
 }
 
@@ -68,7 +80,7 @@ inline auto rename_atomic_replace(const std::filesystem::path &from,
 // as a soft step allows the in-memory state to commit on rename success.
 inline auto publish_collection_manifest_atomic_only(const std::filesystem::path &collection_dir,
                                                     const CollectionManifest &m) -> void {
-  const auto pid = static_cast<int64_t>(::getpid());
+  const auto pid = ::alaya::platform::get_pid();
   const auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
   const std::string tmp_name =
       ".tmp_collection_manifest_" + std::to_string(pid) + "_" + std::to_string(ts);
@@ -89,6 +101,10 @@ struct SegmentIdsView {
   auto data() const -> const uint64_t * { return static_cast<const uint64_t *>(mmap.data()); }
 };
 
+// Per-platform collection lock handle. On POSIX, the int file-descriptor backs
+// `flock()`; on Windows, the HANDLE backs `LockFileEx()`. Both kernels release
+// the lock automatically on handle close, so close() doubles as release.
+#ifndef _WIN32
 struct LockFd {
   int fd = -1;
 
@@ -117,6 +133,36 @@ struct LockFd {
     }
   }
 };
+#else
+struct LockFd {
+  HANDLE handle = INVALID_HANDLE_VALUE;
+
+  LockFd() = default;
+  explicit LockFd(HANDLE h) : handle(h) {}
+  LockFd(const LockFd &) = delete;
+  auto operator=(const LockFd &) -> LockFd & = delete;
+  LockFd(LockFd &&other) noexcept : handle(other.handle) { other.handle = INVALID_HANDLE_VALUE; }
+  auto operator=(LockFd &&other) noexcept -> LockFd & {
+    if (this != &other) {
+      close();
+      handle = other.handle;
+      other.handle = INVALID_HANDLE_VALUE;
+    }
+    return *this;
+  }
+  ~LockFd() { close(); }
+
+  // LockFileEx auto-releases the kernel lock on handle close. We do not call
+  // UnlockFileEx explicitly because the open handle holds the lock for the
+  // duration of the file-handle lifetime.
+  void close() noexcept {
+    if (handle != INVALID_HANDLE_VALUE && handle != nullptr) {
+      ::CloseHandle(handle);
+      handle = INVALID_HANDLE_VALUE;
+    }
+  }
+};
+#endif
 
 inline auto absolute_lock_path_string(const std::filesystem::path &lock_path) -> std::string {
   std::error_code ec;
@@ -137,34 +183,39 @@ inline auto weakly_canonical_lock_path_string(const std::filesystem::path &lock_
   return absolute_lock_path_string(lock_path);
 }
 
-inline auto read_lock_holder_pid(int fd) -> std::optional<std::string> {
-  char buf[65] = {};
-  const ssize_t n = ::pread(fd, buf, sizeof(buf) - 1, 0);
-  if (n <= 0) {
-    return std::nullopt;
-  }
-  std::string content(buf, static_cast<size_t>(n));
+// Common pid-text parser. The lock-file format is `pid=<digits>\n`; the
+// reader returns the digit run as a string (no integer parsing — keeps the
+// "diagnostic only" contract intact).
+inline auto parse_pid_text(std::string_view content) -> std::optional<std::string> {
   const auto pos = content.find("pid=");
-  if (pos == std::string::npos) {
+  if (pos == std::string_view::npos) {
     return std::nullopt;
   }
-  size_t begin = pos + 4;
-  size_t end = begin;
+  std::size_t begin = pos + 4;
+  std::size_t end = begin;
   while (end < content.size() && content[end] >= '0' && content[end] <= '9') {
     ++end;
   }
   if (end == begin) {
     return std::nullopt;
   }
-  return content.substr(begin, end - begin);
+  return std::string(content.substr(begin, end - begin));
+}
+
+#ifndef _WIN32
+inline auto read_lock_holder_pid(int fd) -> std::optional<std::string> {
+  char buf[65] = {};
+  const ssize_t n = ::pread(fd, buf, sizeof(buf) - 1, 0);
+  if (n <= 0) {
+    return std::nullopt;
+  }
+  return parse_pid_text(std::string_view(buf, static_cast<size_t>(n)));
 }
 
 inline void write_lock_holder_pid_best_effort(int fd) noexcept {
   char content[64];
-  const int n = std::snprintf(content,
-                              sizeof(content),
-                              "pid=%" PRId64 "\n",
-                              static_cast<int64_t>(::getpid()));
+  const int n =
+      std::snprintf(content, sizeof(content), "pid=%" PRId64 "\n", ::alaya::platform::get_pid());
   if (n <= 0 || static_cast<size_t>(n) >= sizeof(content)) {
     return;
   }
@@ -196,7 +247,68 @@ inline void write_lock_holder_pid_best_effort(int fd) noexcept {
 inline auto is_lock_contention_errno(int saved) -> bool {
   return saved == EWOULDBLOCK || saved == EAGAIN;
 }
+#else
+inline auto read_lock_holder_pid(HANDLE handle) -> std::optional<std::string> {
+  // Move file pointer to 0 and read first 64 bytes via OVERLAPPED. Using a
+  // local OVERLAPPED with Offset=0 leaves any concurrent position untouched.
+  OVERLAPPED ov{};
+  ov.Offset = 0;
+  ov.OffsetHigh = 0;
+  char buf[65] = {};
+  DWORD got = 0;
+  if (!::ReadFile(handle, buf, sizeof(buf) - 1, &got, &ov)) {
+    return std::nullopt;
+  }
+  if (got == 0) {
+    return std::nullopt;
+  }
+  return parse_pid_text(std::string_view(buf, got));
+}
 
+inline void write_lock_holder_pid_best_effort(HANDLE handle) noexcept {
+  char content[64];
+  const int n =
+      std::snprintf(content, sizeof(content), "pid=%" PRId64 "\n", ::alaya::platform::get_pid());
+  if (n <= 0 || static_cast<size_t>(n) >= sizeof(content)) {
+    return;
+  }
+  // Truncate then overwrite. Failure is best-effort (diagnostic data only).
+  LARGE_INTEGER zero{};
+  zero.QuadPart = 0;
+  if (!::SetFilePointerEx(handle, zero, nullptr, FILE_BEGIN)) {
+    return;
+  }
+  if (!::SetEndOfFile(handle)) {
+    return;
+  }
+  OVERLAPPED ov{};
+  ov.Offset = 0;
+  ov.OffsetHigh = 0;
+  DWORD written = 0;
+  (void)::WriteFile(handle, content, static_cast<DWORD>(n), &written, &ov);
+}
+
+[[noreturn]] inline void throw_lock_open_failed(const std::filesystem::path &lock_path,
+                                                DWORD saved) {
+  const auto path = absolute_lock_path_string(lock_path);
+  if (saved == ERROR_PATH_NOT_FOUND) {
+    throw std::runtime_error("DiskCollection: collection path does not exist for lock file: " +
+                             path);
+  }
+  if (saved == ERROR_ACCESS_DENIED) {
+    throw std::runtime_error("DiskCollection: lock path is not a regular file: " + path +
+                             ": Win32 error " + std::to_string(saved));
+  }
+  throw std::runtime_error("DiskCollection: lock open failed: " + path + ": Win32 error " +
+                           std::to_string(saved));
+}
+
+inline auto is_lock_contention_win32_error(DWORD err) -> bool {
+  return err == ERROR_LOCK_VIOLATION || err == ERROR_SHARING_VIOLATION;
+}
+#endif
+
+#ifndef _WIN32
 // Post-flock inode revalidation (KL3 closure). Compares the fd's
 // fstat-derived `(st_dev, st_ino)` (captured by the caller before flock)
 // against a fresh `stat(lock_path)`. Throws on mismatch or when
@@ -224,12 +336,14 @@ inline void revalidate_lock_inode_after_flock(const std::filesystem::path &lock_
                              weakly_canonical_lock_path_string(lock_path));
   }
 }
+#endif
 
 // AcquireMode selects between the open() entry (O_CREAT, tolerates an
 // existing `.lock` for legacy-collection compatibility) and the ctor entry
 // (O_CREAT|O_EXCL, atomic ownership of the freshly-created `.lock`).
 enum class AcquireMode { ForOpen, ForCreate };
 
+#ifndef _WIN32
 inline auto acquire_collection_lock_impl(const std::filesystem::path &collection_root,
                                          AcquireMode mode) -> LockFd {
   const auto lock_path = collection_root / ".lock";
@@ -307,6 +421,72 @@ inline auto acquire_collection_lock_impl(const std::filesystem::path &collection
   write_lock_holder_pid_best_effort(lock.fd);
   return lock;
 }
+#else
+inline auto acquire_collection_lock_impl(const std::filesystem::path &collection_root,
+                                         AcquireMode mode) -> LockFd {
+  const auto lock_path = collection_root / ".lock";
+  // Sharing intentionally excludes DELETE so the lock file cannot be unlinked
+  // / renamed while we hold the handle. This is the Win32 analogue of the
+  // POSIX KL3 inode-swap defense — preventing the swap, rather than detecting
+  // it post-acquire.
+  const DWORD share_mode = FILE_SHARE_READ | FILE_SHARE_WRITE;
+  const DWORD creation = (mode == AcquireMode::ForCreate) ? static_cast<DWORD>(CREATE_NEW)
+                                                          : static_cast<DWORD>(OPEN_ALWAYS);
+  HANDLE handle = ::CreateFileW(lock_path.c_str(),
+                                GENERIC_READ | GENERIC_WRITE,
+                                share_mode,
+                                nullptr,
+                                creation,
+                                FILE_ATTRIBUTE_NORMAL,
+                                nullptr);
+  if (handle == INVALID_HANDLE_VALUE) {
+    const auto saved = ::GetLastError();
+    if (mode == AcquireMode::ForCreate &&
+        (saved == ERROR_FILE_EXISTS || saved == ERROR_ALREADY_EXISTS)) {
+      throw std::runtime_error(
+          "DiskCollection: target path already exists or is being created concurrently: " +
+          weakly_canonical_lock_path_string(lock_path));
+    }
+    if (saved == ERROR_SHARING_VIOLATION) {
+      // Another process opened the lock file without sharing delete — treat
+      // as contention (matches the POSIX contention message contract).
+      throw std::runtime_error("DiskCollection: collection is already open by another process: " +
+                               weakly_canonical_lock_path_string(lock_path));
+    }
+    throw_lock_open_failed(lock_path, saved);
+  }
+  LockFd lock(handle);
+
+  // Try-lock with LOCKFILE_FAIL_IMMEDIATELY. Lock the maximum byte range
+  // (UINT64_MAX) so any concurrent partial-range lock is rejected too.
+  OVERLAPPED ov{};
+  if (!::LockFileEx(lock.handle,
+                    LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                    0,
+                    MAXDWORD,
+                    MAXDWORD,
+                    &ov)) {
+    const auto saved = ::GetLastError();
+    if (is_lock_contention_win32_error(saved)) {
+      const auto holder_pid = read_lock_holder_pid(lock.handle);
+      std::string msg = "DiskCollection: collection is already open by another process: " +
+                        weakly_canonical_lock_path_string(lock_path);
+      if (holder_pid.has_value()) {
+        msg += " (pid=" + *holder_pid + ")";
+      }
+      throw std::runtime_error(msg);
+    }
+    throw std::runtime_error(
+        "DiskCollection: lock LockFileEx failed: " + weakly_canonical_lock_path_string(lock_path) +
+        ": Win32 error " + std::to_string(saved));
+  }
+
+  // Inode-swap revalidation has no Win32 analogue with these share flags —
+  // the kernel guarantees the file cannot be renamed/unlinked while open.
+  write_lock_holder_pid_best_effort(lock.handle);
+  return lock;
+}
+#endif
 
 // Open-entry acquire: tolerates an existing `.lock`. Used ONLY by
 // `DiskCollection::open(path)`. Backwards-compatible with legacy collections
@@ -1143,37 +1323,24 @@ class DiskCollection {
   // or `std::nullopt` if the file is missing / unreadable / too short.
   static auto peek_graph_expected_size(const std::filesystem::path &graph_path)
       -> std::optional<uint64_t> {
-    int fd = ::open(graph_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-    if (fd < 0) {
+    std::string buf;
+    try {
+      buf = ::alaya::platform::read_file_prefix(graph_path, sizeof(uint64_t));
+    } catch (const std::exception &) {
       return std::nullopt;
     }
     uint64_t expected = 0;
-    ssize_t total = 0;
-    while (total < static_cast<ssize_t>(sizeof(expected))) {
-      ssize_t n = ::read(fd, reinterpret_cast<char *>(&expected) + total, sizeof(expected) - total);
-      if (n < 0) {
-        if (errno == EINTR) {
-          continue;
-        }
-        ::close(fd);
-        return std::nullopt;
-      }
-      if (n == 0) {
-        ::close(fd);
-        return std::nullopt;
-      }
-      total += n;
-    }
-    ::close(fd);
+    std::memcpy(&expected, buf.data(), sizeof(expected));
     return expected;
   }
 
   static auto stat_nonempty_regular_file(const std::filesystem::path &path) -> bool {
-    struct ::stat st{};
-    if (::stat(path.c_str(), &st) != 0) {
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(path, ec) || ec) {
       return false;
     }
-    return S_ISREG(st.st_mode) && st.st_size > 0;
+    const auto sz = std::filesystem::file_size(path, ec);
+    return !ec && sz > 0;
   }
 
   static void classify_and_log_orphan(const std::filesystem::path &orphan_dir) {

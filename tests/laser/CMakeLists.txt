@@ -75,6 +75,36 @@ target_compile_options(
 add_test(NAME laser_test_threadpool_file_reader COMMAND $<TARGET_FILE:test_threadpool_file_reader>)
 set_tests_properties(laser_test_threadpool_file_reader PROPERTIES LABELS "laser;threadpool")
 
+# IOCP backend test (Windows-only payload; on Linux/macOS the file compiles to a single SUCCEED placeholder so the CTest
+# matrix stays uniform).
+add_executable(test_iocp_file_reader ${CMAKE_CURRENT_SOURCE_DIR}/utils/test_iocp_file_reader.cpp)
+target_include_directories(test_iocp_file_reader PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(
+  test_iocp_file_reader PRIVATE ${GTEST_LIBS} Eigen3::Eigen concurrentqueue::concurrentqueue spdlog::spdlog_header_only
+)
+if(TARGET OpenMP::OpenMP_CXX)
+  target_link_libraries(test_iocp_file_reader PRIVATE OpenMP::OpenMP_CXX)
+endif()
+target_compile_features(test_iocp_file_reader PRIVATE cxx_std_20)
+if(WIN32)
+  target_compile_definitions(test_iocp_file_reader PRIVATE ALAYA_LASER_USE_IOCP=1)
+endif()
+# MSVC and GCC/Clang have different flag syntax; the simd consumer options above are GCC/Clang-only, so only attach them
+# on non-MSVC builds.
+if(NOT MSVC)
+  target_compile_options(
+    test_iocp_file_reader
+    PRIVATE -O3
+            -DNDEBUG
+            -Wall
+            -Wextra
+            ${_ALAYA_LASER_CONSUMER_OPTIONS}
+  )
+endif()
+
+add_test(NAME laser_test_iocp_file_reader COMMAND $<TARGET_FILE:test_iocp_file_reader>)
+set_tests_properties(laser_test_iocp_file_reader PROPERTIES LABELS "laser;iocp")
+
 add_executable(laser_simd_dispatch_test ${CMAKE_CURRENT_SOURCE_DIR}/simd_dispatch_test.cpp)
 target_link_libraries(laser_simd_dispatch_test PRIVATE alaya_laser ${GTEST_LIBS})
 target_compile_features(laser_simd_dispatch_test PRIVATE cxx_std_20)

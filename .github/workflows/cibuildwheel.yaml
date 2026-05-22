@@ -13,11 +13,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows wheels are parked until add-windows-portability-layer:
-        # python/include pulls POSIX headers, include/index/disk and
-        # include/recovery do the same, include/utils depends on sys/mman.h
-        # and sys/file.h, and LASER's io_uring path has no Windows equivalent.
-        # See openspec/changes/fix-cibuildwheel-stage1/proposal.md.
+        # 5-platform release wheel matrix. Windows uses LASER's IOCP backend
+        # (see openspec/changes/add-windows-portability-layer); Linux ARM
+        # builds with LASER OFF by default (tracked in a separate change).
         include:
         - os: ubuntu-latest
           arch: x86_64
@@ -60,11 +58,10 @@ jobs:
         target-arch: ${{ matrix.arch }}
 
     - name: Build wheels
-      if: matrix.os != 'windows-2022'
       uses: pypa/cibuildwheel@v3.3
 
     - name: Save Conan cache
-      if: steps.conan-cache.outputs.cache-hit != 'true' && matrix.os != 'windows-2022'
+      if: steps.conan-cache.outputs.cache-hit != 'true'
       continue-on-error: true
       uses: ./.github/actions/cache-restore
       with:
@@ -73,7 +70,6 @@ jobs:
         target-arch: ${{ matrix.arch }}
 
     - uses: actions/upload-artifact@v4
-      if: matrix.os != 'windows-2022'
       with:
         name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.build_id }}
         path: ./wheelhouse/*.whl

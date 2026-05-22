@@ -42,6 +42,14 @@ class AlayaLiteConan(ConanFile):
         if self.settings.os == "Linux":
             if self.settings.compiler in ["clang", "apple-clang"]:
                 self.requires("llvm-openmp/17.0.6")
+        elif self.settings.os == "Windows":
+            # MSVC's legacy /openmp implements OpenMP 2.0 only; LASER uses
+            # `#pragma omp simd` (OpenMP 4.0+). Either pull llvm-openmp from
+            # Conan or rely on vcpkg llvm-openmp + /openmp:llvm at compile
+            # time. Listing it here lets `find_package(OpenMP)` resolve
+            # without an external vcpkg toolchain when conan is the only
+            # dependency manager available.
+            self.requires("llvm-openmp/17.0.6")
         # GCC: assume libgomp is system-provided
         # macOS wheel builds use Homebrew libomp from cibuildwheel before-all.
         # ConanCenter's llvm-openmp/17 runtime lacks symbols emitted by the

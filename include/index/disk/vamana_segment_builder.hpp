@@ -4,9 +4,6 @@
 
 #pragma once
 
-#include <fcntl.h>
-#include <unistd.h>
-
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -29,6 +26,7 @@
 #include "index/graph/vamana/vamana_writer.hpp"
 #include "utils/log.hpp"
 #include "utils/metric_type.hpp"
+#include "utils/platform_fs.hpp"
 
 namespace alaya::disk {
 
@@ -144,7 +142,7 @@ class VamanaSegmentBuilder {
 
     // Step 2 — tmp directory. The pid+steady_clock suffix avoids collisions
     // when the same caller retries `finish` after a transient error.
-    const auto pid = static_cast<int64_t>(::getpid());
+    const auto pid = ::alaya::platform::get_pid();
     const auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
     const std::string tmp_name =
         ".tmp_" + seg_basename + "_" + std::to_string(pid) + "_" + std::to_string(ts);
@@ -242,21 +240,7 @@ class VamanaSegmentBuilder {
   }
 
   static auto fsync_regular_file(const std::filesystem::path &path) -> void {
-    int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
-    if (fd < 0) {
-      throw std::runtime_error("VamanaSegmentBuilder: open file for fsync failed: " +
-                               path.string() + ": " + std::strerror(errno));
-    }
-    if (::fsync(fd) != 0) {
-      int saved = errno;
-      ::close(fd);
-      throw std::runtime_error("VamanaSegmentBuilder: fsync file failed: " + path.string() + ": " +
-                               std::strerror(saved));
-    }
-    if (::close(fd) != 0) {
-      throw std::runtime_error("VamanaSegmentBuilder: close after fsync failed: " + path.string() +
-                               ": " + std::strerror(errno));
-    }
+    ::alaya::platform::sync_file_or_throw(path);
   }
 
   uint32_t dim_;
