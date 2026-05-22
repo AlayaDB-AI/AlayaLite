@@ -70,7 +70,7 @@ def segment_count(col_path: Path) -> int:
 
 
 def peak_rss_kb_and_unit() -> tuple[int, str]:
-    if sys.platform == "win32":
+    if sys.platform == "win32":  # pragma: no cover - Linux CI never enters this branch
         # Lazy import: psutil lives in the optional `laser` extras, so importing
         # at module scope would break `from alayalite.bench import _metrics` on
         # a default Windows install.

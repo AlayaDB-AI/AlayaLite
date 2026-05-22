@@ -17,6 +17,7 @@ on  :
     - cmake/**
     - scripts/ci/codecov/**
     - scripts/conan_build/**
+    - codecov.yml
   push:
     branches: [main]
     paths:
@@ -33,6 +34,7 @@ on  :
     - cmake/**
     - scripts/ci/codecov/**
     - scripts/conan_build/**
+    - codecov.yml
 
 jobs:
   codecov-python:
