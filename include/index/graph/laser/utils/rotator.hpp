@@ -135,7 +135,7 @@ class FHTRotator {
    * @param src   raw query vector, length dimension_
    * @param dst   rotated query vector, length B
    */
-  void rotate(const float *__restrict__ src, float *__restrict__ dst) const {
+  void rotate(const float *ALAYA_RESTRICT src, float *ALAYA_RESTRICT dst) const {
     size_t idx = simd::get_rotate_loop_func()(src, mat_.data(), dimension_, dst);
     for (; idx < dimension_; ++idx) {
       dst[idx] = src[idx] * mat_.at(idx);

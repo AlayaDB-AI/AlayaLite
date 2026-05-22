@@ -18,11 +18,12 @@
 #include <cstdint>
 
 #include "simd/laser_dispatch.hpp"
+#include "utils/platform.hpp"
 
 namespace alaya::laser::scalar {
 
 /** @brief Computes min/max values of a vector for quantization range. */
-inline void data_range(const float *__restrict__ vec, size_t dim, float &lo, float &hi) {
+inline void data_range(const float *ALAYA_RESTRICT vec, size_t dim, float &lo, float &hi) {
   simd::get_data_range_func()(vec, dim, lo, hi);
 }
 
@@ -35,8 +36,8 @@ inline void data_range(const float *__restrict__ vec, size_t dim, float &lo, flo
  * @param sum_q Output sum of all quantized values
  */
 template <typename T>
-void quantize(T *__restrict__ result,
-              const float *__restrict__ vec,
+void quantize(T *ALAYA_RESTRICT result,
+              const float *ALAYA_RESTRICT vec,
               size_t dim,
               float lo,
               float width,

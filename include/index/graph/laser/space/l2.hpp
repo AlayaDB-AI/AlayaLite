@@ -17,6 +17,7 @@
 
 #include "simd/distance_l2.hpp"
 #include "simd/laser_dispatch.hpp"
+#include "utils/platform.hpp"
 
 namespace alaya::laser::space {
 
@@ -27,12 +28,14 @@ namespace alaya::laser::space {
  * @param dim Vector dimension
  * @return ||vec0 - vec1||^2
  */
-inline float l2_sqr(const float *__restrict__ vec0, const float *__restrict__ vec1, size_t dim) {
+inline float l2_sqr(const float *ALAYA_RESTRICT vec0,
+                    const float *ALAYA_RESTRICT vec1,
+                    size_t dim) {
   return ::alaya::simd::l2_sqr<float, float>(vec0, vec1, dim);
 }
 
 /** @brief Computes squared L2 norm of a single vector: ||vec0||^2 */
-inline float l2_sqr_single(const float *__restrict__ vec0, size_t dim) {
+inline float l2_sqr_single(const float *ALAYA_RESTRICT vec0, size_t dim) {
   return simd::get_l2_sqr_single_func()(vec0, dim);
 }
 

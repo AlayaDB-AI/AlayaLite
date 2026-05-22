@@ -45,6 +45,7 @@
 #include "index/graph/laser/utils/pca_transform.hpp"
 #include "index/graph/laser/utils/rotator.hpp"
 #include "third_party/ngt/hashset.hpp"
+#include "utils/platform.hpp"
 
 namespace alaya::laser {
 /**
@@ -154,9 +155,9 @@ class QuantizedGraph {
   void init_workspace();
 
   // search on disk-based quantized graph
-  void disk_search_qg(const float *__restrict__ query,
+  void disk_search_qg(const float *ALAYA_RESTRICT query,
                       uint32_t knn,
-                      uint32_t *__restrict__ results);
+                      uint32_t *ALAYA_RESTRICT results);
 
   void copy_vectors(const float *);
 
@@ -221,11 +222,11 @@ class QuantizedGraph {
   void load_cluster_stats(const char *filename);
 
   /* search and copy results to KNN */
-  void search(const float *__restrict__ query, uint32_t knn, uint32_t *__restrict__ results);
+  void search(const float *ALAYA_RESTRICT query, uint32_t knn, uint32_t *ALAYA_RESTRICT results);
 
-  void batch_search(const float *__restrict__ query,
+  void batch_search(const float *ALAYA_RESTRICT query,
                     uint32_t knn,
-                    uint32_t *__restrict__ results,
+                    uint32_t *ALAYA_RESTRICT results,
                     size_t num_queries);
 
   void destroy_thread_data() {
@@ -343,15 +344,15 @@ inline void QuantizedGraph::set_params(size_t ef_search, size_t num_threads, int
 /*
  * search single query
  */
-inline void QuantizedGraph::search(const float *__restrict__ query,
+inline void QuantizedGraph::search(const float *ALAYA_RESTRICT query,
                                    uint32_t knn,
-                                   uint32_t *__restrict__ results) {
+                                   uint32_t *ALAYA_RESTRICT results) {
   disk_search_qg(query, knn, results);
 }
 
-inline void QuantizedGraph::batch_search(const float *__restrict__ query,
+inline void QuantizedGraph::batch_search(const float *ALAYA_RESTRICT query,
                                          uint32_t knn,
-                                         uint32_t *__restrict__ results,
+                                         uint32_t *ALAYA_RESTRICT results,
                                          size_t num_queries) {
 #pragma omp parallel for schedule(dynamic) num_threads(static_cast<int>(nthreads_))
   for (size_t i = 0; i < num_queries; ++i) {
@@ -393,9 +394,9 @@ inline void QuantizedGraph::batch_search(const float *__restrict__ query,
  * @note The query vector is internally rotated using Fast Hadamard Transform for
  *       compatibility with the RaBitQ quantization scheme.
  */
-inline void QuantizedGraph::disk_search_qg(const float *__restrict__ query,
+inline void QuantizedGraph::disk_search_qg(const float *ALAYA_RESTRICT query,
                                            uint32_t knn,
-                                           uint32_t *__restrict__ results) {
+                                           uint32_t *ALAYA_RESTRICT results) {
   // ==================== Thread-local Data Acquisition ====================
   // Acquire thread-local workspace from the concurrent queue.
   // This includes: visited set, search buffer, AIO context, and scratch memory.

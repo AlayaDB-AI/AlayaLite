@@ -99,9 +99,9 @@ constexpr std::array<int, 16> kPackedLaneOrder =
     {0, 8, 1, 9, 2, 10, 3, 11, 4, 12, 5, 13, 6, 14, 7, 15};
 
 inline void accumulate_impl_generic(size_t dim,
-                                    const uint8_t *__restrict__ codes,
-                                    const uint8_t *__restrict__ LUT,
-                                    uint16_t *__restrict__ result) {
+                                    const uint8_t *ALAYA_RESTRICT codes,
+                                    const uint8_t *ALAYA_RESTRICT LUT,
+                                    uint16_t *ALAYA_RESTRICT result) {
   std::fill(result, result + 32, static_cast<uint16_t>(0));
   const size_t num_codebook = dim >> 2;
   const uint8_t *packed = codes;
@@ -129,11 +129,11 @@ inline void appro_dist_impl_generic(size_t num_points,
                                     float width,
                                     float vl,
                                     float sqr_qr,
-                                    const float *__restrict__ result,
-                                    const float *__restrict__ triple_x,
-                                    const float *__restrict__ fac_dq,
-                                    const float *__restrict__ fac_vq,
-                                    float *__restrict__ appro_dist) {
+                                    const float *ALAYA_RESTRICT result,
+                                    const float *ALAYA_RESTRICT triple_x,
+                                    const float *ALAYA_RESTRICT fac_dq,
+                                    const float *ALAYA_RESTRICT fac_vq,
+                                    float *ALAYA_RESTRICT appro_dist) {
   for (size_t i = 0; i < num_points; ++i) {
     appro_dist[i] =
         sqr_y + triple_x[i] + (fac_dq[i] * width * result[i]) + (fac_vq[i] * vl) + sqr_qr;
@@ -141,25 +141,25 @@ inline void appro_dist_impl_generic(size_t num_points,
 }
 
 inline void convert_accum_to_float_generic(size_t count,
-                                           const uint16_t *__restrict__ result,
+                                           const uint16_t *ALAYA_RESTRICT result,
                                            int32_t sumq,
-                                           float *__restrict__ result_float) {
+                                           float *ALAYA_RESTRICT result_float) {
   for (size_t i = 0; i < count; ++i) {
     result_float[i] = static_cast<float>((static_cast<int16_t>(result[i]) << 1) - sumq);
   }
 }
 
-inline auto rotate_loop_generic(const float *__restrict__ src,
-                                const float *__restrict__ mat,
+inline auto rotate_loop_generic(const float *ALAYA_RESTRICT src,
+                                const float *ALAYA_RESTRICT mat,
                                 size_t dim,
-                                float *__restrict__ dst) -> size_t {
+                                float *ALAYA_RESTRICT dst) -> size_t {
   for (size_t i = 0; i < dim; ++i) {
     dst[i] = src[i] * mat[i];
   }
   return dim;
 }
 
-inline void data_range_generic(const float *__restrict__ vec, size_t dim, float &lo, float &hi) {
+inline void data_range_generic(const float *ALAYA_RESTRICT vec, size_t dim, float &lo, float &hi) {
   if (dim == 0) {
     lo = 0.0F;
     hi = 0.0F;
@@ -174,7 +174,7 @@ inline void data_range_generic(const float *__restrict__ vec, size_t dim, float 
   }
 }
 
-inline float l2_sqr_single_generic(const float *__restrict__ vec0, size_t dim) {
+inline float l2_sqr_single_generic(const float *ALAYA_RESTRICT vec0, size_t dim) {
   float result = 0.0F;
   for (size_t i = 0; i < dim; ++i) {
     const float value = vec0[i];
@@ -187,9 +187,9 @@ inline float l2_sqr_single_generic(const float *__restrict__ vec0, size_t dim) {
 
 ALAYA_TARGET_AVX512_BW
 inline void accumulate_impl_avx512(size_t dim,
-                                   const uint8_t *__restrict__ codes,
-                                   const uint8_t *__restrict__ LUT,
-                                   uint16_t *__restrict__ result) {
+                                   const uint8_t *ALAYA_RESTRICT codes,
+                                   const uint8_t *ALAYA_RESTRICT LUT,
+                                   uint16_t *ALAYA_RESTRICT result) {
   size_t code_length = dim << 2;
   __m512i c;
   __m512i lo;
@@ -235,9 +235,9 @@ inline void accumulate_impl_avx512(size_t dim,
 
 ALAYA_TARGET_AVX2
 inline void accumulate_impl_avx2(size_t dim,
-                                 const uint8_t *__restrict__ codes,
-                                 const uint8_t *__restrict__ LUT,
-                                 uint16_t *__restrict__ result) {
+                                 const uint8_t *ALAYA_RESTRICT codes,
+                                 const uint8_t *ALAYA_RESTRICT LUT,
+                                 uint16_t *ALAYA_RESTRICT result) {
   size_t code_length = dim << 2;
   __m256i c, lo, hi, lut, res_lo, res_hi;
 
@@ -292,11 +292,11 @@ inline void appro_dist_impl_avx512(size_t num_points,
                                    float width,
                                    float vl,
                                    float sqr_qr,
-                                   const float *__restrict__ result,
-                                   const float *__restrict__ triple_x,
-                                   const float *__restrict__ fac_dq,
-                                   const float *__restrict__ fac_vq,
-                                   float *__restrict__ appro_dist) {
+                                   const float *ALAYA_RESTRICT result,
+                                   const float *ALAYA_RESTRICT triple_x,
+                                   const float *ALAYA_RESTRICT fac_dq,
+                                   const float *ALAYA_RESTRICT fac_vq,
+                                   float *ALAYA_RESTRICT appro_dist) {
   // sqr_qr is ||q_r||^2 (query residual norm); triple_x already carries ||x_r||^2.
   const __m512 sqr_y_simd = _mm512_set1_ps(sqr_y);
   const __m512 width_simd = _mm512_set1_ps(width);
@@ -330,11 +330,11 @@ inline void appro_dist_impl_avx2(size_t num_points,
                                  float width,
                                  float vl,
                                  float sqr_qr,
-                                 const float *__restrict__ result,
-                                 const float *__restrict__ triple_x,
-                                 const float *__restrict__ fac_dq,
-                                 const float *__restrict__ fac_vq,
-                                 float *__restrict__ appro_dist) {
+                                 const float *ALAYA_RESTRICT result,
+                                 const float *ALAYA_RESTRICT triple_x,
+                                 const float *ALAYA_RESTRICT fac_dq,
+                                 const float *ALAYA_RESTRICT fac_vq,
+                                 float *ALAYA_RESTRICT appro_dist) {
   // sqr_qr is ||q_r||^2 (query residual norm); triple_x already carries ||x_r||^2.
   const __m256 sqr_y_simd = _mm256_set1_ps(sqr_y);
   const __m256 width_simd = _mm256_set1_ps(width);
@@ -364,9 +364,9 @@ inline void appro_dist_impl_avx2(size_t num_points,
 
 ALAYA_TARGET_AVX512_BW
 inline void convert_accum_to_float_avx512(size_t count,
-                                          const uint16_t *__restrict__ result,
+                                          const uint16_t *ALAYA_RESTRICT result,
                                           int32_t sumq,
-                                          float *__restrict__ result_float) {
+                                          float *ALAYA_RESTRICT result_float) {
   // FastScan accumulators are stored as uint16 but carry int16 bit patterns
   // (the _mm*_sub_epi16 in accumulate_impl_* can produce negatives). The SIMD
   // path uses _mm*_cvtepi16_epi32 to sign-extend; the scalar tail mirrors this
@@ -393,9 +393,9 @@ inline void convert_accum_to_float_avx512(size_t count,
 
 ALAYA_TARGET_AVX2
 inline void convert_accum_to_float_avx2(size_t count,
-                                        const uint16_t *__restrict__ result,
+                                        const uint16_t *ALAYA_RESTRICT result,
                                         int32_t sumq,
-                                        float *__restrict__ result_float) {
+                                        float *ALAYA_RESTRICT result_float) {
   const __m256i qq = _mm256_set1_epi32(sumq);
   size_t i = 0;
   const size_t simd_count = count - (count % 8);
@@ -411,10 +411,10 @@ inline void convert_accum_to_float_avx2(size_t count,
 }
 
 ALAYA_TARGET_AVX512_BW
-inline auto rotate_loop_avx512(const float *__restrict__ src,
-                               const float *__restrict__ mat,
+inline auto rotate_loop_avx512(const float *ALAYA_RESTRICT src,
+                               const float *ALAYA_RESTRICT mat,
                                size_t dim,
-                               float *__restrict__ dst) -> size_t {
+                               float *ALAYA_RESTRICT dst) -> size_t {
   size_t idx = 0;
   for (; idx + 16 <= dim; idx += 16) {
     __m512 ss = _mm512_loadu_ps(&src[idx]);
@@ -426,10 +426,10 @@ inline auto rotate_loop_avx512(const float *__restrict__ src,
 }
 
 ALAYA_TARGET_AVX2
-inline auto rotate_loop_avx2(const float *__restrict__ src,
-                             const float *__restrict__ mat,
+inline auto rotate_loop_avx2(const float *ALAYA_RESTRICT src,
+                             const float *ALAYA_RESTRICT mat,
                              size_t dim,
-                             float *__restrict__ dst) -> size_t {
+                             float *ALAYA_RESTRICT dst) -> size_t {
   size_t idx = 0;
   for (; idx + 8 <= dim; idx += 8) {
     __m256 ss = _mm256_loadu_ps(&src[idx]);
@@ -441,7 +441,7 @@ inline auto rotate_loop_avx2(const float *__restrict__ src,
 }
 
 ALAYA_TARGET_AVX512_BW
-inline void data_range_avx512(const float *__restrict__ vec, size_t dim, float &lo, float &hi) {
+inline void data_range_avx512(const float *ALAYA_RESTRICT vec, size_t dim, float &lo, float &hi) {
   if (dim == 0) {
     lo = 0.0F;
     hi = 0.0F;
@@ -465,7 +465,7 @@ inline void data_range_avx512(const float *__restrict__ vec, size_t dim, float &
 }
 
 ALAYA_TARGET_AVX2
-inline void data_range_avx2(const float *__restrict__ vec, size_t dim, float &lo, float &hi) {
+inline void data_range_avx2(const float *ALAYA_RESTRICT vec, size_t dim, float &lo, float &hi) {
   if (dim == 0) {
     lo = 0.0F;
     hi = 0.0F;
@@ -509,7 +509,7 @@ inline float reduce_add_m256(__m256 x) {
 }
 
 ALAYA_TARGET_AVX512_BW
-inline float l2_sqr_single_avx512(const float *__restrict__ vec0, size_t dim) {
+inline float l2_sqr_single_avx512(const float *ALAYA_RESTRICT vec0, size_t dim) {
   float result = 0;
   size_t mul16 = dim - (dim & 0b1111);
   auto sum = _mm512_setzero_ps();
@@ -527,7 +527,7 @@ inline float l2_sqr_single_avx512(const float *__restrict__ vec0, size_t dim) {
 }
 
 ALAYA_TARGET_AVX2
-inline float l2_sqr_single_avx2(const float *__restrict__ vec0, size_t dim) {
+inline float l2_sqr_single_avx2(const float *ALAYA_RESTRICT vec0, size_t dim) {
   size_t mul8 = dim - (dim & 0b111);
   __m256 sum = _mm256_setzero_ps();
   size_t i = 0;

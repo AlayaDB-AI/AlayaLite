@@ -25,6 +25,8 @@
 #include <cstring>
 #include <vector>
 
+#include "utils/platform.hpp"
+
 namespace alaya::laser {
 
 #define LOWBIT(x) ((x) & (-(x)))
@@ -137,8 +139,8 @@ inline void pack_codes(size_t padded_dim,
 
 /** @brief Packs query bytes into lookup table format for SIMD accumulation. */
 inline void pack_lut_impl(size_t dim,
-                          const uint8_t *__restrict__ byte_query,
-                          uint8_t *__restrict__ LUT) {
+                          const uint8_t *ALAYA_RESTRICT byte_query,
+                          uint8_t *ALAYA_RESTRICT LUT) {
   size_t num_codebook = dim >> 2;
   for (size_t i = 0; i < num_codebook; ++i) {
     LUT[0] = 0;

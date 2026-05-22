@@ -23,9 +23,15 @@
 namespace alaya::laser {
 #define RANDOM_QUERY_QUANTIZATION
 #define QG_BQUERY 6
-#define FORCE_INLINE inline __attribute__((always_inline))
-#define LIKELY(x) __builtin_expect(!!(x), 1)
-#define UNLIKELY(x) __builtin_expect(!!(x), 0)
+#if defined(_MSC_VER) && !defined(__clang__)
+  #define FORCE_INLINE __forceinline
+  #define LIKELY(x) (x)
+  #define UNLIKELY(x) (x)
+#else
+  #define FORCE_INLINE inline __attribute__((always_inline))
+  #define LIKELY(x) __builtin_expect(!!(x), 1)
+  #define UNLIKELY(x) __builtin_expect(!!(x), 0)
+#endif
 
 using PID = uint32_t;                     // Point ID type for graph nodes
 constexpr uint32_t kPidMax = 0xFFFFFFFF;  // Maximum valid PID value

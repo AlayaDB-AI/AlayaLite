@@ -49,12 +49,12 @@ class QGScanner {
         convert_(simd::get_convert_func()),
         compute_appro_dist_(simd::get_appro_dist_func()) {}
 
-  void pack_lut(const uint8_t *__restrict__ byte_query, uint8_t *__restrict__ LUT) const {
+  void pack_lut(const uint8_t *ALAYA_RESTRICT byte_query, uint8_t *ALAYA_RESTRICT LUT) const {
     pack_lut_impl(padded_dim_, byte_query, LUT);
   }
 
-  void scan_neighbors(float *__restrict__ appro_dist,
-                      const uint8_t *__restrict__ LUT,
+  void scan_neighbors(float *ALAYA_RESTRICT appro_dist,
+                      const uint8_t *ALAYA_RESTRICT LUT,
                       float sqr_y,
                       float vl,
                       float width,
