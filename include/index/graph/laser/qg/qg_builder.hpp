@@ -240,14 +240,19 @@ class QGBuilder {
     // Open the aligned vector file for direct I/O (bypasses page cache)
     auto vector_reader = make_aligned_file_reader();
     vector_reader->open(tmp_path.c_str());
+    std::cerr << "[laser-trace] phase2: reader opened, num_threads_=" << num_threads_
+              << ", num_points_=" << qg_.num_points_ << std::endl;
 
     // Create a bounded pool of thread-local scratch buffers.
     ConcurrentQueue<ThreadData> thread_data;
     const int num_threads_signed = static_cast<int>(num_threads_);
+    std::cerr << "[laser-trace] phase2: setup loop entering, num_threads_signed="
+              << num_threads_signed << std::endl;
 #pragma omp parallel for num_threads(num_threads_signed)
     for (int thread = 0; thread < num_threads_signed; thread++) {
 #pragma omp critical
       {
+        std::cerr << "[laser-trace] phase2: critical entered for thread=" << thread << std::endl;
         vector_reader->register_thread();
         ThreadData data;
         data.ctx_ = vector_reader->get_ctx();
@@ -258,9 +263,13 @@ class QGBuilder {
         data.neighbor_vector_scratch_ = reinterpret_cast<char *>(
             memory::align_allocate<kSectorLen>(qg_.degree_bound_ * vector_tmp_page_size));
         thread_data.push(data);
+        std::cerr << "[laser-trace] phase2: pushed data for thread=" << thread
+                  << ", queue size now=" << thread_data.size() << std::endl;
       }
     }
 
+    std::cerr << "[laser-trace] phase2: setup loop done, queue size=" << thread_data.size()
+              << std::endl;
     std::cout << "\nupdate qg..." << std::endl;
     std::unordered_map<size_t, PageAssembler> page_assemblers;
 
@@ -291,15 +300,33 @@ class QGBuilder {
       // Acquire a scratch buffer from the shared pool (blocking if none available)
       // This ensures we never exceed our memory budget
       ThreadData data = thread_data.pop();
+      if (data.cur_page_scratch_ == nullptr && i < 4) {
+        std::cerr << "[laser-trace] main-loop: i=" << i
+                  << " got null on first pop, queue size=" << thread_data.size() << std::endl;
+      }
+      int spin_count = 0;
       while (data.cur_page_scratch_ == nullptr) {
         thread_data.wait_for_push_notify();
         data = thread_data.pop();
+        if (++spin_count == 100000 && i < 4) {
+          std::cerr << "[laser-trace] main-loop: i=" << i
+                    << " stuck in pop spin (100k iters), queue size=" << thread_data.size()
+                    << std::endl;
+        }
+      }
+      if (i < 4) {
+        std::cerr << "[laser-trace] main-loop: i=" << i << " got data after " << spin_count
+                  << " spins, calling update_qg_out_of_memory" << std::endl;
       }
 
       // Core processing: read vectors from disk, compute RaBitQ codes, prepare node data
       // This function reads the node's vector and all neighbor vectors via async I/O,
       // then computes quantization codes without holding vectors in memory permanently
       qg_.update_qg_out_of_memory(i, new_neighbors_[i], *vector_reader, data);
+      if (i < 4) {
+        std::cerr << "[laser-trace] main-loop: i=" << i << " update_qg_out_of_memory returned"
+                  << std::endl;
+      }
 
       // Pack completed node bytes into the read-path page layout.
 #pragma omp critical
