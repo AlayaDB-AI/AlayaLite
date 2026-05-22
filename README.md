@@ -173,6 +173,7 @@ open `-march=native` in your `CMakeLists.txt` to reproduce the results).
 | :---------------------------------------------------------: | :-----------------------------------------------------------: |
 | <div style="text-align: center;">**Fashion-MNIST	784 Euclidean**</div> | <div style="text-align: center;">**Gist 960 Euclidean**</div> |
 
+### In-memory collection vs. other mainstream systems
 The same in-memory path powers `Collection` hybrid search when metadata filters
 are involved. We evaluate this filtered retrieval workflow using
 [VectorDBBench](https://github.com/zilliztech/VectorDBBench) on the
