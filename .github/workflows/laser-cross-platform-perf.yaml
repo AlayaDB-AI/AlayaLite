@@ -107,7 +107,7 @@ jobs       :
           backend: iocp
           cmake_args: -DALAYA_ENABLE_LASER=ON -DALAYA_LASER_USE_IOCP=ON -DALAYA_NATIVE_ARCH=OFF
           build_dram_budget_gb: '4.0'
-          install_libomp: true
+          install_libomp: false
           install_libaio: false
 
     env:
@@ -136,13 +136,6 @@ jobs       :
       if: matrix.install_libomp && runner.os == 'macOS'
       shell: bash
       run: brew install libomp
-
-    - name: Install Windows OpenMP runtime (vcpkg)
-      if: matrix.install_libomp && runner.os == 'Windows'
-      shell: bash
-      run: |
-        "$VCPKG_INSTALLATION_ROOT/vcpkg.exe" install llvm-openmp:x64-windows
-        echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
 
     - name: Restore Conan cache
       id: conan-cache

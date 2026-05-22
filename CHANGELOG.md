@@ -15,9 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`manylinux_2_28_x86_64`, `manylinux_2_28_aarch64`, `macos x86_64`,
   `macos arm64`, `windows-2022 AMD64`); Linux ARM remains the only lane
   with LASER off-by-default (tracked in a separate change). The Windows
-  lane uses MSVC 2022 + vcpkg-installed `llvm-openmp:x64-windows`;
-  `_alayalitepy.pyd` runtime DLLs are bundled into the wheel by
-  `delvewheel`.
+  lane uses MSVC 2022 with the toolchain-default `/openmp` runtime
+  (`vcomp140.dll`); LASER stays inside OpenMP 2.0 surface, no
+  vcpkg/Conan OpenMP package is required. `_alayalitepy.pyd` runtime
+  DLLs are bundled into the wheel by `delvewheel`.
 - LASER on-disk index is now buildable and runnable on macOS (M-series and
   Intel) using a portable thread-pool I/O backend. Linux x86_64 continues to
   use the libaio backend with no behavior change.

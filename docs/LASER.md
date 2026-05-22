@@ -34,8 +34,8 @@ sudo dnf install libaio-devel
 # macOS (Homebrew)
 brew install libomp
 
-# Windows (vcpkg ships pre-installed on windows-2022 GitHub runners)
-"%VCPKG_INSTALLATION_ROOT%\vcpkg.exe" install llvm-openmp:x64-windows
+# Windows: MSVC 2022 ships the OpenMP 2.0 runtime (vcomp140.dll) as part of
+# the C++ workload. No extra package install is required.
 ```
 
 If `libaio` is missing while Laser is enabled on Linux x86_64, CMake fails
@@ -107,9 +107,11 @@ FILE_FLAG_OVERLAPPED)` + a single I/O completion port. A dedicated
 dispatcher thread drains the port via `GetQueuedCompletionStatusEx` and
 routes completions to the originating consumer thread's queue. The 4096-byte
 alignment contract on `AlignedRead` is enforced by `FILE_FLAG_NO_BUFFERING`'s
-sector-size requirement. Builds require MSVC 2022 + vcpkg-installed
-`llvm-openmp:x64-windows` for the OpenMP runtime that LASER's build path
-uses (`/openmp:llvm` compile flag).
+sector-size requirement. Builds require MSVC 2022; OpenMP is provided by the
+default MSVC `/openmp` flag, which CMake's `find_package(OpenMP)` picks up
+automatically. LASER's `#pragma omp parallel for` / `critical` / `schedule`
+usage stays inside the OpenMP 2.0 surface, so the legacy MSVC OpenMP runtime
+(`vcomp140.dll`, shipped with VC Redist) is sufficient.
 
 ## SIMD Dispatch
 
