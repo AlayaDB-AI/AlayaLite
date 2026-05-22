@@ -4,7 +4,9 @@
 
 #include <gtest/gtest.h>
 #include <rocksdb/db.h>
+#include <algorithm>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -197,6 +199,37 @@ TEST_F(RocksDBStorageTest, InsertReplacingSameInternalIdCleansOldIndexes) {
     auto new_category_ids = storage.get_ids_by_field_value("category", std::string("new"));
     ASSERT_EQ(new_category_ids.size(), 1U);
     EXPECT_EQ(new_category_ids[0], 7U);
+}
+
+TEST_F(RocksDBStorageTest, FieldIndexesSupportSimpleEqualityAndRangePredicates) {
+    RocksDBConfig indexed_config = config_;
+    indexed_config.indexed_fields_ = {"label", "price"};
+    RocksDBStorage<> storage(indexed_config);
+
+    ASSERT_TRUE(storage.insert(
+        10,
+        ScalarData{"item_10",
+                   "doc10",
+                   {{"label", std::string("target")}, {"price", int64_t(1999)}}}));
+    ASSERT_TRUE(storage.insert(
+        2,
+        ScalarData{"item_02",
+                   "doc02",
+                   {{"label", std::string("target")}, {"price", int64_t(2500)}}}));
+    ASSERT_TRUE(storage.insert(
+        31,
+        ScalarData{"item_31",
+                   "doc31",
+                   {{"label", std::string("other")}, {"price", int64_t(1500)}}}));
+
+    auto target_ids = storage.get_ids_by_field_value("label", std::string("target"));
+    std::sort(target_ids.begin(), target_ids.end());
+    EXPECT_EQ(target_ids, (std::vector<uint32_t>{2, 10}));
+
+    auto cheap_ids =
+        storage.get_ids_by_int_range("price", std::numeric_limits<int64_t>::min(), int64_t(1999));
+    std::sort(cheap_ids.begin(), cheap_ids.end());
+    EXPECT_EQ(cheap_ids, (std::vector<uint32_t>{10, 31}));
 }
 
 TEST_F(RocksDBStorageTest, RemoveOperations) {

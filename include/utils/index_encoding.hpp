@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <string_view>
 
 #include "scalar_data.hpp"
 
@@ -133,12 +134,20 @@ inline auto make_field_prefix(const std::string &field) -> std::string {
  * @brief Extract ID from field index key (last component after underscore)
  */
 template <typename IDType>
-inline auto extract_id_from_key(const std::string &key) -> IDType {
+inline auto extract_id_from_key(std::string_view key) -> IDType {
   auto last_underscore = key.rfind('_');
-  if (last_underscore == std::string::npos) {
+  if (last_underscore == std::string_view::npos) {
     return 0;
   }
-  return static_cast<IDType>(std::stoull(key.substr(last_underscore + 1)));
+  IDType value = 0;
+  for (size_t i = last_underscore + 1; i < key.size(); ++i) {
+    auto ch = key[i];
+    if (ch < '0' || ch > '9') {
+      return 0;
+    }
+    value = static_cast<IDType>((value * 10) + static_cast<IDType>(ch - '0'));
+  }
+  return value;
 }
 
 }  // namespace alaya::index_encoding
