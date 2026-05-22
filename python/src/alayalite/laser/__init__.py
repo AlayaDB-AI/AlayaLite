@@ -135,9 +135,9 @@ def _require_laser_extras() -> None:
     ):
         try:
             __import__(module_name)
-        except ImportError:
+        except ImportError:  # pragma: no cover - defensive; CI installs [laser]
             missing.append(extra_pkg)
-    if missing:
+    if missing:  # pragma: no cover - error path; the [laser] extra is required for fit
         # pylint: disable=inconsistent-quotes  # ruff format prefers single quotes
         # around strings containing double quotes; the join separator below is a
         # genuine f-string interpolation and not a style miss.
