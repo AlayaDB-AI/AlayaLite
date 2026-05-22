@@ -157,6 +157,12 @@ We would like to thank all the contributors and users of AlayaLite for their sup
 
 If you have any questions or suggestions, please feel free to open an issue or contact us at **dev@alayadb.ai**.
 
+For Chinese-speaking users, you can join our WeChat discussion group by scanning the QR code below:
+
+<p align="center">
+  <img src="./.assets/wechat-group-qr.png" width="240" alt="AlayaLite WeChat discussion group QR code">
+</p>
+
 
 ## License
 
