@@ -73,6 +73,8 @@ class PyIndex : public BasePyIndex {
   using DistanceType = typename SearchSpaceType::DistanceTypeAlias;
   using BuildSpaceType = typename GraphBuilderType::DistanceSpaceTypeAlias;
   using MaterializedViewManagerType = MaterializedViewManager<SearchSpaceType, BuildSpaceType>;
+  using HybridSearchJobType = GraphHybridSearchJob<SearchSpaceType, BuildSpaceType>;
+  using PreparedHybridSearchPlanType = typename HybridSearchJobType::PreparedHybridSearchPlan;
 
   PyIndex() = delete;
   explicit PyIndex(IndexParams params) : params_(std::move(params)) { initialize_recovery(); }
@@ -1011,8 +1013,14 @@ class PyIndex : public BasePyIndex {
       std::vector<std::vector<IDType>> id_results(query_size, std::vector<IDType>(topk));
       std::vector<std::vector<std::string>> item_id_results(query_size,
                                                             std::vector<std::string>(topk));
+      std::shared_ptr<PreparedHybridSearchPlanType> prepared_plan;
+      auto use_materialized_view = materialized_view_manager_.can_hybrid_search(filter);
       {
         py::gil_scoped_release release;
+        if (!bf && !use_materialized_view) {
+          prepared_plan = std::make_shared<PreparedHybridSearchPlanType>(
+              hybrid_search_job_->prepare_hybrid_search_plan(filter, search_info));
+        }
         auto batch_pool = get_hybrid_batch_pool(num_threads);
         std::vector<std::future<void>> futures;
         futures.reserve(query_size);
@@ -1024,7 +1032,17 @@ class PyIndex : public BasePyIndex {
                                                     search_info,
                                                     filter_ptr = &filter,
                                                     bf,
+                                                    use_materialized_view,
+                                                    prepared_plan,
                                                     item_ids = item_id_results[i].data()]() {
+            if (prepared_plan != nullptr && !use_materialized_view) {
+              hybrid_search_job_->execute_prepared_hybrid_search(cur_query,
+                                                                 ids,
+                                                                 search_info,
+                                                                 *prepared_plan,
+                                                                 item_ids);
+              return;
+            }
             execute_hybrid_search_dispatch(cur_query, ids, search_info, *filter_ptr, bf, item_ids);
           }));
         }
