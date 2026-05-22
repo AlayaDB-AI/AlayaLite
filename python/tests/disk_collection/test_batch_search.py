@@ -421,12 +421,16 @@ def test_docstring_documents_omp_resolution():
 def test_disk_laser_batch_8threads_matches_serial_baseline(tmp_path):
     """8-thread batch_search agrees with serial baseline on a Laser collection.
 
-    Laser is mutex-serialized internally so this test verifies correctness
-    (labels match) — not throughput scaling, which is intentionally not
-    delivered for Laser per spec D3. The query batch matches the spec
-    scenario (N=64) and the call must complete inside the 60-second
-    wall-clock budget the spec mandates; we measure the budget inline
-    rather than introducing a pytest-timeout dependency.
+    Laser is mutex-serialized internally so different threads cannot overlap
+    inside a single search, but the serialized search itself is still not
+    bit-deterministic: `disk_search_qg` issues async libaio reads and the
+    completion order varies run-to-run, which reshuffles equally-distanced
+    ties inside the top-k result pool. We therefore assert per-row set
+    equality (same neighbour set, order may differ), not byte equality.
+
+    Throughput scaling is intentionally not delivered for Laser per spec D3;
+    this test is about correctness only. The call must complete inside the
+    60-second wall-clock budget the spec mandates.
     """
     col, vectors = _build_laser(tmp_path)
     n = 64
@@ -439,7 +443,10 @@ def test_disk_laser_batch_8threads_matches_serial_baseline(tmp_path):
     labels = col.batch_search(queries, k=10, ef=100, beam_width=4, num_threads=8)
     elapsed = time.monotonic() - started
     assert elapsed < 60.0, f"batch_search did not complete within 60s budget (took {elapsed:.2f}s)"
-    assert np.array_equal(labels, expected)
+    for i in range(n):
+        got = {int(x) for x in labels[i] if x != _UINT64_MAX}
+        want = {int(x) for x in expected[i] if x != _UINT64_MAX}
+        assert got == want, f"row {i}: batch={sorted(got)} serial={sorted(want)}"
 
 
 # ---------------------------------------------------------------------------
