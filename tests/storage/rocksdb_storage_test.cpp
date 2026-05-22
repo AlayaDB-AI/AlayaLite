@@ -509,7 +509,7 @@ TEST_F(RocksDBStorageTest, SaveCheckpointToInvalidPath) {
 
     fs::path invalid_checkpoint_path = temp_dir_ / "nonexistent_parent/checkpoint";
 
-    EXPECT_NO_THROW(storage.save(invalid_checkpoint_path.string()));
+    EXPECT_THROW(storage.save(invalid_checkpoint_path.string()), std::runtime_error);
     EXPECT_FALSE(fs::exists(invalid_checkpoint_path));
 }
 
