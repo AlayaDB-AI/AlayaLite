@@ -118,6 +118,10 @@ repair-wheel-command = "delocate-listdeps {wheel} && delocate-wheel -w {dest_dir
 # is part of the VC Redist and delvewheel either bundles it from the VS install
 # or relies on the system VC Redist on the consumer machine.
 environment = { CMAKE_GENERATOR = "Visual Studio 17 2022", CMAKE_GENERATOR_PLATFORM = "x64" }
+# Windows-specific before-build overrides the global one: install delvewheel
+# (cibuildwheel does not bundle it the way it bundles auditwheel / delocate)
+# AND run the shared conan-install step that the global before-build provides.
+before-build = "pip install delvewheel && python {project}/scripts/conan_build/conan_install.py --project-dir {project}"
 repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"
 # ----------------- build whl end ------------------
 
