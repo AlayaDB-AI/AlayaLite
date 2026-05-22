@@ -29,10 +29,15 @@
   that do not fit in RAM.
 - **Ease of Use**: [Intuitive APIs](https://github.com/AlayaDB-AI/AlayaLite/blob/main/python/README.md) in Python.
 
+## Documentation
 
-## Getting Started!
+- [Client User Guide](docs/CLIENT_USER_MANUAL.md)
+- [LASER Guide](docs/LASER.md)
+
+## Quick Start
 
 Get started with just one command!
+
 ```bash
 pip install alayalite             # with pip
 # or
@@ -44,17 +49,12 @@ uv add alayalite                  # in a uv-managed project
 
 ### In-memory index: quick start
 
-Access your vectors using simple APIs.
 ```python
-from alayalite import Client, Index
-from alayalite.utils import calc_recall, calc_gt
 import numpy as np
+from alayalite import Client
 
-# Initialize the client and create an index. The client can manage multiple indices with distinct names.
 client = Client()
-index = client.create_index("default")
-
-# Generate random vectors and queries, then calculate the ground truth top-10 nearest neighbors for each query.
+index = client.create_index("ann")
 vectors = np.random.rand(1000, 128).astype(np.float32)
 queries = np.random.rand(10, 128).astype(np.float32)
 gt = calc_gt(vectors, queries, 10)
@@ -135,6 +135,8 @@ print(f"QPS:       {len(queries) / elapsed:.1f}  ({len(queries)} queries in {ela
 # Reopen later without rebuilding:
 # idx = Index.from_prefix("/tmp/alaya_laser/demo", dram_budget_gb=2.0)
 ```
+
+LASER requires a LASER-enabled build. See the [LASER Guide](docs/LASER.md) for platform requirements and build options.
 
 ## Benchmark
 
