@@ -175,13 +175,13 @@ open `-march=native` in your `CMakeLists.txt` to reproduce the results).
 
 The same in-memory path powers `Collection` hybrid search when metadata filters
 are involved. We evaluate this filtered retrieval workflow using
-[VectorDBBench](https://github.com/zilliztech/VectorDBBench); the following
-results report QPS under integer and string-equality filters at 0.1%
-selectivity.
+[VectorDBBench](https://github.com/zilliztech/VectorDBBench) on the
+**Medium Cohere** dataset (1M vectors, 768 dimensions). The following results
+report QPS under 0.1% selectivity filters at concurrency 1 and 80.
 
-|     ![INT 0.1% selectivity QPS](./.assets/int-0p1p_qps_c1_c80.png)     |    ![String equality 0.1% selectivity QPS](./.assets/strequ-0p1p_qps_c1_c80.png)    |
-| :---------------------------------------------------------: | :-----------------------------------------------------------: |
-| <div style="text-align: center;">**INT Filter, 0.1% Selectivity**</div> | <div style="text-align: center;">**String Equality Filter, 0.1% Selectivity**</div> |
+![Integer filter 0.1% selectivity QPS](./.assets/int-0p1p_qps_c1_c80.png)
+
+![String equality filter 0.1% selectivity QPS](./.assets/strequ-0p1p_qps_c1_c80.png)
 
 ### On-disk LASER vs. other large-scale systems
 
