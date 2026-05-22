@@ -145,7 +145,13 @@ macOS dependency:
 brew install libomp
 ```
 
-Python dependencies for LASER build/search workflows:
+For a package install, add the LASER runtime dependencies to the same environment:
+
+```bash
+pip install scikit-learn faiss-cpu tqdm psutil matplotlib tomli
+```
+
+When working from a cloned repository, install the developer dependency group instead:
 
 ```bash
 uv sync --group laser
