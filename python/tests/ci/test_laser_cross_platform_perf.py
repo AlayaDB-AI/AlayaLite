@@ -354,7 +354,11 @@ def test_build_result_aggregates_rounds_and_records_recipe() -> None:
             }
         },
     ]
-    result = helper._build_result(args, summaries, "threadpool")  # pylint: disable=protected-access
+    build_stats = {"vectors_path": Path("/tmp/fake.fbin"), "build_wall_s": 1.5, "build_rss_increment_kb": 8192}
+    result = helper._build_result(args, summaries, "threadpool", build_stats)  # pylint: disable=protected-access
+    # Build phase surfaces alongside the search-phase benchmark medians.
+    assert result["build_phase"]["build_wall_s"] == 1.5
+    assert result["build_phase"]["build_rss_increment_kb"] == 8192
     # Medians.
     assert result["benchmark"]["median_laser_api_qps"] == 150.0
     assert result["benchmark"]["median_disk_collection_qps"] == 60.0

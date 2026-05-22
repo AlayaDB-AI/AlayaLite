@@ -11,8 +11,11 @@ import shutil
 import statistics
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
+
+import psutil
 
 DEFAULT_LABELS = [
     "linux-libaio-x86_64",
@@ -80,7 +83,7 @@ def _generate_vectors(n: int, dim: int, seed: int, n_clusters: int, cluster_std:
     return vectors
 
 
-def _build_laser_fixture(args: argparse.Namespace, fixture_dir: Path) -> Path:
+def _build_laser_fixture(args: argparse.Namespace, fixture_dir: Path) -> dict:
     if args.main_dim != args.dim:
         raise SystemExit(
             "laser_cross_platform_perf: paired native-vs-disk_laser benchmark currently requires "
@@ -91,6 +94,14 @@ def _build_laser_fixture(args: argparse.Namespace, fixture_dir: Path) -> Path:
 
     shutil.rmtree(fixture_dir, ignore_errors=True)
     fixture_dir.mkdir(parents=True, exist_ok=True)
+
+    # Sample baseline + final RSS around the LASER build so we can report the
+    # build-phase memory increment separately from the query-phase RSS that
+    # laser_compare.py reports from its own subprocess.
+    proc = psutil.Process()
+    baseline_rss_kb = proc.memory_info().rss // 1024
+    t_build_start = time.monotonic()
+
     vectors = _generate_vectors(args.n, args.dim, args.seed, args.n_clusters, args.cluster_std)
     qg_name = "dsqg_seg_00000001"
     laser_module.Index.fit(
@@ -114,10 +125,18 @@ def _build_laser_fixture(args: argparse.Namespace, fixture_dir: Path) -> Path:
         dram_budget_gb=args.build_dram_budget_gb,
     )
 
+    build_wall_s = time.monotonic() - t_build_start
+    final_rss_kb = proc.memory_info().rss // 1024
+    build_rss_increment_kb = max(0, final_rss_kb - baseline_rss_kb)
+
     vectors_path = fixture_dir / f"{qg_name}_pca_base.fbin"
     if not vectors_path.is_file():
         raise RuntimeError(f"LASER fixture vector file was not written: {vectors_path}")
-    return vectors_path
+    return {
+        "vectors_path": vectors_path,
+        "build_wall_s": build_wall_s,
+        "build_rss_increment_kb": int(build_rss_increment_kb),
+    }
 
 
 def _run_laser_compare(args: argparse.Namespace, fixture_dir: Path, vectors_path: Path, round_index: int) -> dict:
@@ -204,12 +223,16 @@ def _round_result(round_index: int, summary: dict) -> dict[str, float | int | No
     }
 
 
-def _build_result(args: argparse.Namespace, summaries: list[dict], backend: str) -> dict:
+def _build_result(args: argparse.Namespace, summaries: list[dict], backend: str, build_stats: dict) -> dict:
     round_results = [_round_result(index + 1, summary) for index, summary in enumerate(summaries)]
     recall_deltas = [item["recall_delta"] for item in round_results if item["recall_delta"] is not None]
     max_abs_recall_delta = max((abs(float(delta)) for delta in recall_deltas), default=None)
     return {
         "label": args.label,
+        "build_phase": {
+            "build_wall_s": build_stats["build_wall_s"],
+            "build_rss_increment_kb": build_stats["build_rss_increment_kb"],
+        },
         "platform": {
             "system": platform.system(),
             "machine": platform.machine(),
@@ -348,9 +371,10 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
     backend = _detect_backend(args.backend)
     fixture_dir = args.work_dir / args.label / "fixture"
-    vectors_path = _build_laser_fixture(args, fixture_dir)
+    build_stats = _build_laser_fixture(args, fixture_dir)
+    vectors_path = build_stats["vectors_path"]
     summaries = [_run_laser_compare(args, fixture_dir, vectors_path, index + 1) for index in range(args.rounds)]
-    result = _build_result(args, summaries, backend)
+    result = _build_result(args, summaries, backend, build_stats)
     output_path = args.output or _artifact_path(args.label)
     markdown_path = args.markdown_output or _markdown_artifact_path(args.label)
     _write_result_files(result, output_path, markdown_path, args.results_dir)
