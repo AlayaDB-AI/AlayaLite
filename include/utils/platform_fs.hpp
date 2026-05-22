@@ -309,47 +309,6 @@ inline auto truncate_open_file(native_fd_t handle, std::uint64_t length) noexcep
 #endif
 }
 
-// Truncate a regular file at the given path to the given length. Opens the
-// file, truncates, and closes. Throws on any step's failure.
-inline auto truncate_file(const fs::path &path, std::uint64_t length) -> void {
-#ifdef _WIN32
-  HANDLE h = ::CreateFileW(path.c_str(),
-                           GENERIC_WRITE,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE,
-                           nullptr,
-                           OPEN_EXISTING,
-                           FILE_ATTRIBUTE_NORMAL,
-                           nullptr);
-  if (h == INVALID_HANDLE_VALUE) {
-    throw std::runtime_error("truncate_file: CreateFileW failed: " + path.string() +
-                             ": Win32 error " + std::to_string(::GetLastError()));
-  }
-  const bool ok = truncate_open_file(h, length);
-  const auto saved = ok ? 0UL : ::GetLastError();
-  ::CloseHandle(h);
-  if (!ok) {
-    throw std::runtime_error("truncate_file: SetEndOfFile failed: " + path.string() +
-                             ": Win32 error " + std::to_string(saved));
-  }
-#else
-  int fd = ::open(path.c_str(), O_WRONLY);
-  if (fd < 0) {
-    throw std::runtime_error("truncate_file: open failed: " + path.string() + ": " +
-                             std::strerror(errno));
-  }
-  if (::ftruncate(fd, static_cast<off_t>(length)) != 0) {
-    int saved = errno;
-    ::close(fd);
-    throw std::runtime_error("truncate_file: ftruncate failed: " + path.string() + ": " +
-                             std::strerror(saved));
-  }
-  if (::close(fd) != 0) {
-    throw std::runtime_error("truncate_file: close failed: " + path.string() + ": " +
-                             std::strerror(errno));
-  }
-#endif
-}
-
 // Read the first `prefix_bytes` of a regular file. Throws if the file is a
 // symlink, missing, non-regular, or smaller than `prefix_bytes`. Used by
 // header-style metadata reads where the consumer only needs the first few

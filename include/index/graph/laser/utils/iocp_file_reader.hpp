@@ -87,11 +87,13 @@ class IOCPFileReader : public AlignedFileReader {
   std::thread dispatcher_;
   // Shared ownership for safe dispatcher-vs-deregister lifetime: dispatcher
   // holds a strong ref while enqueueing, so a concurrent deregister can't
-  // free the IOCPContext mid-enqueue (use-after-free race that Codex caught).
+  // free the IOCPContext mid-enqueue.
   std::unordered_map<std::thread::id, std::shared_ptr<IOCPContext>> owned_contexts_;
   std::unordered_map<uint64_t, std::shared_ptr<IOCPContext>> tid_to_ctx_;
   std::mutex tid_map_mut_;
 
+  // 50 ms wakeup also bounds shutdown latency: stop_ is observed at most
+  // one timeout later, even if the sentinel completion is lost.
   static constexpr DWORD kCompletionTimeoutMs = 50;
   static constexpr ULONG kCompletionBatchSize = 64;
 
@@ -228,7 +230,7 @@ class IOCPFileReader : public AlignedFileReader {
     }
     // The dispatcher may still hold a temporary shared_ptr ref; this
     // shared ownership keeps the IOCPContext alive until the in-flight
-    // enqueue completes (Codex caught the UAF here).
+    // enqueue completes.
     own_it->second->active.store(false, std::memory_order_release);
     ctx_map_.erase(my_id);
     owned_contexts_.erase(my_id);
@@ -276,21 +278,9 @@ class IOCPFileReader : public AlignedFileReader {
                                ": Win32 error " + std::to_string(::GetLastError()));
     }
 
-    // CompletionKey = 0 on association: we override it per-submit via the
-    // OVERLAPPED.hEvent isn't used here; we set the key on each submit by
-    // re-associating? No — `CreateIoCompletionPort` only allows one
-    // association per handle, so we associate once with key=0 and pass the
-    // real tid via `OVERLAPPED.hEvent` or the entry's CompletionKey at
-    // ReadFile time. The cleanest path is: associate the file with the port
-    // once (key 0), and rely on the ReadOverlapped struct embedded in the
-    // OVERLAPPED to carry the tid back out.
-    //
-    // Wait — the design.md says use CompletionKey. But that's tied to the
-    // file-handle association, not per-read. Re-read: actually
-    // GetQueuedCompletionStatusEx returns OVERLAPPED_ENTRY which has
-    // lpCompletionKey from the association. We have one handle and one
-    // association so the key is uniform — we have to carry tid in the
-    // OVERLAPPED itself instead. ReadOverlapped::tid stores it.
+    // `CreateIoCompletionPort` allows only one (handle, key) association, so
+    // the per-handle CompletionKey is uniform and cannot route per-thread.
+    // Per-read routing is carried in the `ReadOverlapped::tid` field instead.
     hCompletionPort_ = ::CreateIoCompletionPort(hFile_, nullptr, 0, 0);
     if (hCompletionPort_ == nullptr) {
       const auto err = ::GetLastError();

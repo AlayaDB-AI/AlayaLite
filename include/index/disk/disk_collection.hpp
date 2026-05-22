@@ -220,7 +220,7 @@ inline void write_lock_holder_pid_best_effort(int fd) noexcept {
   if (n <= 0 || static_cast<size_t>(n) >= sizeof(content)) {
     return;
   }
-  (void)::ftruncate(fd, 0);
+  (void)::alaya::platform::truncate_open_file(fd, 0);
   (void)::pwrite(fd, content, static_cast<size_t>(n), 0);
 }
 
@@ -274,12 +274,7 @@ inline void write_lock_holder_pid_best_effort(HANDLE handle) noexcept {
     return;
   }
   // Truncate then overwrite. Failure is best-effort (diagnostic data only).
-  LARGE_INTEGER zero{};
-  zero.QuadPart = 0;
-  if (!::SetFilePointerEx(handle, zero, nullptr, FILE_BEGIN)) {
-    return;
-  }
-  if (!::SetEndOfFile(handle)) {
+  if (!::alaya::platform::truncate_open_file(handle, 0)) {
     return;
   }
   OVERLAPPED ov{};
@@ -310,14 +305,13 @@ inline auto is_lock_contention_win32_error(DWORD err) -> bool {
 #endif
 
 #ifndef _WIN32
-// Post-flock inode revalidation (KL3 closure). Compares the fd's
-// fstat-derived `(st_dev, st_ino)` (captured by the caller before flock)
-// against a fresh `stat(lock_path)`. Throws on mismatch or when
-// `lock_path` no longer exists (the file was unlinked while we hold the
-// fd open). The bounded detection contract: only swaps that happen
-// BETWEEN the caller's fstat and this stat are catchable. A swap that
-// completes before the caller's open is invisible because both
-// readings observe the post-swap inode.
+// Post-flock inode revalidation. Compares the fd's fstat-derived
+// `(st_dev, st_ino)` (captured by the caller before flock) against a fresh
+// `stat(lock_path)`. Throws on mismatch or when `lock_path` no longer exists
+// (the file was unlinked while we hold the fd open). Only swaps that happen
+// BETWEEN the caller's fstat and this stat are catchable — a swap that
+// completes before the caller's open is invisible because both readings
+// observe the post-swap inode.
 inline void revalidate_lock_inode_after_flock(const std::filesystem::path &lock_path,
                                               dev_t fd_st_dev,
                                               ino_t fd_st_ino) {
@@ -413,10 +407,9 @@ inline auto acquire_collection_lock_impl(const std::filesystem::path &collection
         ": " + std::strerror(saved));
   }
 
-  // KL3 closure: post-flock inode revalidation (extracted for direct
-  // testability). See `revalidate_lock_inode_after_flock` for the bounded
-  // detection contract; the helper throws on `unlink+touch` swaps that
-  // happen between this acquire's `fstat` and `stat` calls.
+  // Post-flock inode revalidation. See `revalidate_lock_inode_after_flock`
+  // for the bounded detection contract; the helper throws on `unlink+touch`
+  // swaps that happen between this acquire's `fstat` and `stat` calls.
   revalidate_lock_inode_after_flock(lock_path, st.st_dev, st.st_ino);
 
   write_lock_holder_pid_best_effort(lock.fd);
@@ -428,8 +421,8 @@ inline auto acquire_collection_lock_impl(const std::filesystem::path &collection
   const auto lock_path = collection_root / ".lock";
   // Sharing intentionally excludes DELETE so the lock file cannot be unlinked
   // / renamed while we hold the handle. This is the Win32 analogue of the
-  // POSIX KL3 inode-swap defense — preventing the swap, rather than detecting
-  // it post-acquire.
+  // POSIX inode-swap defense — preventing the swap, rather than detecting it
+  // post-acquire.
   const DWORD share_mode = FILE_SHARE_READ | FILE_SHARE_WRITE;
   const DWORD creation = (mode == AcquireMode::ForCreate) ? static_cast<DWORD>(CREATE_NEW)
                                                           : static_cast<DWORD>(OPEN_ALWAYS);
@@ -678,7 +671,7 @@ inline auto disk_search_distance_equal_for_order(float a, float b) -> bool {
 
 class DiskCollection {
  public:
-  // Default soft cap: 512 MiB measured against the D6 formula.
+  // Default soft cap on in-memory pending bytes before forcing a publish.
   static constexpr size_t kDefaultMaxPendingBytes = 512ULL * 1024 * 1024;
 
   // Public constructor: create-only.
@@ -703,7 +696,7 @@ class DiskCollection {
     if (index_type == DiskIndexType::Vamana) {
       detail::validate_vamana_params(vamana_params, "DiskCollection");
     }
-    // Phase 2 reordered ctor (closes KL1 + KL2):
+    // Ctor ordering:
     //   exists(path) → mkdir(path) (root only) → _for_create (O_EXCL, atomic
     //   ownership) → mkdir(path/segments) → publish_manifest.
     // The O_EXCL acquire is the kernel-level serialization point. Anything
@@ -802,8 +795,8 @@ class DiskCollection {
     }
     DiskCollection col;
     col.path_ = path;
-    // See design.md D6: manifest load, listed segment open, and orphan scan
-    // must run while the collection-level writer lock is held.
+    // Manifest load, listed segment open, and orphan scan must run while the
+    // collection-level writer lock is held.
     col.lock_fd_ = detail::acquire_collection_lock_for_open(path);
     col.manifest_ = CollectionManifest::load(path / "collection_manifest.txt");
     // Same v1 capability gate as the constructor; delegated to the factory so
@@ -844,10 +837,8 @@ class DiskCollection {
         static_cast<uint64_t>(manifest_.dim) * sizeof(float) + sizeof(uint64_t);
     const uint64_t cap = max_pending_bytes_;
 
-    // Defense in depth: check n * per_row * 2 for overflow before any cap
-    // comparison. Without this, a hostile n could wrap to a small value
-    // and bypass the cap check. (Final Codex review flagged this as the
-    // first of two archive blockers.)
+    // Check n * per_row * 2 for overflow before any cap comparison. Without
+    // this, a hostile n could wrap to a small value and bypass the cap check.
     uint64_t single_batch_bytes = 0;
     if (alaya_mul_overflow(uint64_t{2}, n, &single_batch_bytes) ||
         alaya_mul_overflow(single_batch_bytes, per_row, &single_batch_bytes)) {
@@ -883,8 +874,7 @@ class DiskCollection {
 
     // Strong exception safety: reserve both buffers BEFORE any insert. If
     // reserve throws bad_alloc, no state has been mutated. After successful
-    // reserve, the inserts cannot allocate again so they can't throw
-    // (Codex section-7 med #5).
+    // reserve, the inserts cannot allocate again so they can't throw.
     pending_vectors_.reserve(pending_vectors_.size() + n * manifest_.dim);
     pending_labels_.reserve(pending_labels_.size() + n);
     pending_vectors_.insert(pending_vectors_.end(), vectors, vectors + n * manifest_.dim);
@@ -943,7 +933,7 @@ class DiskCollection {
     // Segment is now on disk. Any subsequent failure in this function leaves
     // an orphan segment that will be classified as kind=complete on next open.
     // Eagerly advance in-memory next_segment_id so a retried flush() uses a
-    // fresh id rather than colliding with the orphan (Codex section-7 high #1).
+    // fresh id rather than colliding with the orphan.
     manifest_.next_segment_id = seg_id + 1;
 
     // Atomic rename of the collection manifest. Once this returns, the segment
@@ -955,7 +945,7 @@ class DiskCollection {
 
     // From this point on, the on-disk state is consistent. Commit in-memory
     // state atomically. Pending is cleared LAST so any throw above leaves it
-    // intact for the caller (Codex section-7 high #3 — fsync below is soft).
+    // intact for the caller (the fsync below is best-effort, not load-bearing).
     manifest_ = std::move(new_manifest);
     segments_.push_back(std::move(searcher));
     segment_dirs_.push_back(seg_dir);
@@ -1191,13 +1181,12 @@ class DiskCollection {
 
     // Multi-thread: per-query parallelism. workers share an atomic counter
     // that doles out query indices; each worker invokes the existing
-    // single-query search() path on its slice. Per spec D3 we deliberately
-    // do NOT parallelize across segments inside a single search().
+    // single-query search() path on its slice. We deliberately do NOT
+    // parallelize across segments inside a single search().
     //
-    // Clamp workers to n_queries (Decision 5: optimization, not contract):
-    // a worker that immediately observes fetch_add >= n_queries returns
-    // without doing useful work, so spawning more than n_queries threads
-    // is wasted thread-spawn cost.
+    // Clamp workers to n_queries: a worker that immediately observes
+    // fetch_add >= n_queries returns without doing useful work, so spawning
+    // more than n_queries threads is wasted thread-spawn cost.
     const uint32_t worker_count = static_cast<uint32_t>(std::min<uint64_t>(num_threads, n_queries));
     std::atomic<uint64_t> next_query{0};
     std::atomic<bool> aborted{false};
@@ -1265,9 +1254,9 @@ class DiskCollection {
     segment_dirs_.reserve(manifest_.segment_ids.size());
     for (const auto &id : manifest_.segment_ids) {
       const auto seg_dir = path_ / "segments" / id;
-      // Reject segment directories that are themselves symlinks (D4: a
+      // Reject segment directories that are themselves symlinks: a
       // symlink-swap of seg_*/ would otherwise redirect reads outside the
-      // collection root — MMapFile's O_NOFOLLOW only protects leaf files).
+      // collection root — MMapFile's O_NOFOLLOW only protects leaf files.
       std::error_code ec;
       if (std::filesystem::is_symlink(seg_dir, ec)) {
         throw std::runtime_error("DiskCollection: segment directory is a symlink: " +
