@@ -4,10 +4,21 @@
 
 """Medoid generation for graph-based nearest neighbor search entry points."""
 
+import platform
+
 import faiss
 import numpy as np
 
 from alayalite.laser._io import read_fbin, write_fbin, write_ibin
+
+# faiss-cpu's bundled OpenMP runtime collides with macOS's Accelerate framework
+# (used by numpy / sklearn on Apple Silicon). The collision shows up as an
+# abort inside ``faiss.Index.train()`` rather than a clean error, leaving
+# Python's resource_tracker emitting a "leaked semaphore" warning at shutdown.
+# Force faiss to single-thread on Darwin to dodge it; only affects medoid
+# kmeans training (build-time, one-shot), not LASER search.
+if platform.system() == "Darwin":
+    faiss.omp_set_num_threads(1)
 
 
 def generate_medoids(base_path, n_clusters, sample_ratio=0.10, seed=None):

@@ -93,36 +93,46 @@ uv pip install 'alayalite[laser]'
 ```
 
 ```python
-from alayalite.laser import BuildParams, Index
+import shutil
+import time
 import numpy as np
+from sklearn.datasets import make_blobs
+from alayalite.laser import BuildParams, Index
+from alayalite.utils import calc_gt, calc_recall
 
-# Build artifacts (PCA, medoids, Vamana graph, LASER index) land in `output_dir/`.
-vectors = np.random.rand(100_000, 128).astype(np.float32)
-queries = np.random.rand(100, 128).astype(np.float32)
+# Smoke-scale demo (~10-20s end-to-end on a modern laptop). Tuning details,
+# paper-aligned configs and the on-disk layout live in docs/LASER.md.
+output_dir = "/tmp/alaya_laser"
+shutil.rmtree(output_dir, ignore_errors=True)
+
+# Synthetic GMM clusters so ANN has structure to find; uniform-random vectors
+# in 768-D would collapse recall (high-D distance concentration).
+pts, _ = make_blobs(n_samples=10_100, n_features=768, centers=64,
+                    cluster_std=0.35, random_state=42)
+vectors = pts[:10_000].astype(np.float32)
+queries = pts[10_000:].astype(np.float32)
+gt = calc_gt(vectors, queries, 10)
 
 idx = Index.fit(
     vectors,
-    output_dir="/tmp/alaya_laser",
+    output_dir=output_dir,
     name="demo",
-    build_params=BuildParams(
-        metric="l2", R=64, L=200, alpha=1.2,
-        ef_indexing=200,
-        # ep_num is the medoid count used as search entry points. faiss
-        # kmeans wants training points >= 39 * ep_num; at n=100K with the
-        # default 10% sample (=10K), keep ep_num <= ~250. Use ep_num=300+
-        # at n>=200K. See docs/LASER.md for tuning notes.
-        ep_num=100,
-    ),
+    build_params=BuildParams(main_dim=256, ep_num=20),
     seed=42,
-    num_threads=16,
+    num_threads=0,
     dram_budget_gb=2.0,
 )
+idx.set_params(ef_search=200, num_threads=1, beam_width=16)
 
-# Search-time knobs are separate from build params.
-idx.set_params(ef_search=200, num_threads=8, beam_width=16)
+idx.batch_search(queries, 10)                       # warmup
+t0 = time.perf_counter()
 ids = idx.batch_search(queries, 10)
+elapsed = time.perf_counter() - t0
 
-# Reopen an existing build later without rebuilding:
+print(f"Recall@10: {calc_recall(ids, gt):.3f}")
+print(f"QPS:       {len(queries) / elapsed:.1f}  ({len(queries)} queries in {elapsed*1000:.1f} ms)")
+
+# Reopen later without rebuilding:
 # idx = Index.from_prefix("/tmp/alaya_laser/demo", dram_budget_gb=2.0)
 ```
 
