@@ -104,7 +104,15 @@ idx = Index.fit(
     vectors,
     output_dir="/tmp/alaya_laser",
     name="demo",
-    build_params=BuildParams(metric="l2", R=64, L=200, alpha=1.2, ef_indexing=200),
+    build_params=BuildParams(
+        metric="l2", R=64, L=200, alpha=1.2,
+        ef_indexing=200,
+        # ep_num is the medoid count used as search entry points. faiss
+        # kmeans wants training points >= 39 * ep_num; at n=100K with the
+        # default 10% sample (=10K), keep ep_num <= ~250. Use ep_num=300+
+        # at n>=200K. See docs/LASER.md for tuning notes.
+        ep_num=100,
+    ),
     seed=42,
     num_threads=16,
     dram_budget_gb=2.0,
