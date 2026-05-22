@@ -98,8 +98,15 @@ hot data on SSD and only the search-time working set in memory. Vectors must be
 `float32` with `raw_dim >= 128`; L2 is the only supported metric in v1.
 
 LASER is available on Linux x86_64 (libaio backend, default), macOS
-(thread-pool backend), and Windows x64 (IOCP backend). Linux x86_64 builds
-need `libaio` headers — `sudo apt-get install libaio-dev` on Debian/Ubuntu.
+(thread-pool backend), and Windows x64 (IOCP backend). Platform notes:
+
+- Linux x86_64 builds need `libaio` headers, for example
+  `sudo apt-get install libaio-dev` on Debian/Ubuntu.
+- macOS builds need OpenMP from Homebrew: `brew install libomp`.
+- Windows x64 builds should run from a Visual Studio 2022 developer shell with
+  the **Desktop development with C++** workload installed; MSVC provides the
+  OpenMP runtime used by LASER.
+
 See [`docs/LASER.md`](https://github.com/AlayaDB-AI/AlayaLite/blob/main/docs/LASER.md) for build flags, tuning notes, and the
 TOML-driven CLI.
 
@@ -108,9 +115,9 @@ LASER `Index.fit` pulls in PCA / k-means / progress-bar helpers (`scikit-learn`,
 install stays lean. Install them on top of the base wheel:
 
 ```bash
-pip install 'alayalite[laser]'
+pip install "alayalite[laser]"
 # or, with uv:
-uv pip install 'alayalite[laser]'
+uv pip install "alayalite[laser]"
 ```
 
 ```python
