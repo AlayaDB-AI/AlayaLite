@@ -218,9 +218,11 @@ struct GraphHybridSearchJob {
     constexpr size_t kBatchSize = 1024;
     batch_ids.reserve(kBatchSize);
     auto run_indexed_candidates = [&](const auto &exact_distance) {
-      for (auto id : filter_executor.indexed_ids()) {
-        result_pool.insert(id, exact_distance(id));
-      }
+      filter_executor.visit_index_fast_path_ids([&](IDType id) {
+        if (filter_executor.match(id)) {
+          result_pool.insert(id, exact_distance(id));
+        }
+      });
     };
     auto run_full_scan = [&](const auto &exact_distance, size_t data_num) {
       for (size_t begin = 0; begin < data_num; begin += kBatchSize) {

@@ -108,6 +108,15 @@ class DynamicBitset {
   void set_all() { std::ranges::fill(data_, ~0ULL); }
 
   /**
+   * @brief Invert all storage bits in-place.
+   */
+  void flip_all() {
+    for (auto &block : data_) {
+      block = ~block;
+    }
+  }
+
+  /**
    * @brief Clear all bits to 0 (mark all as unvisited)
    */
   void clear() { std::ranges::fill(data_, 0ULL); }
