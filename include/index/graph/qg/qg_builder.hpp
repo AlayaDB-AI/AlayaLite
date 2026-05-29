@@ -190,10 +190,10 @@ class QGBuilder {
         }
 
         if (dst_neighbors.size() < degree_bound_) {
-          dst_neighbors.emplace_back(source_id, nei.distance_);
+          dst_neighbors.emplace_back(current_id, nei.distance_);
         } else {
           if (reverse_buffer[dst].size() < kMaxCandidatePoolSize) {
-            reverse_buffer[dst].emplace_back(source_id, nei.distance_);
+            reverse_buffer[dst].emplace_back(current_id, nei.distance_);
           }
         }
       }

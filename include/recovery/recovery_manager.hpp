@@ -15,6 +15,7 @@
 #include "recovery/snapshot_manifest.hpp"
 #include "recovery/write_ahead_log.hpp"
 #include "utils/log.hpp"
+#include "utils/parser.hpp"
 #include "utils/platform_fs.hpp"
 
 namespace alaya::recovery {
