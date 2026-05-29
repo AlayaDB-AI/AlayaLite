@@ -9,7 +9,7 @@ on  :
 
 jobs:
   build_wheels:
-    name: Build wheels on ${{ matrix.os }} (${{ matrix.build_id }})
+    name: Build wheels on ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -21,21 +21,17 @@ jobs:
         - os: ubuntu-latest
           arch: x86_64
           build: cp3{8,9,10,11,12,13}-*
-          build_id: all
         - os: ubuntu-24.04-arm
           arch: aarch64
           build: cp3{8,9,10,11,12,13}-*
-          build_id: all
         - os: macos-15-intel
           arch: x86_64
         - os: macos-15
           arch: arm64
           build: cp3{8,9,10,11,12,13}-*
-          build_id: all
         - os: windows-2022
           arch: AMD64
           build: cp3{8,9,10,11,12,13}-*
-          build_id: all
 
     env:
       CONAN_NON_INTERACTIVE: 1
@@ -94,47 +90,9 @@ jobs:
 
     - uses: actions/upload-artifact@v4
       with:
-        name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.build_id }}
+        name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}
         path: ./wheelhouse/*.whl
         compression-level: 0
-        overwrite: true
-
-    - name: Wait before artifact upload retry
-      if: steps.upload_wheels_1.outcome == 'failure'
-      run: sleep 15
-
-    - name: Upload wheels artifact (attempt 2)
-      id: upload_wheels_2
-      if: steps.upload_wheels_1.outcome == 'failure'
-      uses: actions/upload-artifact@v4
-      continue-on-error: true
-      with:
-        name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.build_id }}
-        path: ./wheelhouse/*.whl
-        compression-level: 0
-        overwrite: true
-
-    - name: Wait before final artifact upload retry
-      if: steps.upload_wheels_1.outcome == 'failure' && steps.upload_wheels_2.outcome == 'failure'
-      run: sleep 30
-
-    - name: Upload wheels artifact (attempt 3)
-      id: upload_wheels_3
-      if: steps.upload_wheels_1.outcome == 'failure' && steps.upload_wheels_2.outcome == 'failure'
-      uses: actions/upload-artifact@v4
-      continue-on-error: true
-      with:
-        name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}-${{ matrix.build_id }}
-        path: ./wheelhouse/*.whl
-        compression-level: 0
-        overwrite: true
-
-    - name: Fail if artifact upload never succeeded
-      if: always() && steps.upload_wheels_1.outcome == 'failure' && steps.upload_wheels_2.outcome == 'failure' && 
-        steps.upload_wheels_3.outcome == 'failure'
-      run: |
-        echo "::error::Artifact upload failed after 3 attempts."
-        exit 1
 
   # Attach all 25 wheels (5 platforms × 5 Python versions) to the GitHub Release
   # that corresponds to the pushed tag. Runs only on `push.tags`; manual
