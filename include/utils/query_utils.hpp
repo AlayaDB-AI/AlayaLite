@@ -296,6 +296,9 @@ struct LinearPool {
   }
 
   auto insert(IDType u, DistanceType dist) -> bool {
+    if (capacity_ == 0) {
+      return false;
+    }
     if (size_ == capacity_ && dist >= data_[size_ - 1].distance_) {
       return false;
     }
@@ -316,7 +319,10 @@ struct LinearPool {
   }
 
   void emplace_insert(IDType u, DistanceType dist) {
-    if (dist >= data_[size_ - 1].distance) {
+    if (size_ == 0) {
+      return;
+    }
+    if (dist >= data_[size_ - 1].distance_) {
       return;
     }
     int lo = find_bsearch(dist);

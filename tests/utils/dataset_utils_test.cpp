@@ -129,6 +129,33 @@ TEST(ParserTest, ParseJsonLineHandlesScalarsArraysAndEscapes) {
   EXPECT_EQ(*as_string((*items)[1]), "two");
 }
 
+TEST(ParserTest, ParseJsonLineDecodesUnicodeEscapesAndSurrogatePairs) {
+  auto root =
+      parse_json_line(R"({"euro":"\u20AC","gclef":"\uD834\uDD1E","emoji":"\uD83D\uDE00"})");
+  auto *object = as_object(root);
+  ASSERT_NE(object, nullptr);
+
+  const std::string euro = {static_cast<char>(0xE2), static_cast<char>(0x82),
+                            static_cast<char>(0xAC)};
+  const std::string gclef = {static_cast<char>(0xF0), static_cast<char>(0x9D),
+                             static_cast<char>(0x84), static_cast<char>(0x9E)};
+  const std::string emoji = {static_cast<char>(0xF0), static_cast<char>(0x9F),
+                             static_cast<char>(0x98), static_cast<char>(0x80)};
+
+  ASSERT_NE(find_any(*object, {"euro"}), nullptr);
+  ASSERT_NE(find_any(*object, {"gclef"}), nullptr);
+  ASSERT_NE(find_any(*object, {"emoji"}), nullptr);
+  EXPECT_EQ(*as_string(*find_any(*object, {"euro"})), euro);
+  EXPECT_EQ(*as_string(*find_any(*object, {"gclef"})), gclef);
+  EXPECT_EQ(*as_string(*find_any(*object, {"emoji"})), emoji);
+}
+
+TEST(ParserTest, ParseJsonLineRejectsInvalidUnicodeSurrogates) {
+  EXPECT_THROW((void)parse_json_line(R"({"bad":"\uD834"})"), std::runtime_error);
+  EXPECT_THROW((void)parse_json_line(R"({"bad":"\uD834\u0041"})"), std::runtime_error);
+  EXPECT_THROW((void)parse_json_line(R"({"bad":"\uDD1E"})"), std::runtime_error);
+}
+
 TEST(ParserTest, LoadNpyFloatMatrixHonorsMaxRowsAndRejectsUnsupportedHeaders) {
   auto dir = std::filesystem::temp_directory_path() / "alayalite_parser_test";
   std::filesystem::remove_all(dir);
@@ -140,6 +167,13 @@ TEST(ParserTest, LoadNpyFloatMatrixHonorsMaxRowsAndRejectsUnsupportedHeaders) {
   EXPECT_EQ(matrix.rows_, 2);
   EXPECT_EQ(matrix.cols_, 2);
   EXPECT_EQ(matrix.data_, (std::vector<float>{1.0F, 2.0F, 3.0F, 4.0F}));
+
+  auto v2_file = dir / "valid_v2.npy";
+  write_tiny_npy(v2_file, {7.0F, 8.0F}, 1, 2, "<f4", false, 2);
+  auto v2_matrix = load_npy_float_matrix(v2_file);
+  EXPECT_EQ(v2_matrix.rows_, 1);
+  EXPECT_EQ(v2_matrix.cols_, 2);
+  EXPECT_EQ(v2_matrix.data_, (std::vector<float>{7.0F, 8.0F}));
 
   auto invalid_descr = dir / "invalid_descr.npy";
   write_tiny_npy(invalid_descr, {1.0F, 2.0F}, 1, 2, "<f8", false);

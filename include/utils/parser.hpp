@@ -20,10 +20,10 @@
 #include <cctype>
 #include <charconv>
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -89,6 +89,25 @@ inline auto parse_npy_shape(const std::string &header) -> std::pair<uint32_t, ui
   return {static_cast<uint32_t>(rows), static_cast<uint32_t>(cols)};
 }
 
+inline auto read_little_endian_u16(std::ifstream &reader) -> uint16_t {
+  std::array<unsigned char, 2> bytes{};
+  reader.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  if (reader.fail()) {
+    throw std::runtime_error("Failed to read NPY header length");
+  }
+  return static_cast<uint16_t>(bytes[0]) | (static_cast<uint16_t>(bytes[1]) << 8);
+}
+
+inline auto read_little_endian_u32(std::ifstream &reader) -> uint32_t {
+  std::array<unsigned char, 4> bytes{};
+  reader.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  if (reader.fail()) {
+    throw std::runtime_error("Failed to read NPY header length");
+  }
+  return static_cast<uint32_t>(bytes[0]) | (static_cast<uint32_t>(bytes[1]) << 8) |
+         (static_cast<uint32_t>(bytes[2]) << 16) | (static_cast<uint32_t>(bytes[3]) << 24);
+}
+
 inline auto load_npy_float_matrix(const std::filesystem::path &filepath, uint32_t max_rows = 0)
     -> NpyFloatMatrix {
   std::ifstream reader(filepath, std::ios::binary);
@@ -110,11 +129,9 @@ inline auto load_npy_float_matrix(const std::filesystem::path &filepath, uint32_
 
   uint32_t header_len = 0;
   if (major == 1) {
-    uint16_t len = 0;
-    reader.read(reinterpret_cast<char *>(&len), sizeof(len));
-    header_len = len;
+    header_len = read_little_endian_u16(reader);
   } else if (major == 2 || major == 3) {
-    reader.read(reinterpret_cast<char *>(&header_len), sizeof(header_len));
+    header_len = read_little_endian_u32(reader);
   } else {
     throw std::runtime_error("Unsupported npy version in " + filepath.string());
   }
@@ -153,7 +170,19 @@ inline auto load_npy_float_matrix(const std::filesystem::path &filepath, uint32_
 struct JsonValue {
   using Array = std::vector<JsonValue>;
   using Object = std::unordered_map<std::string, JsonValue>;
-  std::variant<std::nullptr_t, bool, int64_t, double, std::string, Array, Object> value_;
+  using ArrayPtr = std::shared_ptr<Array>;
+  using ObjectPtr = std::shared_ptr<Object>;
+
+  JsonValue() : value_(nullptr) {}
+  explicit JsonValue(std::nullptr_t) : value_(nullptr) {}
+  explicit JsonValue(bool value) : value_(value) {}
+  explicit JsonValue(int64_t value) : value_(value) {}
+  explicit JsonValue(double value) : value_(value) {}
+  explicit JsonValue(std::string value) : value_(std::move(value)) {}
+  explicit JsonValue(Array value) : value_(std::make_shared<Array>(std::move(value))) {}
+  explicit JsonValue(Object value) : value_(std::make_shared<Object>(std::move(value))) {}
+
+  std::variant<std::nullptr_t, bool, int64_t, double, std::string, ArrayPtr, ObjectPtr> value_;
 };
 
 class JsonParser {
@@ -211,17 +240,44 @@ class JsonParser {
     throw std::runtime_error("invalid JSON unicode escape");
   }
 
+  static auto is_high_surrogate(uint32_t code_unit) -> bool {
+    return code_unit >= 0xD800 && code_unit <= 0xDBFF;
+  }
+
+  static auto is_low_surrogate(uint32_t code_unit) -> bool {
+    return code_unit >= 0xDC00 && code_unit <= 0xDFFF;
+  }
+
   static void append_utf8(std::string &output, uint32_t codepoint) {
+    if (codepoint > 0x10FFFF || is_high_surrogate(codepoint) || is_low_surrogate(codepoint)) {
+      throw std::runtime_error("invalid JSON unicode codepoint");
+    }
     if (codepoint <= 0x7F) {
       output.push_back(static_cast<char>(codepoint));
     } else if (codepoint <= 0x7FF) {
       output.push_back(static_cast<char>(0xC0 | (codepoint >> 6)));
       output.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
-    } else {
+    } else if (codepoint <= 0xFFFF) {
       output.push_back(static_cast<char>(0xE0 | (codepoint >> 12)));
       output.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
       output.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
+    } else {
+      output.push_back(static_cast<char>(0xF0 | (codepoint >> 18)));
+      output.push_back(static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F)));
+      output.push_back(static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F)));
+      output.push_back(static_cast<char>(0x80 | (codepoint & 0x3F)));
     }
+  }
+
+  auto parse_unicode_escape() -> uint32_t {
+    if (pos_ + 4 > input_.size()) {
+      throw std::runtime_error("short JSON unicode escape");
+    }
+    uint32_t code_unit = 0;
+    for (uint32_t i = 0; i < 4; ++i) {
+      code_unit = (code_unit << 4) | hex_value(input_[pos_++]);
+    }
+    return code_unit;
   }
 
   auto parse_string() -> std::string {
@@ -262,12 +318,19 @@ class JsonParser {
           result.push_back('\t');
           break;
         case 'u': {
-          if (pos_ + 4 > input_.size()) {
-            throw std::runtime_error("short JSON unicode escape");
-          }
-          uint32_t codepoint = 0;
-          for (uint32_t i = 0; i < 4; ++i) {
-            codepoint = (codepoint << 4) | hex_value(input_[pos_++]);
+          auto codepoint = parse_unicode_escape();
+          if (is_high_surrogate(codepoint)) {
+            if (pos_ + 2 > input_.size() || input_[pos_] != '\\' || input_[pos_ + 1] != 'u') {
+              throw std::runtime_error("JSON high surrogate must be followed by low surrogate");
+            }
+            pos_ += 2;
+            auto low_surrogate = parse_unicode_escape();
+            if (!is_low_surrogate(low_surrogate)) {
+              throw std::runtime_error("JSON high surrogate must be followed by low surrogate");
+            }
+            codepoint = 0x10000 + ((codepoint - 0xD800) << 10) + (low_surrogate - 0xDC00);
+          } else if (is_low_surrogate(codepoint)) {
+            throw std::runtime_error("JSON low surrogate without preceding high surrogate");
           }
           append_utf8(result, codepoint);
           break;
@@ -307,19 +370,18 @@ class JsonParser {
     }
 
     auto token = input_.substr(start, pos_ - start);
+    auto *begin = token.data();
+    auto *end = token.data() + token.size();
     if (is_float) {
-      std::string number(token);
-      char *end = nullptr;
-      auto value = std::strtod(number.c_str(), &end);
-      if (end != number.c_str() + number.size()) {
+      double value = 0.0;
+      auto [ptr, ec] = std::from_chars(begin, end, value);
+      if (ec != std::errc() || ptr != end) {
         throw std::runtime_error("invalid JSON floating-point number");
       }
       return JsonValue{value};
     }
 
     int64_t value = 0;
-    auto *begin = token.data();
-    auto *end = token.data() + token.size();
     auto [ptr, ec] = std::from_chars(begin, end, value);
     if (ec != std::errc() || ptr != end) {
       throw std::runtime_error("invalid JSON integer");
@@ -407,11 +469,13 @@ class JsonParser {
 inline auto parse_json_line(std::string_view line) -> JsonValue { return JsonParser(line).parse(); }
 
 inline auto as_object(const JsonValue &value) -> const JsonValue::Object * {
-  return std::get_if<JsonValue::Object>(&value.value_);
+  const auto *object = std::get_if<JsonValue::ObjectPtr>(&value.value_);
+  return object == nullptr ? nullptr : object->get();
 }
 
 inline auto as_array(const JsonValue &value) -> const JsonValue::Array * {
-  return std::get_if<JsonValue::Array>(&value.value_);
+  const auto *array = std::get_if<JsonValue::ArrayPtr>(&value.value_);
+  return array == nullptr ? nullptr : array->get();
 }
 
 inline auto as_string(const JsonValue &value) -> const std::string * {
