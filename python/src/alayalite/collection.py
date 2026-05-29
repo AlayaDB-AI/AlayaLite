@@ -255,8 +255,6 @@ class Collection:
             # Collection always requires scalar data storage
             self.__index_params.has_scalar_data = True
 
-            index = Index(self.__name, self.__index_params)
-
             # Prepare batch data
             vectors = np.array([item[2] for item in items], dtype=dt)
             item_ids = [item[0] for item in items]
