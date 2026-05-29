@@ -1067,7 +1067,7 @@ class RocksDBStorage {
     }
     for (auto it = int_range_bitset_cache_.begin(); it != int_range_bitset_cache_.end();) {
       auto field = int_range_bitset_cache_field(it->first);
-      if (field.has_value() && fields.contains(*field)) {
+      if (field.has_value() && fields.find(*field) != fields.end()) {
         it = int_range_bitset_cache_.erase(it);
       } else {
         ++it;

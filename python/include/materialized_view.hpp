@@ -911,7 +911,7 @@ class MaterializedViewManager {
       return partitions_[lookup_it->second];
     }
 
-    if (params_ == nullptr || params_->materialized_view_mode_ != "lazy") {
+    if (params_ == nullptr) {
       return nullptr;
     }
 
