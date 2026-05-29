@@ -116,6 +116,44 @@ class TestCollection(unittest.TestCase):
 
         self.assertEqual(mock_fit.call_args.kwargs["num_threads"], 7)
 
+    def test_fit_columnar_builds_collection_without_tuple_rows(self):
+        """Collection.fit should accept columnar inputs directly."""
+        vectors = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=np.float32)
+        item_ids = ["doc-1", "doc-2"]
+        documents = ["Document 1", "Document 2"]
+        metadata_list = [{"category": "A"}, {"category": "B"}]
+
+        self.collection.fit(
+            vectors,
+            item_ids=item_ids,
+            documents=documents,
+            metadata_list=metadata_list,
+        )
+
+        result = self.collection.filter_query({})
+        self.assertEqual(result["id"], item_ids)
+        self.assertEqual(result["document"], documents)
+        self.assertEqual(result["metadata"], metadata_list)
+
+    def test_fit_uses_explicit_build_threads(self):
+        """Columnar fit should honor explicit build thread parameters."""
+        vectors = np.array([[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]], dtype=np.float32)
+        item_ids = ["doc-1", "doc-2"]
+        documents = ["Document 1", "Document 2"]
+        metadata_list = [{"category": "A"}, {"category": "B"}]
+        collection = self._create_collection("test_collection_fit_threads", self._collection_params())
+
+        with patch.object(Index, "fit", autospec=True, return_value=None) as mock_fit:
+            collection.fit(
+                vectors,
+                item_ids=item_ids,
+                documents=documents,
+                metadata_list=metadata_list,
+                num_threads=3,
+            )
+
+        self.assertEqual(mock_fit.call_args.kwargs["num_threads"], 3)
+
     def test_upsert_fit_and_concat(self):
         items = [
             (1, "Document 1", np.array([0.1, 0.2, 0.3], dtype=np.float32), {"category": "A"}),

@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "utils/metadata_filter_matcher.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <filesystem>
@@ -10,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "utils/metadata_filter_matcher.hpp"
 
 namespace alaya {
 namespace fs = std::filesystem;
@@ -310,6 +310,145 @@ TEST_F(MetadataFilterExecutorTest, FullBitsetUsesIndexFastPathForIndexedFilters)
   expect_mask(result, {false, true, false, true});
 }
 
+TEST_F(MetadataFilterExecutorTest, DirectIndexedBitsetAvoidsMaterializingCandidateIds) {
+  auto storage = make_storage({"category", "age"});
+  using IndexBuildMode = MetadataFilterExecutor<TestID>::IndexBuildMode;
+
+  auto exact_filter = make_single_condition_filter("category", FilterOp::EQ, std::string("books"));
+  MetadataFilterExecutor<TestID> exact_executor(exact_filter,
+                                                storage.get(),
+                                                4,
+                                                IndexBuildMode::kSkip);
+  EXPECT_FALSE(exact_executor.has_index_fast_path());
+  EXPECT_TRUE(exact_executor.indexed_ids().empty());
+
+  auto exact_result = exact_executor.build_direct_indexed_blocked_bitset();
+  ASSERT_TRUE(exact_result.has_value());
+  EXPECT_EQ(exact_result->matched_count_, 2U);
+  expect_mask(*exact_result, {false, true, false, true});
+  EXPECT_FALSE(exact_executor.has_index_fast_path());
+  EXPECT_TRUE(exact_executor.indexed_ids().empty());
+
+  auto range_filter = make_single_condition_filter("age", FilterOp::LT, int64_t(30));
+  MetadataFilterExecutor<TestID> range_executor(range_filter,
+                                                storage.get(),
+                                                4,
+                                                IndexBuildMode::kSkip);
+  auto range_result = range_executor.build_direct_indexed_blocked_bitset();
+  ASSERT_TRUE(range_result.has_value());
+  EXPECT_EQ(range_result->matched_count_, 2U);
+  expect_mask(*range_result, {false, false, true, true});
+}
+
+TEST_F(MetadataFilterExecutorTest, IndexedAndFiltersIntersectCandidateSets) {
+  auto storage = make_storage({"category", "age"});
+
+  MetadataFilter filter;
+  filter.add_eq("category", std::string("books")).add_ge("age", int64_t(30));
+
+  MetadataFilterExecutor<TestID> executor(filter, storage.get(), 4);
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_TRUE(executor.index_fast_path_is_exact());
+  EXPECT_EQ(executor.indexed_ids(), (std::vector<TestID>{2}));
+
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 1U);
+  expect_mask(result, {true, true, false, true});
+}
+
+TEST_F(MetadataFilterExecutorTest, IndexedOrFiltersUnionCandidateSets) {
+  auto storage = make_storage({"category", "age"});
+
+  MetadataFilter filter;
+  filter.logic_op = LogicOp::OR;
+  filter.add_eq("category", std::string("games")).add_ge("age", int64_t(40));
+
+  MetadataFilterExecutor<TestID> executor(filter, storage.get(), 4);
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_TRUE(executor.index_fast_path_is_exact());
+  EXPECT_TRUE(executor.index_fast_path_uses_materialized_ids());
+  EXPECT_EQ(executor.indexed_ids(), (std::vector<TestID>{1, 3}));
+  EXPECT_EQ(executor.indexed_count(), 2U);
+  EXPECT_FALSE(executor.match(0));
+  EXPECT_TRUE(executor.match(1));
+  EXPECT_FALSE(executor.match(2));
+  EXPECT_TRUE(executor.match(3));
+
+  std::vector<TestID> visited_ids;
+  executor.visit_index_fast_path_ids([&visited_ids](TestID id) {
+    visited_ids.push_back(id);
+  });
+  EXPECT_EQ(visited_ids, (std::vector<TestID>{1, 3}));
+
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 2U);
+  expect_mask(result, {true, false, true, false});
+}
+
+TEST_F(MetadataFilterExecutorTest, IndexedNotFiltersComplementCandidateSet) {
+  auto storage = make_storage({"category"});
+
+  MetadataFilter filter;
+  filter.logic_op = LogicOp::NOT;
+  filter.add_eq("category", std::string("books"));
+
+  MetadataFilterExecutor<TestID> executor(filter, storage.get(), 4);
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_TRUE(executor.index_fast_path_is_exact());
+  EXPECT_FALSE(executor.index_fast_path_uses_materialized_ids());
+  EXPECT_TRUE(executor.indexed_ids().empty());
+  EXPECT_EQ(executor.indexed_count(), 2U);
+  EXPECT_FALSE(executor.match(0));
+  EXPECT_TRUE(executor.match(1));
+  EXPECT_FALSE(executor.match(2));
+  EXPECT_TRUE(executor.match(3));
+
+  std::vector<TestID> visited_ids;
+  executor.visit_index_fast_path_ids([&visited_ids](TestID id) {
+    visited_ids.push_back(id);
+  });
+  EXPECT_EQ(visited_ids, (std::vector<TestID>{1, 3}));
+
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 2U);
+  expect_mask(result, {true, false, true, false});
+}
+
+TEST_F(MetadataFilterExecutorTest, IndexedAndWithResidualEvaluatesOnlyCandidateSet) {
+  auto storage = make_storage({"category"});
+
+  MetadataFilter filter;
+  filter.add_eq("category", std::string("books"));
+  filter.conditions.push_back(make_condition("title", FilterOp::CONTAINS, std::string("notes")));
+
+  MetadataFilterExecutor<TestID> executor(filter, storage.get(), 4);
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_FALSE(executor.index_fast_path_is_exact());
+  EXPECT_EQ(executor.indexed_ids(), (std::vector<TestID>{0, 2}));
+  EXPECT_FALSE(executor.match(0));
+  EXPECT_TRUE(executor.match(2));
+
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 1U);
+  expect_mask(result, {true, true, false, true});
+}
+
+TEST_F(MetadataFilterExecutorTest, OrWithUnindexedBranchFallsBackToRawEvaluation) {
+  auto storage = make_storage({"category"});
+
+  MetadataFilter filter;
+  filter.logic_op = LogicOp::OR;
+  filter.add_eq("category", std::string("books"));
+  filter.conditions.push_back(make_condition("title", FilterOp::CONTAINS, std::string("gamma")));
+
+  MetadataFilterExecutor<TestID> executor(filter, storage.get(), 4);
+  EXPECT_FALSE(executor.has_index_fast_path());
+
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 3U);
+  expect_mask(result, {false, true, false, false});
+}
+
 TEST_F(MetadataFilterExecutorTest, IntegerRangeFiltersUseIndexFastPathAndHandleEdges) {
   auto storage = make_storage({"age"});
 
@@ -322,8 +461,8 @@ TEST_F(MetadataFilterExecutorTest, IntegerRangeFiltersUseIndexFastPathAndHandleE
   MetadataFilterExecutor<TestID> gt_executor(gt_filter, storage.get(), 4);
   EXPECT_EQ(gt_executor.indexed_ids(), (std::vector<TestID>{2, 3}));
 
-  auto gt_max_filter = make_single_condition_filter(
-      "age", FilterOp::GT, std::numeric_limits<int64_t>::max());
+  auto gt_max_filter =
+      make_single_condition_filter("age", FilterOp::GT, std::numeric_limits<int64_t>::max());
   MetadataFilterExecutor<TestID> gt_max_executor(gt_max_filter, storage.get(), 4);
   EXPECT_TRUE(gt_max_executor.has_index_fast_path());
   EXPECT_TRUE(gt_max_executor.indexed_ids().empty());
@@ -337,8 +476,8 @@ TEST_F(MetadataFilterExecutorTest, IntegerRangeFiltersUseIndexFastPathAndHandleE
   MetadataFilterExecutor<TestID> lt_executor(lt_filter, storage.get(), 4);
   EXPECT_EQ(lt_executor.indexed_ids(), (std::vector<TestID>{0, 1}));
 
-  auto lt_min_filter = make_single_condition_filter(
-      "age", FilterOp::LT, std::numeric_limits<int64_t>::min());
+  auto lt_min_filter =
+      make_single_condition_filter("age", FilterOp::LT, std::numeric_limits<int64_t>::min());
   MetadataFilterExecutor<TestID> lt_min_executor(lt_min_filter, storage.get(), 4);
   EXPECT_TRUE(lt_min_executor.has_index_fast_path());
   EXPECT_TRUE(lt_min_executor.indexed_ids().empty());

@@ -190,10 +190,10 @@ class QGBuilder {
         }
 
         if (dst_neighbors.size() < degree_bound_) {
-          dst_neighbors.emplace_back(data_id, nei.distance_);
+          dst_neighbors.emplace_back(current_id, nei.distance_);
         } else {
           if (reverse_buffer[dst].size() < kMaxCandidatePoolSize) {
-            reverse_buffer[dst].emplace_back(data_id, nei.distance_);
+            reverse_buffer[dst].emplace_back(current_id, nei.distance_);
           }
         }
       }
@@ -201,14 +201,15 @@ class QGBuilder {
     ALAYA_OMP_PARALLEL_FOR_DYNAMIC
     for (int64_t data_id = 0; data_id < static_cast<int64_t>(num_nodes_);
          ++data_id) {  // prune for every vertex
-      CandidateList &tmp_pool = reverse_buffer[data_id];
+      auto source_id = static_cast<IDType>(data_id);
+      CandidateList &tmp_pool = reverse_buffer[source_id];
       tmp_pool.reserve(tmp_pool.size() + degree_bound_);
       // add current neighbors
       tmp_pool.insert(tmp_pool.end(),
-                      new_neighbors_[data_id].begin(),
-                      new_neighbors_[data_id].end());
+                      new_neighbors_[source_id].begin(),
+                      new_neighbors_[source_id].end());
       std::sort(tmp_pool.begin(), tmp_pool.end());
-      heuristic_prune(data_id, tmp_pool, new_neighbors_[data_id], sup);
+      heuristic_prune(source_id, tmp_pool, new_neighbors_[source_id], sup);
     }
   }
 
@@ -261,7 +262,7 @@ class QGBuilder {
           ids.emplace(neighbor.id_);
         }
         while (new_result.size() < degree_bound_) {
-          IDType rand_id = rand_integer<IDType>(0, static_cast<IDType>(num_nodes_) - 1);
+          auto rand_id = rand_integer<IDType>(0, static_cast<IDType>(num_nodes_) - 1);
           if (rand_id != static_cast<IDType>(i) && ids.find(rand_id) == ids.end()) {
             new_result.emplace_back(rand_id, space_->get_distance(rand_id, i));
             ids.emplace(rand_id);
@@ -506,7 +507,7 @@ class QGBuilder {
       std::unordered_set<IDType> neighbor_set;
       neighbor_set.reserve(degree_bound_);
       while (neighbor_set.size() < degree_bound_) {
-        IDType rand_id = rand_integer<IDType>(0, num_nodes_ - 1);
+        auto rand_id = rand_integer<IDType>(0, num_nodes_ - 1);
         if (rand_id != static_cast<IDType>(i)) {
           neighbor_set.emplace(rand_id);
         }
