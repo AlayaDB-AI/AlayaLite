@@ -36,4 +36,13 @@ add_test(NAME index_test_nndescent COMMAND $<TARGET_FILE:nndescent_test>)
 add_test(NAME index_test_nsg COMMAND $<TARGET_FILE:nsg_test>)
 add_test(NAME index_test_rabitq COMMAND $<TARGET_FILE:rabitq_test>)
 add_test(NAME index_test_rabitq_performance COMMAND $<TARGET_FILE:rabitq_performance_test>)
+set_tests_properties(
+  index_test_fusion_graph
+  index_test_graph
+  index_test_hnsw
+  index_test_nndescent
+  index_test_nsg
+  index_test_rabitq
+  PROPERTIES LABELS "unit"
+)
 set_tests_properties(index_test_rabitq_performance PROPERTIES LABELS "performance")

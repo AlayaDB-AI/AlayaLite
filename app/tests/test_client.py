@@ -12,6 +12,8 @@ import httpx
 import numpy as np
 import pytest
 
+from .client_helpers import create_app_client
+
 
 def reload_client() -> httpx.AsyncClient:
     # Simulate restart: force reload of app modules and create a new ASGI client.
@@ -69,37 +71,38 @@ async def test_reset_collection(fresh_client: httpx.AsyncClient):
 async def test_reset_persistence_collection(tmp_path, monkeypatch):
     monkeypatch.setenv("ALAYALITE_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("ALAYALITE_ROCKSDB_DIR", str(tmp_path / "RocksDB"))
-    tc = reload_client()
     collection_name_list = ["a", "b", "c", "d", "e"]
-    for collection_name in collection_name_list:
-        response = await tc.post("/api/v1/collection/create", json={"collection_name": collection_name})
+    async with reload_client() as client:
+        for collection_name in collection_name_list:
+            response = await client.post("/api/v1/collection/create", json={"collection_name": collection_name})
+            assert response.status_code == 200
+
+            response = await client.post(
+                "/api/v1/collection/insert",
+                json={
+                    "collection_name": collection_name,
+                    "items": [
+                        (1, "Document 1", np.array([0.1, 0.2, 0.3]).tolist(), {"category": "A"}),
+                    ],
+                },
+            )
+            assert response.status_code == 200
+
+            response = await client.post("/api/v1/collection/save", json={"collection_name": collection_name})
+            assert response.status_code == 200
+
+        response = await client.post("/api/v1/collection/list")
+        assert response.status_code == 200
+        assert set(response.json()) == set(collection_name_list)
+
+        # reset collection
+        response = await client.post("/api/v1/collection/reset", json={"delete_on_disk": True})
         assert response.status_code == 200
 
-        response = await tc.post(
-            "/api/v1/collection/insert",
-            json={
-                "collection_name": collection_name,
-                "items": [
-                    (1, "Document 1", np.array([0.1, 0.2, 0.3]).tolist(), {"category": "A"}),
-                ],
-            },
-        )
-
-        response = await tc.post("/api/v1/collection/save", json={"collection_name": collection_name})
+    async with reload_client() as restarted_client:
+        response = await restarted_client.post("/api/v1/collection/list")
         assert response.status_code == 200
-
-    response = await tc.post("/api/v1/collection/list")
-    assert response.status_code == 200
-    assert set(response.json()) == set(collection_name_list)
-
-    # reset collection
-    response = await tc.post("/api/v1/collection/reset", json={"delete_on_disk": True})
-    assert response.status_code == 200
-
-    tc2 = reload_client()
-    response = await tc2.post("/api/v1/collection/list")
-    assert response.status_code == 200
-    assert response.json() == []
+        assert response.json() == []
 
 
 @pytest.mark.asyncio
@@ -298,10 +301,10 @@ async def test_persistence_across_restart(tmp_path, monkeypatch):
     assert os.path.isdir(coll_path)
     assert os.path.isfile(os.path.join(coll_path, "schema.json"))
 
-    # Release old client to free RocksDB lock
-    del tc
-    del tc1_ans
-    gc.collect()
+    async with create_app_client() as tc2:
+        resp = await tc2.post("/api/v1/collection/list")
+        assert resp.status_code == 200
+        assert "restart_coll" in resp.json()
 
     tc2 = reload_client()
     # list collections should include our saved collection
