@@ -5,11 +5,10 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <limits>
 #include <string>
-#include <variant>
 #include <vector>
 
 #include "utils/dataset_utils.hpp"
@@ -17,12 +16,67 @@
 #include "utils/parser.hpp"
 
 namespace alaya {
+namespace fs = std::filesystem;
+
+namespace {
+
+template <typename T>
+void write_raw(std::ofstream &out, const T &value) {
+  out.write(reinterpret_cast<const char *>(&value), sizeof(T));
+}
+
+void write_fvecs(const fs::path &path, const std::vector<std::vector<float>> &vectors) {
+  std::ofstream out(path, std::ios::binary);
+  for (const auto &vec : vectors) {
+    auto dim = static_cast<uint32_t>(vec.size());
+    write_raw(out, dim);
+    out.write(reinterpret_cast<const char *>(vec.data()),
+              static_cast<std::streamsize>(vec.size() * sizeof(float)));
+  }
+}
+
+void write_ivecs(const fs::path &path, const std::vector<std::vector<uint32_t>> &vectors) {
+  std::ofstream out(path, std::ios::binary);
+  for (const auto &vec : vectors) {
+    auto dim = static_cast<uint32_t>(vec.size());
+    write_raw(out, dim);
+    out.write(reinterpret_cast<const char *>(vec.data()),
+              static_cast<std::streamsize>(vec.size() * sizeof(uint32_t)));
+  }
+}
+
+auto make_local_dataset_config(const fs::path &dir) -> DatasetConfig {
+  return DatasetConfig{
+      .name_ = "local",
+      .dir_ = dir,
+      .data_file_ = dir / "base.fvecs",
+      .query_file_ = dir / "query.fvecs",
+      .gt_file_ = dir / "groundtruth.ivecs",
+  };
+}
+
+void write_local_dataset_files(const DatasetConfig &config) {
+  fs::create_directories(config.dir_);
+  write_fvecs(config.data_file_, {{0.0F, 0.0F}, {1.0F, 1.0F}, {2.0F, 2.0F}});
+  write_fvecs(config.query_file_, {{0.1F, 0.1F}, {0.9F, 0.9F}});
+  write_ivecs(config.gt_file_, {{2U}, {2U}});
+}
+
+}  // namespace
 
 class DatasetTest : public ::testing::Test {
  protected:
-  void SetUp() override { data_dir_ = resolve_data_dir(); }
+  void SetUp() override {
+    data_dir_ = fs::current_path().parent_path() / "data";
+    temp_dir_ = fs::temp_directory_path() / "alayalite_dataset_utils_test";
+    fs::remove_all(temp_dir_);
+    fs::create_directories(temp_dir_);
+  }
 
-  std::filesystem::path data_dir_;
+  void TearDown() override { fs::remove_all(temp_dir_); }
+
+  fs::path data_dir_;
+  fs::path temp_dir_;
 };
 
 TEST_F(DatasetTest, DISABLED_LoadSiftSmall) {
@@ -69,6 +123,74 @@ TEST_F(DatasetTest, SiftMicroConfig) {
   EXPECT_EQ(config.max_query_num_, 50);
   // sift_micro uses siftsmall files
   EXPECT_TRUE(config.data_file_.string().find("siftsmall") != std::string::npos);
+}
+
+TEST_F(DatasetTest, DatasetConfigsUseExpectedFilesAndArchives) {
+  auto sift_config = sift_small(data_dir_);
+  EXPECT_EQ(sift_config.name_, "siftsmall");
+  EXPECT_EQ(sift_config.archive_name_, "data.tar.gz");
+  EXPECT_EQ(sift_config.strip_components_, 1);
+  EXPECT_TRUE(sift_config.data_file_.string().find("siftsmall_base.fvecs") != std::string::npos);
+
+  auto deep_config = deep1m(data_dir_);
+  EXPECT_EQ(deep_config.name_, "deep1M");
+  EXPECT_EQ(deep_config.archive_name_, "deep1M.tar.gz");
+  EXPECT_TRUE(deep_config.gt_file_.string().find("deep1M_groundtruth.ivecs") !=
+              std::string::npos);
+
+  auto t2i_config = t2i1m(data_dir_);
+  EXPECT_EQ(t2i_config.name_, "t2i-1m");
+  EXPECT_TRUE(t2i_config.download_url_.empty());
+  EXPECT_TRUE(t2i_config.query_file_.string().find("query.fvecs") != std::string::npos);
+}
+
+TEST_F(DatasetTest, LoadDatasetReadsLocalFilesWithoutDownload) {
+  auto config = make_local_dataset_config(temp_dir_ / "normal");
+  write_local_dataset_files(config);
+
+  auto ds = load_dataset(config);
+
+  EXPECT_EQ(ds.name_, "local");
+  EXPECT_EQ(ds.data_num_, 3U);
+  EXPECT_EQ(ds.query_num_, 2U);
+  EXPECT_EQ(ds.dim_, 2U);
+  EXPECT_EQ(ds.gt_dim_, 1U);
+  EXPECT_EQ(ds.data_, (std::vector<float>{0.0F, 0.0F, 1.0F, 1.0F, 2.0F, 2.0F}));
+  EXPECT_EQ(ds.queries_, (std::vector<float>{0.1F, 0.1F, 0.9F, 0.9F}));
+  EXPECT_EQ(ds.ground_truth_, (std::vector<uint32_t>{2U, 2U}));
+}
+
+TEST_F(DatasetTest, LoadDatasetTruncatesDataAndRecomputesGroundTruth) {
+  auto config = make_local_dataset_config(temp_dir_ / "data_truncated");
+  write_local_dataset_files(config);
+  config.max_data_num_ = 2;
+
+  auto ds = load_dataset(config);
+
+  EXPECT_EQ(ds.data_num_, 2U);
+  EXPECT_EQ(ds.query_num_, 2U);
+  EXPECT_EQ(ds.data_, (std::vector<float>{0.0F, 0.0F, 1.0F, 1.0F}));
+  EXPECT_EQ(ds.ground_truth_, (std::vector<uint32_t>{0U, 1U}));
+}
+
+TEST_F(DatasetTest, LoadDatasetTruncatesQueriesAndGroundTruth) {
+  auto config = make_local_dataset_config(temp_dir_ / "query_truncated");
+  write_local_dataset_files(config);
+  config.max_query_num_ = 1;
+
+  auto ds = load_dataset(config);
+
+  EXPECT_EQ(ds.data_num_, 3U);
+  EXPECT_EQ(ds.query_num_, 1U);
+  EXPECT_EQ(ds.queries_, (std::vector<float>{0.1F, 0.1F}));
+  EXPECT_EQ(ds.ground_truth_, (std::vector<uint32_t>{2U}));
+}
+
+TEST_F(DatasetTest, LoadDatasetThrowsWhenFilesMissingAndNoDownloadUrl) {
+  auto config = make_local_dataset_config(temp_dir_ / "missing");
+
+  EXPECT_THROW(load_dataset(config), std::runtime_error);
+  EXPECT_TRUE(fs::exists(config.dir_.parent_path()));
 }
 
 TEST_F(DatasetTest, DISABLED_LoadSiftMicro) {

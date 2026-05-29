@@ -7,8 +7,10 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -354,13 +356,13 @@ class MaterializedViewManager {
       }
 
       partition_lookup_.reserve(partitions->size());
-      partitions_.reserve(partitions->size());
       for (auto &partition_seed : *partitions) {
         auto partition = build_partition(partition_seed.value_,
                                          std::move(partition_seed.encoded_value_),
                                          std::move(partition_seed.global_ids_));
-        partition_lookup_.emplace(partition.encoded_value_, partitions_.size());
-        partitions_.push_back(std::move(partition));
+        auto partition_ptr = std::make_shared<Partition>(std::move(partition));
+        partition_lookup_.emplace(partition_ptr->encoded_value_, partitions_.size());
+        partitions_.push_back(std::move(partition_ptr));
       }
 
       ready_ = !partitions_.empty();
@@ -418,13 +420,13 @@ class MaterializedViewManager {
 
     size_t selected_partitions = 0;
     for (const auto &value : partition_selection.values_) {
-      auto lookup_it = partition_lookup_.find(index_encoding::encode_value(value));
-      if (lookup_it == partition_lookup_.end()) {
+      auto partition = get_or_build_partition(value);
+      if (partition == nullptr) {
         continue;
       }
 
       ++selected_partitions;
-      auto partition_results = execute_partition_search(partitions_[lookup_it->second],
+      auto partition_results = execute_partition_search(*partition,
                                                         query,
                                                         search_info,
                                                         filter_executor.get(),
@@ -577,6 +579,11 @@ class MaterializedViewManager {
   }
 
   void reset() {
+    std::lock_guard<std::mutex> lock(partition_build_mutex_);
+    reset_unlocked();
+  }
+
+  void reset_unlocked() {
     ready_ = false;
     field_.clear();
     partition_lookup_.clear();
@@ -647,6 +654,30 @@ class MaterializedViewManager {
     }
 
     return partitions;
+  }
+
+  auto collect_partition_seed(const RocksDBStorage<IDType> &storage,
+                              const MetadataValue &value) const -> PartitionSeed {
+    PartitionSeed seed{value, index_encoding::encode_value(value), {}};
+
+    for (IDType id = 0; id < search_space_->get_data_num(); ++id) {
+      std::string raw_value;
+      if (!storage.get_raw_value(id, raw_value)) {
+        continue;
+      }
+
+      auto field_value =
+          ScalarData::deserialize_single_metadata_value(raw_value.data(), raw_value.size(), field_);
+      if (!field_value.has_value()) {
+        continue;
+      }
+      if (index_encoding::encode_value(*field_value) != seed.encoded_value_) {
+        continue;
+      }
+      seed.global_ids_.push_back(id);
+    }
+
+    return seed;
   }
 
   template <typename ExactDistanceEvaluator>
@@ -872,6 +903,45 @@ class MaterializedViewManager {
     return partition;
   }
 
+  auto get_or_build_partition(const MetadataValue &value) const -> std::shared_ptr<Partition> {
+    auto encoded_value = index_encoding::encode_value(value);
+    std::lock_guard<std::mutex> lock(partition_build_mutex_);
+    auto lookup_it = partition_lookup_.find(encoded_value);
+    if (lookup_it != partition_lookup_.end()) {
+      return partitions_[lookup_it->second];
+    }
+
+    if (params_ == nullptr || params_->materialized_view_mode_ != "lazy") {
+      return nullptr;
+    }
+
+    auto *storage = search_space_ == nullptr ? nullptr : search_space_->get_scalar_storage();
+    if (storage == nullptr) {
+      return nullptr;
+    }
+
+    try {
+      auto partition_seed = collect_partition_seed(*storage, value);
+      if (partition_seed.global_ids_.empty()) {
+        return nullptr;
+      }
+
+      auto partition = build_partition(partition_seed.value_,
+                                       std::move(partition_seed.encoded_value_),
+                                       std::move(partition_seed.global_ids_));
+      auto partition_index = partitions_.size();
+      partitions_.push_back(std::make_shared<Partition>(std::move(partition)));
+      partition_lookup_.emplace(encoded_value, partition_index);
+      LOG_INFO("materialized_view: built lazy partition field={}, size={}",
+               field_,
+               partitions_[partition_index]->local_to_global_ids_.size());
+      return partitions_[partition_index];
+    } catch (const std::exception &e) {
+      LOG_ERROR("materialized_view: lazy build failed for field={}, error={}", field_, e.what());
+      return nullptr;
+    }
+  }
+
   auto execute_partition_search(const Partition &partition,
                                 const DataType *query,
                                 const SearchInfo &search_info,
@@ -925,8 +995,9 @@ class MaterializedViewManager {
   SearchSpacePtr search_space_{nullptr};
   BuildSpacePtr build_space_{nullptr};
   std::string field_;
-  std::unordered_map<std::string, size_t> partition_lookup_;
-  std::vector<Partition> partitions_;
+  mutable std::unordered_map<std::string, size_t> partition_lookup_;
+  mutable std::deque<std::shared_ptr<Partition>> partitions_;
+  mutable std::mutex partition_build_mutex_;
   uint32_t ef_construction_{200};
   uint32_t build_threads_{1};
   bool ready_{false};
