@@ -32,24 +32,92 @@ class MetadataFilterExecutor {
     size_t matched_count_ = 0;
   };
 
+  struct IndexedFilterPlan {
+    std::vector<IDType> ids_;
+    std::optional<DynamicBitset> allow_ids_;
+    size_t matched_count_ = 0;
+    bool exact_ = false;
+  };
+
+  enum class IndexBuildMode {
+    kBuild,
+    kSkip,
+  };
+
   MetadataFilterExecutor(const MetadataFilter &filter,
                          const RocksDBStorage<IDType> *storage,
-                         size_t data_num)
+                         size_t data_num,
+                         IndexBuildMode index_build_mode = IndexBuildMode::kBuild)
       : filter_(filter), storage_(storage), data_num_(data_num), allow_ids_(data_num) {
     if (storage_ == nullptr) {
       throw std::invalid_argument("Storage cannot be null");
     }
 
     collect_required_fields(filter_, required_fields_);
-    build_index_fast_path();
+    if (index_build_mode == IndexBuildMode::kBuild) {
+      build_index_fast_path();
+    }
   }
 
   [[nodiscard]] auto filter() const -> const MetadataFilter & { return filter_; }
   [[nodiscard]] auto is_trivially_true() const -> bool { return filter_.is_empty(); }
   [[nodiscard]] auto has_index_fast_path() const -> bool { return has_index_fast_path_; }
+  [[nodiscard]] auto index_fast_path_is_exact() const -> bool { return index_fast_path_exact_; }
+  [[nodiscard]] auto index_fast_path_uses_materialized_ids() const -> bool {
+    return index_fast_path_uses_materialized_ids_;
+  }
   [[nodiscard]] auto indexed_ids() const -> const std::vector<IDType> & { return indexed_ids_; }
-  [[nodiscard]] auto indexed_count() const -> size_t { return indexed_ids_.size(); }
+  [[nodiscard]] auto indexed_count() const -> size_t { return indexed_count_; }
   [[nodiscard]] auto data_num() const -> size_t { return data_num_; }
+
+  template <typename Visitor>
+  void visit_index_fast_path_ids(Visitor &&visitor) const {
+    if (!has_index_fast_path_) {
+      return;
+    }
+
+    if (index_fast_path_uses_materialized_ids_) {
+      for (auto id : indexed_ids_) {
+        visitor(id);
+      }
+      return;
+    }
+
+    for (size_t raw_id = 0; raw_id < data_num_; ++raw_id) {
+      if (allow_ids_.get(raw_id)) {
+        visitor(static_cast<IDType>(raw_id));
+      }
+    }
+  }
+
+  void materialize_index_fast_path() {
+    if (!has_index_fast_path_) {
+      build_index_fast_path();
+    }
+  }
+
+  [[nodiscard]] auto build_direct_indexed_blocked_bitset() const
+      -> std::optional<BlockedBitsetResult> {
+    auto condition = simple_direct_index_condition(filter_);
+    if (condition == nullptr) {
+      return std::nullopt;
+    }
+
+    BlockedBitsetResult result(data_num_);
+    result.blocked_.set_all();
+    bool indexed = visit_indexed_ids(*condition, [&](IDType id) {
+      auto raw_id = static_cast<size_t>(id);
+      if (raw_id >= data_num_ || !result.blocked_.get(raw_id)) {
+        return;
+      }
+      result.blocked_.reset(raw_id);
+      ++result.matched_count_;
+    });
+    if (!indexed) {
+      return std::nullopt;
+    }
+    return result;
+  }
 
   [[nodiscard]] auto match(IDType id) const -> bool {
     if (filter_.is_empty()) {
@@ -57,9 +125,19 @@ class MetadataFilterExecutor {
     }
 
     if (has_index_fast_path_) {
-      return allow_ids_.get(id);
+      if (static_cast<size_t>(id) >= data_num_ || !allow_ids_.get(id)) {
+        return false;
+      }
+      return index_fast_path_exact_ || match_raw_value(id);
     }
 
+    return match_raw_value(id);
+  }
+
+  [[nodiscard]] auto match_raw_value(IDType id) const -> bool {
+    if (static_cast<size_t>(id) >= data_num_) {
+      return false;
+    }
     std::string raw_value;
     if (!storage_->get_raw_value(id, raw_value)) {
       return false;
@@ -86,7 +164,9 @@ class MetadataFilterExecutor {
 
     if (has_index_fast_path_) {
       for (size_t i = 0; i < ids.size(); ++i) {
-        if (allow_ids_.get(ids[i])) {
+        if (static_cast<size_t>(ids[i]) >= data_num_ || !allow_ids_.get(ids[i])) {
+          result.blocked_.set(i);
+        } else if (index_fast_path_exact_ || match_raw_value(ids[i])) {
           ++result.matched_count_;
         } else {
           result.blocked_.set(i);
@@ -121,10 +201,18 @@ class MetadataFilterExecutor {
 
     if (has_index_fast_path_) {
       result.blocked_.set_all();
-      for (auto id : indexed_ids_) {
-        result.blocked_.reset(id);
-      }
-      result.matched_count_ = indexed_ids_.size();
+      visit_index_fast_path_ids([&](IDType id) {
+        if (index_fast_path_exact_) {
+          result.blocked_.reset(id);
+          ++result.matched_count_;
+          return;
+        }
+
+        if (match(id)) {
+          result.blocked_.reset(id);
+          ++result.matched_count_;
+        }
+      });
       return result;
     }
 
@@ -253,26 +341,389 @@ class MetadataFilterExecutor {
     }
   }
 
-  // TODO(P2): Extend to support multi-condition AND by intersecting indexed ID
-  // sets, and OR by unioning them. Currently only single-condition AND filters
-  // on an indexed field can use the fast path; all other filters fall through
-  // to the O(N) full-scan in build_blocked_bitset().
-  void build_index_fast_path() {
-    if (filter_.logic_op != LogicOp::AND || filter_.conditions.size() != 1 ||
-        !filter_.sub_filters.empty()) {
-      return;
+  [[nodiscard]] auto simple_direct_index_condition(const MetadataFilter &filter) const
+      -> const FilterCondition * {
+    if (filter.logic_op != LogicOp::AND || filter.conditions.size() != 1 ||
+        !filter.sub_filters.empty()) {
+      return nullptr;
+    }
+    const auto &condition = filter.conditions.front();
+    if (!is_indexed_field(condition.field)) {
+      return nullptr;
+    }
+    return &condition;
+  }
+
+  template <typename Visitor>
+  [[nodiscard]] auto visit_indexed_ids(const FilterCondition &cond, Visitor &&visitor) const
+      -> bool {
+    if (!is_indexed_field(cond.field)) {
+      return false;
     }
 
-    auto indexed_ids = lookup_indexed_ids(filter_.conditions.front());
-    if (!indexed_ids.has_value()) {
-      return;
+    switch (cond.op) {
+      case FilterOp::EQ:
+        storage_->visit_ids_by_field_value(cond.field, cond.value, visitor);
+        return true;
+      case FilterOp::IN_SET:
+        for (const auto &value : cond.values) {
+          storage_->visit_ids_by_field_value(cond.field, value, visitor);
+        }
+        return true;
+      case FilterOp::GE:
+        if (std::holds_alternative<int64_t>(cond.value)) {
+          storage_->visit_ids_by_int_range(cond.field,
+                                           std::get<int64_t>(cond.value),
+                                           std::numeric_limits<int64_t>::max(),
+                                           visitor);
+          return true;
+        }
+        if (std::holds_alternative<double>(cond.value)) {
+          storage_->visit_ids_by_double_range(cond.field,
+                                              std::get<double>(cond.value),
+                                              std::numeric_limits<double>::max(),
+                                              visitor);
+          return true;
+        }
+        return false;
+      case FilterOp::GT:
+        if (std::holds_alternative<int64_t>(cond.value)) {
+          auto value = std::get<int64_t>(cond.value);
+          if (value == std::numeric_limits<int64_t>::max()) {
+            return true;
+          }
+          storage_->visit_ids_by_int_range(cond.field,
+                                           value + 1,
+                                           std::numeric_limits<int64_t>::max(),
+                                           visitor);
+          return true;
+        }
+        if (std::holds_alternative<double>(cond.value)) {
+          auto value = std::get<double>(cond.value);
+          storage_->visit_ids_by_double_range(cond.field,
+                                              std::nextafter(value,
+                                                             std::numeric_limits<double>::max()),
+                                              std::numeric_limits<double>::max(),
+                                              visitor);
+          return true;
+        }
+        return false;
+      case FilterOp::LE:
+        if (std::holds_alternative<int64_t>(cond.value)) {
+          storage_->visit_ids_by_int_range(cond.field,
+                                           std::numeric_limits<int64_t>::min(),
+                                           std::get<int64_t>(cond.value),
+                                           visitor);
+          return true;
+        }
+        if (std::holds_alternative<double>(cond.value)) {
+          storage_->visit_ids_by_double_range(cond.field,
+                                              std::numeric_limits<double>::lowest(),
+                                              std::get<double>(cond.value),
+                                              visitor);
+          return true;
+        }
+        return false;
+      case FilterOp::LT:
+        if (std::holds_alternative<int64_t>(cond.value)) {
+          auto value = std::get<int64_t>(cond.value);
+          if (value == std::numeric_limits<int64_t>::min()) {
+            return true;
+          }
+          storage_->visit_ids_by_int_range(cond.field,
+                                           std::numeric_limits<int64_t>::min(),
+                                           value - 1,
+                                           visitor);
+          return true;
+        }
+        if (std::holds_alternative<double>(cond.value)) {
+          auto value = std::get<double>(cond.value);
+          storage_->visit_ids_by_double_range(cond.field,
+                                              std::numeric_limits<double>::lowest(),
+                                              std::nextafter(value,
+                                                             std::numeric_limits<double>::lowest()),
+                                              visitor);
+          return true;
+        }
+        return false;
+      default:
+        return false;
+    }
+  }
+
+  void normalize_indexed_ids(std::vector<IDType> &ids) const {
+    ids.erase(std::remove_if(ids.begin(),
+                             ids.end(),
+                             [this](IDType id) {
+                               return static_cast<size_t>(id) >= data_num_;
+                             }),
+              ids.end());
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+  }
+
+  void discard_out_of_range_ids(std::vector<IDType> &ids) const {
+    ids.erase(std::remove_if(ids.begin(),
+                             ids.end(),
+                             [this](IDType id) {
+                               return static_cast<size_t>(id) >= data_num_;
+                             }),
+              ids.end());
+  }
+
+  [[nodiscard]] static auto simple_condition_ids_are_unique(FilterOp op) -> bool {
+    switch (op) {
+      case FilterOp::EQ:
+      case FilterOp::GE:
+      case FilterOp::GT:
+      case FilterOp::LE:
+      case FilterOp::LT:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  [[nodiscard]] auto intersect_ids(const std::vector<IDType> &lhs,
+                                   const std::vector<IDType> &rhs) const -> std::vector<IDType> {
+    std::vector<IDType> result;
+    result.reserve(std::min(lhs.size(), rhs.size()));
+    std::set_intersection(lhs.begin(),
+                          lhs.end(),
+                          rhs.begin(),
+                          rhs.end(),
+                          std::back_inserter(result));
+    return result;
+  }
+
+  [[nodiscard]] auto union_ids(const std::vector<IDType> &lhs, const std::vector<IDType> &rhs) const
+      -> std::vector<IDType> {
+    std::vector<IDType> result;
+    result.reserve(lhs.size() + rhs.size());
+    std::set_union(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), std::back_inserter(result));
+    return result;
+  }
+
+  [[nodiscard]] auto complement_allow_ids(const std::vector<IDType> &ids) const
+      -> std::pair<DynamicBitset, size_t> {
+    DynamicBitset result(data_num_);
+    result.set_all();
+    size_t excluded_count = 0;
+    for (auto id : ids) {
+      auto raw_id = static_cast<size_t>(id);
+      if (raw_id < data_num_ && result.get(raw_id)) {
+        result.reset(raw_id);
+        ++excluded_count;
+      }
+    }
+    return {std::move(result), data_num_ - excluded_count};
+  }
+
+  [[nodiscard]] auto complement_allow_ids(const DynamicBitset &ids) const
+      -> std::pair<DynamicBitset, size_t> {
+    DynamicBitset result = ids;
+    result.flip_all();
+    size_t matched_count = data_num_;
+    for (size_t raw_id = 0; raw_id < data_num_; ++raw_id) {
+      if (ids.get(raw_id)) {
+        --matched_count;
+      }
+    }
+    return {std::move(result), matched_count};
+  }
+
+  [[nodiscard]] auto materialize_plan_ids(const IndexedFilterPlan &plan) const
+      -> std::vector<IDType> {
+    if (!plan.allow_ids_.has_value()) {
+      return plan.ids_;
     }
 
-    indexed_ids_ = std::move(*indexed_ids);
-    for (auto id : indexed_ids_) {
-      allow_ids_.set(id);
+    std::vector<IDType> ids;
+    ids.reserve(plan.matched_count_);
+    for (size_t raw_id = 0; raw_id < data_num_; ++raw_id) {
+      if (plan.allow_ids_->get(raw_id)) {
+        ids.push_back(static_cast<IDType>(raw_id));
+      }
+    }
+    return ids;
+  }
+
+  [[nodiscard]] auto build_condition_index_plan(const FilterCondition &condition) const
+      -> std::optional<IndexedFilterPlan> {
+    auto ids = lookup_indexed_ids(condition);
+    if (!ids.has_value()) {
+      return std::nullopt;
+    }
+
+    normalize_indexed_ids(*ids);
+    auto matched_count = ids->size();
+    return IndexedFilterPlan{std::move(*ids), std::nullopt, matched_count, true};
+  }
+
+  void apply_index_plan(IndexedFilterPlan &&indexed_plan) {
+    indexed_ids_ = std::move(indexed_plan.ids_);
+    indexed_count_ = indexed_plan.matched_count_;
+    index_fast_path_exact_ = indexed_plan.exact_;
+    allow_ids_.clear();
+    if (indexed_plan.allow_ids_.has_value()) {
+      allow_ids_ = std::move(*indexed_plan.allow_ids_);
+      index_fast_path_uses_materialized_ids_ = false;
+    } else {
+      for (auto id : indexed_ids_) {
+        if (static_cast<size_t>(id) < data_num_) {
+          allow_ids_.set(id);
+        }
+      }
+      index_fast_path_uses_materialized_ids_ = true;
     }
     has_index_fast_path_ = true;
+  }
+
+  [[nodiscard]] auto build_simple_condition_index_plan(const FilterCondition &condition) const
+      -> std::optional<IndexedFilterPlan> {
+    auto ids = lookup_indexed_ids(condition);
+    if (!ids.has_value()) {
+      return std::nullopt;
+    }
+
+    if (simple_condition_ids_are_unique(condition.op)) {
+      discard_out_of_range_ids(*ids);
+    } else {
+      normalize_indexed_ids(*ids);
+    }
+    auto matched_count = ids->size();
+    return IndexedFilterPlan{std::move(*ids), std::nullopt, matched_count, true};
+  }
+
+  [[nodiscard]] auto build_index_plan_for_first_not_child(const MetadataFilter &filter) const
+      -> std::optional<IndexedFilterPlan> {
+    if (!filter.conditions.empty()) {
+      return build_condition_index_plan(filter.conditions.front());
+    }
+    if (!filter.sub_filters.empty() && filter.sub_filters.front() != nullptr) {
+      return build_index_plan(*filter.sub_filters.front());
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] auto build_and_index_plan(const MetadataFilter &filter) const
+      -> std::optional<IndexedFilterPlan> {
+    std::optional<std::vector<IDType>> current_ids;
+    bool exact = true;
+
+    auto consume_plan = [&](const std::optional<IndexedFilterPlan> &plan) {
+      if (!plan.has_value()) {
+        exact = false;
+        return;
+      }
+      auto plan_ids = materialize_plan_ids(*plan);
+      if (!current_ids.has_value()) {
+        current_ids = std::move(plan_ids);
+      } else {
+        current_ids = intersect_ids(*current_ids, plan_ids);
+      }
+      exact = exact && plan->exact_;
+    };
+
+    for (const auto &condition : filter.conditions) {
+      consume_plan(build_condition_index_plan(condition));
+    }
+    for (const auto &sub_filter : filter.sub_filters) {
+      if (sub_filter == nullptr) {
+        consume_plan(std::nullopt);
+      } else {
+        consume_plan(build_index_plan(*sub_filter));
+      }
+    }
+
+    if (!current_ids.has_value()) {
+      return std::nullopt;
+    }
+    auto matched_count = current_ids->size();
+    return IndexedFilterPlan{std::move(*current_ids), std::nullopt, matched_count, exact};
+  }
+
+  [[nodiscard]] auto build_or_index_plan(const MetadataFilter &filter) const
+      -> std::optional<IndexedFilterPlan> {
+    std::vector<IDType> current_ids;
+    bool have_plan = false;
+    bool exact = true;
+
+    auto consume_plan = [&](const std::optional<IndexedFilterPlan> &plan) -> bool {
+      if (!plan.has_value()) {
+        return false;
+      }
+      auto plan_ids = materialize_plan_ids(*plan);
+      if (!have_plan) {
+        current_ids = std::move(plan_ids);
+        have_plan = true;
+      } else {
+        current_ids = union_ids(current_ids, plan_ids);
+      }
+      exact = exact && plan->exact_;
+      return true;
+    };
+
+    for (const auto &condition : filter.conditions) {
+      if (!consume_plan(build_condition_index_plan(condition))) {
+        return std::nullopt;
+      }
+    }
+    for (const auto &sub_filter : filter.sub_filters) {
+      if (sub_filter == nullptr || !consume_plan(build_index_plan(*sub_filter))) {
+        return std::nullopt;
+      }
+    }
+
+    if (!have_plan) {
+      return std::nullopt;
+    }
+    auto matched_count = current_ids.size();
+    return IndexedFilterPlan{std::move(current_ids), std::nullopt, matched_count, exact};
+  }
+
+  [[nodiscard]] auto build_not_index_plan(const MetadataFilter &filter) const
+      -> std::optional<IndexedFilterPlan> {
+    auto child_plan = build_index_plan_for_first_not_child(filter);
+    if (!child_plan.has_value() || !child_plan->exact_) {
+      return std::nullopt;
+    }
+    if (child_plan->allow_ids_.has_value()) {
+      auto [allow_ids, matched_count] = complement_allow_ids(*child_plan->allow_ids_);
+      return IndexedFilterPlan{std::vector<IDType>{}, std::move(allow_ids), matched_count, true};
+    }
+    auto [allow_ids, matched_count] = complement_allow_ids(child_plan->ids_);
+    return IndexedFilterPlan{std::vector<IDType>{}, std::move(allow_ids), matched_count, true};
+  }
+
+  [[nodiscard]] auto build_index_plan(const MetadataFilter &filter) const
+      -> std::optional<IndexedFilterPlan> {
+    if (filter.is_empty()) {
+      return std::nullopt;
+    }
+
+    if (filter.logic_op == LogicOp::AND && filter.conditions.size() == 1 &&
+        filter.sub_filters.empty()) {
+      return build_simple_condition_index_plan(filter.conditions.front());
+    }
+
+    switch (filter.logic_op) {
+      case LogicOp::AND:
+        return build_and_index_plan(filter);
+      case LogicOp::OR:
+        return build_or_index_plan(filter);
+      case LogicOp::NOT:
+        return build_not_index_plan(filter);
+    }
+    return std::nullopt;
+  }
+
+  void build_index_fast_path() {
+    auto indexed_plan = build_index_plan(filter_);
+    if (!indexed_plan.has_value()) {
+      return;
+    }
+    apply_index_plan(std::move(*indexed_plan));
   }
 
   [[nodiscard]] auto evaluate_raw_value(const std::string &raw_value) const -> bool {
@@ -298,7 +749,10 @@ class MetadataFilterExecutor {
   std::unordered_set<std::string> required_fields_;
   DynamicBitset allow_ids_;
   std::vector<IDType> indexed_ids_;
+  size_t indexed_count_ = 0;
   bool has_index_fast_path_ = false;
+  bool index_fast_path_exact_ = false;
+  bool index_fast_path_uses_materialized_ids_ = true;
 };
 
 }  // namespace alaya

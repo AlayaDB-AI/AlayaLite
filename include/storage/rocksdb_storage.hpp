@@ -21,6 +21,7 @@
 #include <cstring>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -30,11 +31,13 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "utils/index_encoding.hpp"
 #include "utils/log.hpp"
+#include "utils/query_utils.hpp"
 #include "utils/scalar_data.hpp"
 
 namespace alaya {
@@ -77,6 +80,26 @@ struct RocksDBConfig {
  */
 template <typename IDType = uint32_t>
 class RocksDBStorage {
+ public:
+  struct CachedBlockedBitset {
+    std::shared_ptr<const DynamicBitset> blocked_;
+    size_t matched_count_ = 0;
+  };
+
+ private:
+  struct IntRangeIndexEntry {
+    int64_t value_ = 0;
+    IDType id_ = 0;
+  };
+
+  using IntRangeIndex = std::vector<IntRangeIndexEntry>;
+
+  struct IntRangeIndexRange {
+    std::shared_ptr<const IntRangeIndex> entries_;
+    size_t begin_ = 0;
+    size_t end_ = 0;
+  };
+
  public:
   explicit RocksDBStorage(RocksDBConfig config = RocksDBConfig::default_config())
       : config_(std::move(config)), cached_count_(0) {
@@ -250,6 +273,7 @@ class RocksDBStorage {
     if (!replacing_existing) {
       ++cached_count_;
     }
+    invalidate_range_index_cache_for(data, old_data);
     return true;
   }
 
@@ -353,6 +377,7 @@ class RocksDBStorage {
     }
 
     cached_count_ += inserted_count;
+    invalidate_range_index_cache_for(records);
     return true;
   }
 
@@ -389,6 +414,7 @@ class RocksDBStorage {
     if (cached_count_ > 0) {
       --cached_count_;
     }
+    invalidate_range_index_cache_for(data);
     return true;
   }
 
@@ -440,6 +466,7 @@ class RocksDBStorage {
       return false;
     }
 
+    invalidate_range_index_cache_for(data, old_data);
     return true;
   }
 
@@ -568,6 +595,16 @@ class RocksDBStorage {
     return ids;
   }
 
+  template <typename Visitor>
+  void visit_ids_by_field_value(const std::string &field,
+                                const MetadataValue &value,
+                                Visitor &&visitor) const {
+    auto ids = get_ids_by_field_value(field, value);
+    for (auto id : ids) {
+      visitor(id);
+    }
+  }
+
   /**
    * @brief Get IDs by int64 range query using index
    * @param field Field name (must be in indexed_fields_)
@@ -615,6 +652,17 @@ class RocksDBStorage {
     return ids;
   }
 
+  template <typename Visitor>
+  void visit_ids_by_int_range(const std::string &field,
+                              int64_t min_value,
+                              int64_t max_value,
+                              Visitor &&visitor) const {
+    auto ids = get_ids_by_int_range(field, min_value, max_value);
+    for (auto id : ids) {
+      visitor(id);
+    }
+  }
+
   /**
    * @brief Get IDs by double range query using index
    * @param field Field name (must be in indexed_fields_)
@@ -657,6 +705,66 @@ class RocksDBStorage {
     }
 
     return ids;
+  }
+
+  template <typename Visitor>
+  void visit_ids_by_double_range(const std::string &field,
+                                 double min_value,
+                                 double max_value,
+                                 Visitor &&visitor) const {
+    auto ids = get_ids_by_double_range(field, min_value, max_value);
+    for (auto id : ids) {
+      visitor(id);
+    }
+  }
+
+  [[nodiscard]] auto get_int_range_blocked_bitset(const std::string &field,
+                                                  int64_t min_value,
+                                                  int64_t max_value,
+                                                  size_t data_num) const
+      -> std::optional<CachedBlockedBitset> {
+    if (min_value > max_value ||
+        std::find(config_.indexed_fields_.begin(), config_.indexed_fields_.end(), field) ==
+            config_.indexed_fields_.end()) {
+      return std::nullopt;
+    }
+
+    auto cache_key = int_range_bitset_cache_key(field, min_value, max_value, data_num);
+    {
+      std::lock_guard<std::mutex> lock(range_index_cache_mutex_);
+      auto cached = int_range_bitset_cache_.find(cache_key);
+      if (cached != int_range_bitset_cache_.end()) {
+        return cached->second;
+      }
+    }
+
+    auto entries = get_or_build_int_range_index(field);
+    if (entries == nullptr) {
+      return std::nullopt;
+    }
+
+    auto begin_it = std::lower_bound(entries->begin(),
+                                     entries->end(),
+                                     min_value,
+                                     [](const auto &lhs, int64_t rhs) {
+                                       return lhs.value_ < rhs;
+                                     });
+    auto end_it = std::upper_bound(entries->begin(),
+                                   entries->end(),
+                                   max_value,
+                                   [](int64_t lhs, const auto &rhs) {
+                                     return lhs < rhs.value_;
+                                   });
+
+    IntRangeIndexRange range{entries,
+                             static_cast<size_t>(std::distance(entries->begin(), begin_it)),
+                             static_cast<size_t>(std::distance(entries->begin(), end_it))};
+    auto built = build_int_range_blocked_bitset(range, data_num);
+
+    std::lock_guard<std::mutex> lock(range_index_cache_mutex_);
+    auto [it, inserted] = int_range_bitset_cache_.emplace(cache_key, built);
+    (void)inserted;
+    return it->second;
   }
 
   [[nodiscard]] auto config() const -> const RocksDBConfig & { return config_; }
@@ -759,6 +867,249 @@ class RocksDBStorage {
 
   static auto legacy_data_key(IDType id) -> std::string {
     return std::string(data_key_prefix()) + std::to_string(static_cast<UnsignedIDType>(id));
+  }
+
+  static auto slice_starts_with(const rocksdb::Slice &key, std::string_view prefix) -> bool {
+    return key.size() >= prefix.size() &&
+           std::memcmp(key.data(), prefix.data(), prefix.size()) == 0;
+  }
+
+  static auto prefix_upper_bound(std::string_view prefix) -> std::optional<std::string> {
+    std::string upper(prefix);
+    for (size_t i = upper.size(); i > 0; --i) {
+      auto byte = static_cast<unsigned char>(upper[i - 1]);
+      if (byte == 0xFFU) {
+        continue;
+      }
+      upper[i - 1] = static_cast<char>(byte + 1U);
+      upper.resize(i);
+      return upper;
+    }
+    return std::nullopt;
+  }
+
+  static auto extract_id_from_key_slice(const rocksdb::Slice &key) -> IDType {
+    return index_encoding::extract_id_from_key<IDType>(std::string_view(key.data(), key.size()));
+  }
+
+  static auto int_range_bitset_cache_key(const std::string &field,
+                                         int64_t min_value,
+                                         int64_t max_value,
+                                         size_t data_num) -> std::string {
+    return std::to_string(field.size()) + ":" + field + ":" + std::to_string(min_value) + ":" +
+           std::to_string(max_value) + ":" + std::to_string(data_num);
+  }
+
+  static auto int_range_bitset_cache_field(std::string_view cache_key)
+      -> std::optional<std::string> {
+    auto separator = cache_key.find(':');
+    if (separator == std::string_view::npos) {
+      return std::nullopt;
+    }
+    auto length_text = cache_key.substr(0, separator);
+    if (length_text.empty() || !std::all_of(length_text.begin(), length_text.end(), [](char ch) {
+          return ch >= '0' && ch <= '9';
+        })) {
+      return std::nullopt;
+    }
+
+    auto field_size = std::stoull(std::string(length_text));
+    auto field_begin = separator + 1;
+    if (field_begin + field_size > cache_key.size()) {
+      return std::nullopt;
+    }
+    return std::string(cache_key.substr(field_begin, field_size));
+  }
+
+  static auto parse_int_field_index_key(std::string_view key, size_t prefix_size)
+      -> std::optional<IntRangeIndexEntry> {
+    constexpr size_t kEncodedInt64Size = 16;
+    if (key.size() <= prefix_size + kEncodedInt64Size ||
+        key[prefix_size + kEncodedInt64Size] != '_') {
+      return std::nullopt;
+    }
+
+    try {
+      auto encoded = std::string(key.substr(prefix_size, kEncodedInt64Size));
+      auto value = index_encoding::decode_int64(encoded);
+      auto id = index_encoding::extract_id_from_key<IDType>(std::string(key));
+      return IntRangeIndexEntry{value, id};
+    } catch (const std::exception &) {
+      return std::nullopt;
+    }
+  }
+
+  [[nodiscard]] auto get_or_build_int_range_index(const std::string &field) const
+      -> std::shared_ptr<const IntRangeIndex> {
+    {
+      std::lock_guard<std::mutex> lock(range_index_cache_mutex_);
+      auto cached = int_range_indexes_.find(field);
+      if (cached != int_range_indexes_.end()) {
+        return cached->second;
+      }
+    }
+
+    auto built = build_int_range_index(field);
+    {
+      std::lock_guard<std::mutex> lock(range_index_cache_mutex_);
+      auto [it, inserted] = int_range_indexes_.emplace(field, built);
+      (void)inserted;
+      return it->second;
+    }
+  }
+
+  [[nodiscard]] auto build_int_range_index(const std::string &field) const
+      -> std::shared_ptr<const IntRangeIndex> {
+    auto entries = std::make_shared<IntRangeIndex>();
+    std::string prefix = index_encoding::make_field_prefix(field) + "i_";
+
+    rocksdb::ReadOptions read_opts;
+    read_opts.fill_cache = false;
+    auto upper_bound = prefix_upper_bound(prefix);
+    rocksdb::Slice upper_bound_slice;
+    if (upper_bound.has_value()) {
+      upper_bound_slice = rocksdb::Slice(*upper_bound);
+      read_opts.iterate_upper_bound = &upper_bound_slice;
+    }
+
+    std::unique_ptr<rocksdb::Iterator> iter(db_->NewIterator(read_opts));
+    for (iter->Seek(prefix); iter->Valid(); iter->Next()) {
+      auto key = iter->key();
+      if (!slice_starts_with(key, prefix)) {
+        break;
+      }
+
+      auto parsed =
+          parse_int_field_index_key(std::string_view(key.data(), key.size()), prefix.size());
+      if (parsed.has_value()) {
+        entries->push_back(*parsed);
+      }
+    }
+
+    std::sort(entries->begin(), entries->end(), [](const auto &lhs, const auto &rhs) {
+      if (lhs.value_ != rhs.value_) {
+        return lhs.value_ < rhs.value_;
+      }
+      return lhs.id_ < rhs.id_;
+    });
+
+    return entries;
+  }
+
+  [[nodiscard]] auto build_int_range_blocked_bitset(const IntRangeIndexRange &range,
+                                                    size_t data_num) const -> CachedBlockedBitset {
+    DynamicBitset blocked(data_num);
+    auto entries = range.entries_;
+    auto hit_count = range.end_ - range.begin_;
+
+    if (hit_count == 0) {
+      blocked.set_all();
+      return CachedBlockedBitset{
+          std::make_shared<DynamicBitset>(std::move(blocked)),
+          0,
+      };
+    }
+
+    if (entries->size() == data_num && hit_count > entries->size() / 2) {
+      size_t matched_count = data_num;
+      auto block_id = [&](IDType id) {
+        auto raw_id = static_cast<size_t>(id);
+        if (raw_id < data_num && !blocked.get(raw_id)) {
+          blocked.set(raw_id);
+          --matched_count;
+        }
+      };
+
+      for (size_t i = 0; i < range.begin_; ++i) {
+        block_id((*entries)[i].id_);
+      }
+      for (size_t i = range.end_; i < entries->size(); ++i) {
+        block_id((*entries)[i].id_);
+      }
+
+      return CachedBlockedBitset{
+          std::make_shared<DynamicBitset>(std::move(blocked)),
+          matched_count,
+      };
+    }
+
+    blocked.set_all();
+    size_t matched_count = 0;
+    for (size_t i = range.begin_; i < range.end_; ++i) {
+      auto raw_id = static_cast<size_t>((*entries)[i].id_);
+      if (raw_id < data_num && blocked.get(raw_id)) {
+        blocked.reset(raw_id);
+        ++matched_count;
+      }
+    }
+
+    return CachedBlockedBitset{
+        std::make_shared<DynamicBitset>(std::move(blocked)),
+        matched_count,
+    };
+  }
+
+  void invalidate_range_index_cache() const {
+    std::lock_guard<std::mutex> lock(range_index_cache_mutex_);
+    int_range_indexes_.clear();
+    int_range_bitset_cache_.clear();
+  }
+
+  void invalidate_range_index_cache_for_fields(
+      const std::unordered_set<std::string> &fields) const {
+    if (fields.empty()) {
+      return;
+    }
+
+    std::lock_guard<std::mutex> lock(range_index_cache_mutex_);
+    for (const auto &field : fields) {
+      int_range_indexes_.erase(field);
+    }
+    for (auto it = int_range_bitset_cache_.begin(); it != int_range_bitset_cache_.end();) {
+      auto field = int_range_bitset_cache_field(it->first);
+      if (field.has_value() && fields.contains(*field)) {
+        it = int_range_bitset_cache_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
+  void collect_indexed_metadata_fields(const ScalarData &data,
+                                       std::unordered_set<std::string> &fields) const {
+    for (const auto &field : config_.indexed_fields_) {
+      if (data.metadata.find(field) != data.metadata.end()) {
+        fields.insert(field);
+      }
+    }
+  }
+
+  void invalidate_range_index_cache_for(const ScalarData &data) const {
+    std::unordered_set<std::string> fields;
+    collect_indexed_metadata_fields(data, fields);
+    invalidate_range_index_cache_for_fields(fields);
+  }
+
+  void invalidate_range_index_cache_for(const ScalarData &data,
+                                        const std::optional<ScalarData> &old_data) const {
+    std::unordered_set<std::string> fields;
+    collect_indexed_metadata_fields(data, fields);
+    if (old_data.has_value()) {
+      collect_indexed_metadata_fields(*old_data, fields);
+    }
+    invalidate_range_index_cache_for_fields(fields);
+  }
+
+  template <typename PendingRecord>
+  void invalidate_range_index_cache_for(const std::vector<PendingRecord> &records) const {
+    std::unordered_set<std::string> fields;
+    for (const auto &record : records) {
+      collect_indexed_metadata_fields(record.data, fields);
+      if (record.old_data.has_value()) {
+        collect_indexed_metadata_fields(*record.old_data, fields);
+      }
+    }
+    invalidate_range_index_cache_for_fields(fields);
   }
 
   static auto parse_data_key(std::string_view key) -> std::optional<IDType> {
@@ -1033,6 +1384,9 @@ class RocksDBStorage {
   std::unique_ptr<rocksdb::DB> db_ = nullptr;
   RocksDBConfig config_;
   mutable std::atomic<size_t> cached_count_;
+  mutable std::mutex range_index_cache_mutex_;
+  mutable std::unordered_map<std::string, std::shared_ptr<const IntRangeIndex>> int_range_indexes_;
+  mutable std::unordered_map<std::string, CachedBlockedBitset> int_range_bitset_cache_;
   mutable std::mutex write_mutex_;
   bool read_only_{false};
 };
