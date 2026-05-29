@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 
 #include "scalar_data.hpp"
@@ -138,7 +139,18 @@ inline auto extract_id_from_key(const std::string &key) -> IDType {
   if (last_underscore == std::string::npos) {
     return 0;
   }
-  return static_cast<IDType>(std::stoull(key.substr(last_underscore + 1)));
+  if (last_underscore + 1 >= key.size()) {
+    throw std::invalid_argument("index key missing numeric id suffix");
+  }
+  IDType value = 0;
+  for (size_t i = last_underscore + 1; i < key.size(); ++i) {
+    auto ch = key[i];
+    if (ch < '0' || ch > '9') {
+      throw std::invalid_argument("index key has non-numeric id suffix");
+    }
+    value = static_cast<IDType>((value * 10) + static_cast<IDType>(ch - '0'));
+  }
+  return value;
 }
 
 }  // namespace alaya::index_encoding

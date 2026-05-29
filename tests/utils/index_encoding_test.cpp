@@ -65,6 +65,10 @@ TEST(IndexEncodingTest, FieldKeyHelpersProduceExpectedFormats) {
 
 TEST(IndexEncodingTest, ExtractIdReturnsZeroWhenKeyHasNoDelimiter) {
   EXPECT_EQ(extract_id_from_key<uint32_t>("nosuffix"), 0U);
+}
+
+TEST(IndexEncodingTest, ExtractIdThrowsWhenKeyHasInvalidNumericSuffix) {
+  EXPECT_THROW(extract_id_from_key<uint32_t>("key_"), std::invalid_argument);
   EXPECT_THROW(extract_id_from_key<uint32_t>("invalid_key_without_numeric_suffix"),
                std::invalid_argument);
 }
