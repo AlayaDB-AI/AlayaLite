@@ -17,9 +17,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>  // NOLINT(build/c++17)
 #include <fstream>
 #include <limits>
@@ -29,6 +29,13 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+  #include <process.h>
+#else
+  #include <sys/wait.h>
+  #include <unistd.h>
+#endif
 
 #include "utils/dataset_utils.hpp"
 #include "utils/parser.hpp"
@@ -457,6 +464,11 @@ inline auto metric_score(const float *query, const float *data, uint32_t dim, Me
   return dot;
 }
 
+inline auto score_greater(const std::pair<uint32_t, float> &lhs,
+                          const std::pair<uint32_t, float> &rhs) -> bool {
+  return lhs.second > rhs.second;
+}
+
 inline auto find_exact_hybrid_gt(const Dataset &dataset, uint32_t topk) -> std::vector<uint32_t> {
   std::vector<uint32_t> result(static_cast<size_t>(dataset.query_num_) * topk,
                                std::numeric_limits<uint32_t>::max());
@@ -472,15 +484,65 @@ inline auto find_exact_hybrid_gt(const Dataset &dataset, uint32_t topk) -> std::
       const auto *data = dataset.data_.data() + static_cast<size_t>(data_id) * dataset.dim_;
       scores.emplace_back(data_id, metric_score(query, data, dataset.dim_, dataset.metric_));
     }
-    std::ranges::sort(scores, [](const auto &lhs, const auto &rhs) {
-      return lhs.second > rhs.second;
-    });
-    auto count = std::min<uint32_t>(topk, static_cast<uint32_t>(scores.size()));
-    for (uint32_t i = 0; i < count; ++i) {
+    auto count = std::min<size_t>(static_cast<size_t>(topk), scores.size());
+    if (count > 0) {
+      std::ranges::partial_sort(scores.begin(),
+                                scores.begin() + count,
+                                scores.end(),
+                                score_greater);
+    }
+    for (size_t i = 0; i < count; ++i) {
       result[static_cast<size_t>(query_id) * topk + i] = scores[i].first;
     }
   }
   return result;
+}
+
+inline auto run_process(const std::vector<std::string> &args) -> int {
+  if (args.empty()) {
+    throw std::runtime_error("cannot run empty command");
+  }
+
+#if defined(_WIN32)
+  std::vector<const char *> argv;
+  argv.reserve(args.size() + 1);
+  for (const auto &arg : args) {
+    argv.push_back(arg.c_str());
+  }
+  argv.push_back(nullptr);
+  return static_cast<int>(_spawnvp(_P_WAIT, args.front().c_str(), argv.data()));
+#else
+  std::vector<char *> argv;
+  argv.reserve(args.size() + 1);
+  for (const auto &arg : args) {
+    argv.push_back(const_cast<char *>(arg.c_str()));
+  }
+  argv.push_back(nullptr);
+
+  auto pid = ::fork();
+  if (pid < 0) {
+    return -1;
+  }
+  if (pid == 0) {
+    ::execvp(args.front().c_str(), argv.data());
+    ::_exit(127);
+  }
+
+  int status = 0;
+  while (::waitpid(pid, &status, 0) < 0) {
+    if (errno == EINTR) {
+      continue;
+    }
+    return -1;
+  }
+  if (WIFEXITED(status)) {
+    return WEXITSTATUS(status);
+  }
+  if (WIFSIGNALED(status)) {
+    return 128 + WTERMSIG(status);
+  }
+  return -1;
+#endif
 }
 
 inline void ensure_hybrid_dataset_files(const HybridDatasetConfig &config) {
@@ -508,14 +570,26 @@ inline void ensure_hybrid_dataset_files(const HybridDatasetConfig &config) {
   }
 
   auto archive_path = config.dir_ / config.archive_name_;
-  auto download_cmd = "wget " + config.download_url_ + " -O " + archive_path.string();
-  auto extract_cmd = "tar -zxvf " + archive_path.string() +
-                     " --strip-components=" + std::to_string(config.strip_components_) + " -C " +
-                     config.dir_.string();
-  if (std::system(download_cmd.c_str()) != 0) {
+  if (config.strip_components_ < 0) {
+    throw std::runtime_error("Hybrid dataset strip-components must be non-negative");
+  }
+
+  std::vector<std::string> download_args = {"wget",
+                                            "-O",
+                                            archive_path.string(),
+                                            "--",
+                                            config.download_url_};
+  std::vector<std::string> extract_args = {"tar",
+                                           "-zxf",
+                                           archive_path.string(),
+                                           "--strip-components=" +
+                                               std::to_string(config.strip_components_),
+                                           "-C",
+                                           config.dir_.string()};
+  if (run_process(download_args) != 0) {
     throw std::runtime_error("Failed to download hybrid dataset: " + config.download_url_);
   }
-  if (std::system(extract_cmd.c_str()) != 0) {
+  if (run_process(extract_args) != 0) {
     throw std::runtime_error("Failed to extract hybrid dataset archive: " + archive_path.string());
   }
 }
