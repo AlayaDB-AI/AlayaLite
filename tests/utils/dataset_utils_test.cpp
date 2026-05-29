@@ -5,10 +5,11 @@
 #include <gtest/gtest.h>
 #include <cstdint>
 #include <cstdlib>
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "utils/dataset_utils.hpp"
@@ -43,6 +44,50 @@ void write_ivecs(const fs::path &path, const std::vector<std::vector<uint32_t>> 
     out.write(reinterpret_cast<const char *>(vec.data()),
               static_cast<std::streamsize>(vec.size() * sizeof(uint32_t)));
   }
+}
+
+void write_tiny_npy(const fs::path &path,
+                    const std::vector<float> &values,
+                    uint32_t rows,
+                    uint32_t cols,
+                    std::string_view descr = "<f4",
+                    bool fortran_order = false,
+                    uint8_t major_version = 1) {
+  std::ofstream out(path, std::ios::binary);
+  if (!out.is_open()) {
+    throw std::runtime_error("failed to open npy test file: " + path.string());
+  }
+
+  std::string header = "{'descr': '" + std::string(descr) + "', 'fortran_order': " +
+                       (fortran_order ? "True" : "False") + ", 'shape': (" +
+                       std::to_string(rows) + ", " + std::to_string(cols) + "), }";
+  constexpr size_t kMagicSize = 6;
+  constexpr size_t kVersionSize = 2;
+  auto length_field_size = major_version == 1 ? size_t{2} : size_t{4};
+  auto prefix_size = kMagicSize + kVersionSize + length_field_size;
+  auto padding = 16 - ((prefix_size + header.size() + 1) % 16);
+  if (padding == 16) {
+    padding = 0;
+  }
+  header.append(padding, ' ');
+  header.push_back('\n');
+
+  out.write("\x93NUMPY", 6);
+  out.put(static_cast<char>(major_version));
+  out.put('\0');
+  auto header_len = static_cast<uint32_t>(header.size());
+  if (major_version == 1) {
+    auto header_len16 = static_cast<uint16_t>(header_len);
+    out.put(static_cast<char>(header_len16 & 0xFFU));
+    out.put(static_cast<char>((header_len16 >> 8U) & 0xFFU));
+  } else {
+    for (uint32_t i = 0; i < 4; ++i) {
+      out.put(static_cast<char>((header_len >> (8U * i)) & 0xFFU));
+    }
+  }
+  out.write(header.data(), static_cast<std::streamsize>(header.size()));
+  out.write(reinterpret_cast<const char *>(values.data()),
+            static_cast<std::streamsize>(values.size() * sizeof(float)));
 }
 
 auto make_local_dataset_config(const fs::path &dir) -> DatasetConfig {
