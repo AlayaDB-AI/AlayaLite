@@ -45,7 +45,7 @@ using SQ8SpaceWithScalar =
     SQ8Space<float, float, uint32_t, SequentialStorage<uint8_t, uint32_t>, ScalarData>;
 
 auto test_data_dir() -> std::filesystem::path {
-  return std::filesystem::current_path().parent_path() / "data";
+  return resolve_data_dir();
 }
 
 auto test_cache_dir() -> const std::filesystem::path & {

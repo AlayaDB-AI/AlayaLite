@@ -26,8 +26,7 @@ namespace alaya {
 class UpdateTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
-    ds_ = load_dataset(sift_small(data_dir));
+    ds_ = load_dataset(sift_micro(resolve_data_dir()));
   }
 
   void TearDown() override {}

@@ -9,6 +9,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 from alayalite import Client
@@ -81,6 +82,48 @@ class TestClientWithURL(unittest.TestCase):
         self.assertNotIn(coll_name, client.list_collections())
         self.assertFalse(os.path.isdir(coll_path))
         self.assertFalse(os.path.isfile(schema_path))
+
+    def test_delete_collection_closes_before_rmtree(self):
+        client = Client(self.temp_dir)
+        coll_name = "coll"
+        coll = client.create_collection(coll_name)
+        coll.insert(self.coll_items)
+        client.save_collection(coll_name)
+
+        original_close = coll.close
+        close_called = False
+
+        def close_collection():
+            nonlocal close_called
+            close_called = True
+            original_close()
+
+        def remove_tree(path):
+            self.assertTrue(close_called)
+            self.assertEqual(path, os.path.join(self.temp_dir, coll_name))
+
+        with patch.object(coll, "close", side_effect=close_collection) as close_mock:
+            with patch("alayalite.client.shutil.rmtree", side_effect=remove_tree) as rmtree_mock:
+                client.delete_collection(coll_name, True)
+
+        close_mock.assert_called_once()
+        rmtree_mock.assert_called_once()
+
+    def test_reset_delete_on_disk_removes_saved_indices(self):
+        client = Client(self.temp_dir)
+        index_name = "ind"
+        index = client.create_index(index_name)
+        index.fit(self.ind_vectors)
+        client.save_index(index_name)
+
+        index_path = os.path.join(self.temp_dir, index_name)
+        self.assertTrue(os.path.isdir(index_path))
+
+        client.reset(True)
+
+        self.assertEqual(client.list_collections(), [])
+        self.assertEqual(client.list_indices(), [])
+        self.assertFalse(os.path.exists(index_path))
 
     def test_init_load(self):
         client = Client(self.temp_dir)
