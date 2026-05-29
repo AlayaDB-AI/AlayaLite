@@ -15,7 +15,7 @@ from ._alayalitepy import DiskCollection, MetricType  # noqa: E402
 from .client import Client  # noqa: E402
 from .collection import Collection  # noqa: E402
 from .index import Index  # noqa: E402
-from .utils import calc_gt, calc_recall, load_fvecs, load_ivecs  # noqa: E402
+from .utils import ColumnarDataset, calc_gt, calc_recall, load_fvecs, load_ivecs, load_npy_jsonl_dataset  # noqa: E402
 
 # Ignore warnings related to "subnormal numbers"
 warnings.filterwarnings(
@@ -34,8 +34,10 @@ __all__ = [
     "DiskCollection",
     "MetricType",
     # utils
+    "ColumnarDataset",
     "load_fvecs",
     "load_ivecs",
+    "load_npy_jsonl_dataset",
     "calc_recall",
     "calc_gt",
 ]

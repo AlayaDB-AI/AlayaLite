@@ -246,7 +246,6 @@ class Collection:
             return
 
         if self.__index_py is None:
-            # First insert - initialize index with batch fit
             _, _, first_embedding, _ = items[0]
             dt = valid_dtype(np.asarray(first_embedding).dtype)
             self.__index_params.data_type = dt
@@ -263,23 +262,13 @@ class Collection:
             item_ids = [item[0] for item in items]
             documents = [item[1] for item in items]
             metadata_list = [item[3] for item in items]
-
-            # Fit with scalar data
-            build_threads = self.__index_params.build_threads
-            if build_threads is None:
-                build_threads = 1
-            else:
-                _assert(build_threads > 0, "index_params.build_threads must be greater than 0")
-            self.__index_py.fit(
+            self.fit(
                 vectors,
-                ef_construction=400,
-                num_threads=build_threads,
                 item_ids=item_ids,
                 documents=documents,
                 metadata_list=metadata_list,
+                ef_construction=400,
             )
-            self.__cpp_index = self.__index_py.get_cpp_index()
-            self._maybe_persist_schema_for_recovery()
         else:
             # Incremental insert with scalar data
             cpp_index = self._get_cpp_index()
@@ -293,6 +282,83 @@ class Collection:
                     document,
                     metadata or {},
                 )
+
+    def fit(
+        self,
+        vectors: np.ndarray,
+        *,
+        item_ids: Optional[List[Union[str, int]]] = None,
+        documents: Optional[List[str]] = None,
+        metadata_list: Optional[List[dict]] = None,
+        ef_construction: int = 400,
+        num_threads: Optional[int] = None,
+    ) -> None:
+        """
+        Build the collection directly from columnar inputs.
+
+        This avoids constructing a large intermediate ``List[tuple]`` before the
+        first build and is the preferred path for large ``.npy + .jsonl`` datasets.
+
+        Args:
+            vectors: 2D vector matrix.
+            item_ids: Optional external IDs. Defaults to row indices.
+            documents: Optional document strings. Defaults to empty strings.
+            metadata_list: Optional metadata dicts. Defaults to empty dicts.
+            ef_construction: Construction parameter for the initial index build.
+            num_threads: Optional build thread override.
+        """
+        if self.__index_py is not None:
+            raise RuntimeError("Collection index is already initialized")
+
+        vectors_arr = np.asarray(vectors)
+        _assert(vectors_arr.ndim == 2, "vectors must be a 2D array")
+        data_size = vectors_arr.shape[0]
+
+        if data_size == 0:
+            return
+
+        if item_ids is None:
+            item_ids = [str(i) for i in range(data_size)]
+        else:
+            _assert(len(item_ids) == data_size, "item_ids length must match vectors rows")
+            item_ids = [str(item_id) for item_id in item_ids]
+
+        if documents is None:
+            documents = [""] * data_size
+        else:
+            _assert(len(documents) == data_size, "documents length must match vectors rows")
+            documents = ["" if document is None else str(document) for document in documents]
+
+        if metadata_list is None:
+            metadata_list = [{} for _ in range(data_size)]
+        else:
+            _assert(len(metadata_list) == data_size, "metadata_list length must match vectors rows")
+            metadata_list = [{} if metadata is None else dict(metadata) for metadata in metadata_list]
+
+        if self.__index_params.data_type is None:
+            self.__index_params.data_type = vectors_arr.dtype
+
+        self.__index_params.fill_none_values()
+        self.__index_params.has_scalar_data = True
+
+        self.__index_py = Index(self.__name, self.__index_params)
+
+        build_threads = num_threads if num_threads is not None else self.__index_params.build_threads
+        if build_threads is None:
+            build_threads = 1
+        else:
+            _assert(build_threads > 0, "num_threads must be greater than 0")
+
+        self.__index_py.fit(
+            vectors_arr,
+            ef_construction=ef_construction,
+            num_threads=build_threads,
+            item_ids=item_ids,
+            documents=documents,
+            metadata_list=metadata_list,
+        )
+        self.__cpp_index = self.__index_py.get_cpp_index()
+        self._maybe_persist_schema_for_recovery()
 
     def upsert(self, items: List[tuple]):
         """
@@ -560,13 +626,12 @@ class Collection:
         """
         Explicitly close and release RocksDB resources.
         """
-        cpp_index = self.__cpp_index
-        if cpp_index is None and self.__index_py is not None:
-            cpp_index = self.__index_py.get_cpp_index()
-        if cpp_index is not None:
-            cpp_index.close_db()
-            self.__cpp_index = None
-        self.__index_py = None
+        if self.__index_py is not None:
+            self.__index_py.close()
+            self.__index_py = None
+        elif self.__cpp_index is not None:
+            self.__cpp_index.close_db()
+        self.__cpp_index = None
 
     def __del__(self):
         """
