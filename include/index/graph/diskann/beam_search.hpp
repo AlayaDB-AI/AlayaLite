@@ -59,6 +59,7 @@
 #include "index/graph/diskann/node_cache.hpp"
 #include "index/graph/diskann/pq_table.hpp"
 #include "index/graph/diskann/search_scratch.hpp"
+#include "index/graph/diskann/tombstone_bitmap.hpp"
 #include "index/graph/laser/utils/aligned_file_reader.hpp"
 #include "index/graph/vamana/robust_prune.hpp"
 #include "simd/distance_l2.hpp"
@@ -85,6 +86,9 @@ struct SearchContext {
   const PQTable *pq = nullptr;  ///< nullptr => index has no PQ
   uint32_t medoid = 0;
   uint64_t num_points = 0;
+
+  // Tombstone-aware search (null for static indices).
+  const TombstoneBitmap *tombstone = nullptr;
 };
 
 /// Optional instrumentation for tests / profiling.
@@ -193,6 +197,20 @@ inline std::vector<std::pair<uint32_t, float>> disk_greedy_search(const SearchCo
     return td.sector_scratch + geom.offset_to_node(id);
   };
 
+  // IP-DiskANN: tombstoned nodes are skipped (graph repaired at delete time).
+  const TombstoneBitmap *tomb = ctx.tombstone;
+  auto consider = [&](uint32_t m, auto &&emit) {
+    if (m >= ctx.num_points || visited.find(m) != visited.end()) {
+      return;
+    }
+    if (tomb != nullptr && tomb->is_deleted(m)) {
+      visited.insert(m);
+      return;
+    }
+    visited.insert(m);
+    emit(m);
+  };
+
   visited.insert(ctx.medoid);
   absorb(ctx.medoid, read_seed(ctx.medoid));
 
@@ -218,11 +236,9 @@ inline std::vector<std::pair<uint32_t, float>> disk_greedy_search(const SearchCo
       const std::vector<uint32_t> nbrs = it->second;
       todo.clear();
       for (const uint32_t m : nbrs) {
-        if (m >= ctx.num_points || visited.find(m) != visited.end()) {
-          continue;
-        }
-        visited.insert(m);
-        todo.push_back(m);
+        consider(m, [&](uint32_t id) {
+          todo.push_back(id);
+        });
       }
       for (size_t off = 0; off < todo.size(); off += n_slots) {
         const size_t end = std::min<size_t>(off + n_slots, todo.size());
@@ -284,11 +300,9 @@ inline std::vector<std::pair<uint32_t, float>> disk_greedy_search(const SearchCo
           continue;
         }
         for (const uint32_t m : it->second) {
-          if (m >= ctx.num_points || visited.find(m) != visited.end()) {
-            continue;
-          }
-          visited.insert(m);
-          pending.push_back(m);
+          consider(m, [&](uint32_t id) {
+            pending.push_back(id);
+          });
         }
       }
     };
@@ -352,10 +366,13 @@ inline std::vector<std::pair<uint32_t, float>> disk_greedy_search(const SearchCo
   }
 
   std::vector<std::pair<uint32_t, float>> out;
-  const size_t take = std::min<size_t>(frontier.size(), top_k);
-  out.reserve(take);
-  for (size_t i = 0; i < take; ++i) {  // frontier is sorted ascending by (dist, id)
-    out.emplace_back(frontier[i].id, frontier[i].distance);
+  out.reserve(std::min<size_t>(frontier.size(), top_k));
+  for (size_t i = 0; i < frontier.size() && out.size() < top_k; ++i) {
+    const uint32_t id = frontier[i].id;
+    if (tomb != nullptr && tomb->is_deleted(id)) {
+      continue;
+    }
+    out.emplace_back(id, frontier[i].distance);
   }
   return out;
 }

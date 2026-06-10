@@ -15,6 +15,7 @@
 /build_asan/
 /build_tsan/
 /build-tidy
+/build_bench
 
 # Python artifacts
 __pycache__/

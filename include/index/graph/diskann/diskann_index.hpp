@@ -34,19 +34,27 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 #include "index/graph/diskann/beam_search.hpp"
 #include "index/graph/diskann/disk_layout.hpp"
+#include "index/graph/diskann/disk_page_io.hpp"
+#include "index/graph/diskann/disk_update_context.hpp"
 #include "index/graph/diskann/node_cache.hpp"
 #include "index/graph/diskann/pq_table.hpp"
 #include "index/graph/diskann/search_scratch.hpp"
+#include "index/graph/diskann/slot_allocator.hpp"
+#include "index/graph/diskann/tombstone_bitmap.hpp"
 #include "index/graph/laser/utils/aligned_file_reader_factory.hpp"
 #include "index/graph/laser/utils/concurrent_queue.hpp"
+#include "index/graph/vamana/robust_prune.hpp"
 #include "index/graph/vamana/vamana_builder.hpp"
+#include "simd/distance_l2.hpp"
 
 namespace alaya::diskann {
 
@@ -74,6 +82,13 @@ struct DiskANNLoadParams {
                                ///< deeper pipeline overlaps more I/O. Explicit values are floored
                                ///< at 2*beam_width and capped at the libaio context size (1024).
                                ///< Sizes the sector scratch to that many pages per thread.
+
+  // --- In-place update mode (No-PQ only; see disk-update specs) ---
+  bool updatable = false;          ///< open O_RDWR + enable insert/remove/update_node/flush
+  uint32_t update_search_l = 100;  ///< L for the insert NN-search (candidate pool before prune)
+  float update_alpha = 1.2f;       ///< alpha-RNG pruning for insert/reconnect (Vamana default)
+  double safety_net_ratio = 0.05;  ///< tombstone ratio that arms the safety-net reconnect
+  uint64_t safety_net_ops = 16;    ///< deletes without an insert before the safety net may fire
 };
 
 /// Per-query search configuration.
@@ -90,7 +105,8 @@ struct DiskANNSearchParams {
 class DiskANNIndex {
  public:
   static constexpr uint64_t kMetaMagic = 0x414C594144534B4EULL;  // "ALYADSKN"
-  static constexpr uint32_t kMetaVersion = 1;
+  /// v2 adds max_slot_id + live_count for in-place updates; v1 is read back-compat.
+  static constexpr uint32_t kMetaVersion = 2;
   /// Default No-PQ async pipeline depth when DiskANNLoadParams::nopq_io_depth == 0.
   /// Benchmark-tuned on SIFT1M/NVMe (knee at ~32; deeper gives no gain).
   static constexpr uint32_t kDefaultNoPQIoDepth = 32;
@@ -212,6 +228,8 @@ class DiskANNIndex {
     meta.pq_n_chunks = params.pq_n_chunks;
     meta.node_len = geom.node_len;
     meta.nodes_per_sector = geom.nodes_per_sector;
+    meta.max_slot_id = n;  // fresh build: file capacity == num_points
+    meta.live_count = n;   // fresh build: every slot is live
     write_meta(path(index_dir, "meta.bin"), meta);
 
     dir_guard.committed = true;  // build complete — keep the directory
@@ -232,12 +250,14 @@ class DiskANNIndex {
     medoid_ = meta.medoid;
     has_pq_ = meta.has_pq != 0;
     pq_n_chunks_ = meta.pq_n_chunks;
+    max_slot_id_ = meta.max_slot_id;  // file capacity (slots); == num_points for static/v1
+    live_count_ = meta.live_count;    // live nodes; == num_points for static/v1
     geom_ = DiskLayoutGeometry::compute(dim_, max_degree_);
     if (geom_.node_len != meta.node_len || geom_.nodes_per_sector != meta.nodes_per_sector) {
       throw std::runtime_error("DiskANNIndex::load: meta geometry inconsistent");
     }
 
-    read_ids(path(index_dir, "ids.bin"), num_points_);
+    read_ids(path(index_dir, "ids.bin"), max_slot_id_);
     cache_.load(path(index_dir, "cache_ids.bin"), path(index_dir, "cache_nodes.bin"));
     if (has_pq_) {
       pq_.load(path(index_dir, "pq_pivots.bin"),
@@ -289,6 +309,10 @@ class DiskANNIndex {
       thread_data_pool_.push(p);
     }
     num_pool_ = pool;
+
+    if (params.updatable) {
+      init_updatable(index_dir, params);
+    }
     loaded_ = true;
   }
 
@@ -317,6 +341,11 @@ class DiskANNIndex {
       throw std::invalid_argument("DiskANNIndex::search: null output buffers");
     }
 
+    std::unique_lock<std::mutex> serial_lock;
+    if (updatable_) {
+      serial_lock = std::unique_lock<std::mutex>(update_mutex_);
+    }
+
     ThreadData *td = acquire();
     uint32_t count = 0;
     try {
@@ -326,7 +355,10 @@ class DiskANNIndex {
       ctx.cache = &cache_;
       ctx.pq = has_pq_ ? &pq_ : nullptr;
       ctx.medoid = medoid_;
-      ctx.num_points = num_points_;
+      ctx.num_points = max_slot_id_;
+      if (updatable_) {
+        ctx.tombstone = &slot_alloc_.tombstone();
+      }
 
       SearchParams sp;
       sp.search_list_size = params.search_list_size;
@@ -415,15 +447,174 @@ class DiskANNIndex {
   }
 
   // --------------------------------------------------------------- accessors
-  [[nodiscard]] uint64_t size() const { return num_points_; }
+  [[nodiscard]] uint64_t size() const { return live_count_; }  // live (non-tombstoned) vectors
   [[nodiscard]] uint64_t dim() const { return dim_; }
   [[nodiscard]] bool has_pq() const { return has_pq_; }
   [[nodiscard]] uint32_t medoid() const { return medoid_; }
+  [[nodiscard]] bool updatable() const { return updatable_; }
+  [[nodiscard]] uint64_t live_count() const { return live_count_; }
+  [[nodiscard]] uint64_t max_slot_id() const { return max_slot_id_; }
+  [[nodiscard]] uint64_t tombstone_count() const { return slot_alloc_.tombstone_count(); }
+  [[nodiscard]] uint64_t free_slot_count() const { return slot_alloc_.free_count(); }
+  [[nodiscard]] uint64_t safety_net_fire_count() const { return safety_net_fires_; }
+  [[nodiscard]] bool is_deleted(uint32_t id) const { return slot_alloc_.is_deleted(id); }
 
   /// Sentinel label for padded (missing) result slots.
   static constexpr uint64_t kNoLabel = std::numeric_limits<uint64_t>::max();
 
+  // ------------------------------------------------------- in-place updates
+  /// Insert a vector: NN search -> alpha-RNG prune -> alloc slot -> write ->
+  /// reconnect pruned neighbors. Returns the allocated internal slot id.
+  uint32_t insert(const float *query, uint64_t label) {
+    if (!updatable_) {
+      throw std::runtime_error("DiskANNIndex::insert: index not loaded in updatable mode");
+    }
+    if (query == nullptr) {
+      throw std::invalid_argument("DiskANNIndex::insert: null query");
+    }
+    std::lock_guard<std::mutex> lock(update_mutex_);
+    page_io_->clear_cache();
+    const auto l2 = alaya::simd::get_l2_sqr_func();
+
+    const auto cand = run_update_search(query, update_search_l_);
+
+    std::vector<alaya::vamana::Neighbor> pool;
+    pool.reserve(cand.size());
+    for (const auto &c : cand) {
+      pool.emplace_back(c.first, c.second);
+    }
+    std::vector<uint32_t> pruned;
+    std::vector<float> occlude_scratch;
+    auto dist_fn = [this, &l2](uint32_t a, uint32_t b) -> float {
+      const std::vector<float> &ca = page_io_->read_coords_cached(a);
+      const std::vector<float> &cb = page_io_->read_coords_cached(b);
+      return l2(ca.data(), cb.data(), dim_);
+    };
+    const uint32_t maxc = std::max<uint32_t>(max_degree_, static_cast<uint32_t>(pool.size()));
+    alaya::vamana::prune_neighbors(kNoSelf,
+                                   pool,
+                                   update_alpha_,
+                                   max_degree_,
+                                   maxc,
+                                   pruned,
+                                   occlude_scratch,
+                                   dist_fn);
+
+    const uint32_t slot = slot_alloc_.alloc();
+    update_ctx_.forget_slot(slot);
+    max_slot_id_ = std::max<uint64_t>(max_slot_id_, slot_alloc_.next_fresh_id());
+
+    page_io_->write_node(slot, query, static_cast<uint32_t>(pruned.size()), pruned.data());
+
+    set_label(slot, label);
+    ++live_count_;
+    ops_since_last_insert_ = 0;
+
+    for (const uint32_t n : pruned) {
+      update_ctx_.inserted_edges_[n].push_back(slot);
+    }
+    for (const uint32_t n : pruned) {
+      update_node_impl(n);
+    }
+    return slot;
+  }
+
+  /// Lazy-delete: cache old neighbors for two-hop, tombstone + free the slot.
+  /// Reconnect is deferred to the next insert or the safety net.
+  void remove(uint32_t internal_id) {
+    if (!updatable_) {
+      throw std::runtime_error("DiskANNIndex::remove: index not loaded in updatable mode");
+    }
+    std::lock_guard<std::mutex> lock(update_mutex_);
+    if (internal_id >= max_slot_id_) {
+      throw std::invalid_argument("DiskANNIndex::remove: internal_id out of range");
+    }
+    if (slot_alloc_.is_deleted(internal_id)) {
+      throw std::invalid_argument("DiskANNIndex::remove: node already deleted");
+    }
+    page_io_->clear_cache();
+
+    // 1. Read coords + old neighbors before tombstoning.
+    const DiskPageIO::NodeData nd = page_io_->read_node(internal_id);
+    update_ctx_.removed_node_nbrs_[internal_id] = nd.nbrs;
+    update_ctx_.removed_vertices_.insert(internal_id);
+
+    // 2. Tombstone + free slot.
+    slot_alloc_.free(internal_id);
+    --live_count_;
+    ++ops_since_last_insert_;
+
+    // 3. IP-DiskANN: search around deleted point for repair candidates.
+    const auto cand = run_update_search(nd.coords.data(), update_search_l_);
+    std::vector<uint32_t> candidates;
+    candidates.reserve(cand.size());
+    for (const auto &c : cand) {
+      candidates.push_back(c.first);
+    }
+
+    // 4. Nodes to reconnect = old neighbors ∪ search results (live only).
+    std::unordered_set<uint32_t> nodes_to_upd;
+    for (const uint32_t nbr : nd.nbrs) {
+      if (!slot_alloc_.is_deleted(nbr)) {
+        nodes_to_upd.insert(nbr);
+      }
+    }
+    for (const uint32_t c : candidates) {
+      if (!slot_alloc_.is_deleted(c)) {
+        nodes_to_upd.insert(c);
+      }
+    }
+
+    // 5. IP-DiskANN reconnect: each affected node gets c replacement edges.
+    page_io_->clear_cache();
+    for (const uint32_t nid : nodes_to_upd) {
+      update_node_ipdiskann(nid, candidates);
+    }
+    maybe_safety_net_reconnect();
+  }
+
+  /**
+   * @brief Reconnect @p node_id's neighbor list in place (Yi's connect-task).
+   * @throws std::invalid_argument if @p node_id is out of range.
+   */
+  void update_node(uint32_t node_id) {
+    if (!updatable_) {
+      throw std::runtime_error("DiskANNIndex::update_node: index not loaded in updatable mode");
+    }
+    std::lock_guard<std::mutex> lock(update_mutex_);
+    if (node_id >= max_slot_id_) {
+      throw std::invalid_argument("DiskANNIndex::update_node: node_id out of range");
+    }
+    page_io_->clear_cache();
+    update_node_impl(node_id);
+  }
+
+  /// Persist meta + ids + slot allocator state to disk.
+  void flush() {
+    if (!updatable_) {
+      throw std::runtime_error("DiskANNIndex::flush: index not loaded in updatable mode");
+    }
+    std::lock_guard<std::mutex> lock(update_mutex_);
+    MetaHeader m;
+    m.num_points = max_slot_id_;
+    m.dim = dim_;
+    m.max_degree = max_degree_;
+    m.medoid = medoid_;
+    m.has_pq = 0;
+    m.pq_n_chunks = 0;
+    m.node_len = geom_.node_len;
+    m.nodes_per_sector = geom_.nodes_per_sector;
+    m.max_slot_id = max_slot_id_;
+    m.live_count = live_count_;
+    write_meta(path(index_dir_, "meta.bin"), m);
+    write_ids(path(index_dir_, "ids.bin"), labels_.data(), labels_.size());
+    slot_alloc_.save(path(index_dir_, "slots.bin"));
+  }
+
  private:
+  static constexpr uint32_t kNoSelf = std::numeric_limits<uint32_t>::max();
+  static constexpr uint32_t kIPDiskANNCopies = 3;
+
   struct MetaHeader {
     uint64_t num_points = 0;
     uint64_t dim = 0;
@@ -433,10 +624,286 @@ class DiskANNIndex {
     uint32_t pq_n_chunks = 0;
     uint64_t node_len = 0;
     uint64_t nodes_per_sector = 0;
+    uint64_t max_slot_id = 0;  // v2: file capacity in slots (only grows)
+    uint64_t live_count = 0;   // v2: num_points minus tombstones
   };
 
   static std::string path(const std::string &dir, const char *name) {
     return (std::filesystem::path(dir) / name).string();
+  }
+
+  // ---- in-place update internals (all called under update_mutex_) ----
+
+  /// Wire up the update subsystem (page IO, slot allocator, context, config).
+  void init_updatable(const std::string &index_dir, const DiskANNLoadParams &params) {
+    if (has_pq_) {
+      throw std::runtime_error(
+          "DiskANNIndex::load: updatable mode requires a No-PQ index (PQ updates unsupported)");
+    }
+    index_dir_ = index_dir;
+    update_alpha_ = params.update_alpha;
+    update_search_l_ = std::max<uint32_t>(1, params.update_search_l);
+    safety_net_ratio_ = params.safety_net_ratio;
+    safety_net_ops_ = params.safety_net_ops;
+    safety_net_fires_ = 0;
+    ops_since_last_insert_ = 0;
+    update_ctx_.clear();
+
+    page_io_ = std::make_unique<DiskPageIO>(path(index_dir, "diskann.index"), geom_);
+
+    const std::string slots_path = path(index_dir, "slots.bin");
+    if (std::filesystem::exists(slots_path)) {
+      slot_alloc_.load(slots_path);  // restore free list + next id + tombstones
+      max_slot_id_ = std::max<uint64_t>(max_slot_id_, slot_alloc_.next_fresh_id());
+    } else {
+      slot_alloc_.reset(static_cast<uint32_t>(max_slot_id_));
+    }
+    updatable_ = true;
+  }
+
+  /// Tombstone-aware exact-L2 NN search returning up to @p l (id, dist) candidates.
+  std::vector<std::pair<uint32_t, float>> run_update_search(const float *query, uint32_t l) {
+    ThreadData *td = acquire();
+    std::vector<std::pair<uint32_t, float>> results;
+    try {
+      SearchContext ctx;
+      ctx.reader = reader_.get();
+      ctx.geom = &geom_;
+      ctx.cache = &cache_;
+      ctx.pq = nullptr;
+      ctx.medoid = medoid_;
+      ctx.num_points = max_slot_id_;
+      ctx.tombstone = &slot_alloc_.tombstone();
+      SearchParams sp;
+      sp.search_list_size = l;
+      sp.beam_width = beam_width_;
+      sp.use_pq = false;
+      sp.rerank = false;
+      sp.deterministic = true;  // reproducible graph construction
+      results = disk_greedy_search(ctx, query, l, sp, *td, nullptr);
+    } catch (...) {
+      release(td);
+      throw;
+    }
+    release(td);
+    return results;
+  }
+
+  /// Reconnect node_id's neighbor list: candidates = live old + two-hop through
+  /// deleted + inserted reverse edges, exact-L2 ranked, alpha-RNG pruned.
+  void update_node_impl(uint32_t node_id) {
+    const auto l2 = alaya::simd::get_l2_sqr_func();
+    const DiskPageIO::NodeData nd = page_io_->read_node(node_id);
+
+    std::unordered_set<uint32_t> cand;
+    for (const uint32_t nbr : nd.nbrs) {
+      if (nbr == node_id) {
+        continue;
+      }
+      if (slot_alloc_.is_deleted(nbr)) {
+        const auto it = update_ctx_.removed_node_nbrs_.find(nbr);
+        if (it != update_ctx_.removed_node_nbrs_.end()) {
+          for (const uint32_t o : it->second) {  // two-hop: live old neighbors of the dead node
+            if (o != node_id && !slot_alloc_.is_deleted(o)) {
+              cand.insert(o);
+            }
+          }
+        }
+      } else {
+        cand.insert(nbr);  // live old neighbor
+      }
+    }
+    const auto ins_it = update_ctx_.inserted_edges_.find(node_id);
+    if (ins_it != update_ctx_.inserted_edges_.end()) {
+      for (const uint32_t v : ins_it->second) {
+        if (v != node_id && !slot_alloc_.is_deleted(v)) {
+          cand.insert(v);
+        }
+      }
+    }
+
+    if (!cand.empty()) {
+      const std::vector<float> self_coords = page_io_->read_coords_cached(node_id);  // copy
+      std::vector<alaya::vamana::Neighbor> pool;
+      pool.reserve(cand.size());
+      for (const uint32_t c : cand) {
+        const std::vector<float> &cc = page_io_->read_coords_cached(c);
+        pool.emplace_back(c, l2(self_coords.data(), cc.data(), dim_));
+      }
+
+      std::vector<uint32_t> new_nbrs;
+      if (pool.size() <= max_degree_) {
+        std::sort(pool.begin(), pool.end());
+        for (const auto &nb : pool) {
+          new_nbrs.push_back(nb.id);
+        }
+      } else {
+        std::vector<float> occlude_scratch;
+        auto dist_fn = [this, &l2](uint32_t a, uint32_t b) -> float {
+          const std::vector<float> &ca = page_io_->read_coords_cached(a);
+          const std::vector<float> &cb = page_io_->read_coords_cached(b);
+          return l2(ca.data(), cb.data(), dim_);
+        };
+        const uint32_t maxc = static_cast<uint32_t>(pool.size());
+        alaya::vamana::prune_neighbors(node_id,
+                                       pool,
+                                       update_alpha_,
+                                       max_degree_,
+                                       maxc,
+                                       new_nbrs,
+                                       occlude_scratch,
+                                       dist_fn);
+      }
+
+      // No unnecessary disk write when the neighbor set is unchanged.
+      if (!same_neighbor_set(nd.nbrs, new_nbrs)) {
+        page_io_->write_node_neighbors(node_id,
+                                       static_cast<uint32_t>(new_nbrs.size()),
+                                       new_nbrs.data());
+      }
+    }
+
+    if (ins_it != update_ctx_.inserted_edges_.end()) {
+      update_ctx_.inserted_edges_.erase(ins_it);  // consume the reverse edges
+    }
+  }
+
+  /// IP-DiskANN reconnect: keep live old neighbors + c closest candidates, prune.
+  void update_node_ipdiskann(uint32_t node_id, const std::vector<uint32_t> &candidates) {
+    const auto l2 = alaya::simd::get_l2_sqr_func();
+    const DiskPageIO::NodeData nd = page_io_->read_node(node_id);
+
+    std::unordered_set<uint32_t> cand;
+
+    // Live old neighbors.
+    for (const uint32_t nbr : nd.nbrs) {
+      if (nbr != node_id && !slot_alloc_.is_deleted(nbr)) {
+        cand.insert(nbr);
+      }
+    }
+    // Inserted reverse edges.
+    const auto ins_it = update_ctx_.inserted_edges_.find(node_id);
+    if (ins_it != update_ctx_.inserted_edges_.end()) {
+      for (const uint32_t v : ins_it->second) {
+        if (v != node_id && !slot_alloc_.is_deleted(v)) {
+          cand.insert(v);
+        }
+      }
+    }
+    // IP-DiskANN: add closest c candidates from the delete search.
+    const std::vector<float> self_coords = page_io_->read_coords_cached(node_id);
+    std::vector<std::pair<float, uint32_t>> scored;
+    for (const uint32_t c : candidates) {
+      if (c != node_id && !slot_alloc_.is_deleted(c) && cand.find(c) == cand.end()) {
+        const std::vector<float> &cc = page_io_->read_coords_cached(c);
+        scored.emplace_back(l2(self_coords.data(), cc.data(), dim_), c);
+      }
+    }
+    std::sort(scored.begin(), scored.end());
+    for (size_t i = 0; i < std::min<size_t>(kIPDiskANNCopies, scored.size()); ++i) {
+      cand.insert(scored[i].second);
+    }
+
+    if (cand.empty()) {
+      if (ins_it != update_ctx_.inserted_edges_.end()) {
+        update_ctx_.inserted_edges_.erase(ins_it);
+      }
+      return;
+    }
+
+    std::vector<alaya::vamana::Neighbor> pool;
+    pool.reserve(cand.size());
+    for (const uint32_t c : cand) {
+      const std::vector<float> &cc = page_io_->read_coords_cached(c);
+      pool.emplace_back(c, l2(self_coords.data(), cc.data(), dim_));
+    }
+
+    std::vector<uint32_t> new_nbrs;
+    if (pool.size() <= max_degree_) {
+      std::sort(pool.begin(), pool.end());
+      for (const auto &nb : pool) {
+        new_nbrs.push_back(nb.id);
+      }
+    } else {
+      std::vector<float> occlude_scratch;
+      auto dist_fn = [this, &l2](uint32_t a, uint32_t b) -> float {
+        const std::vector<float> &ca = page_io_->read_coords_cached(a);
+        const std::vector<float> &cb = page_io_->read_coords_cached(b);
+        return l2(ca.data(), cb.data(), dim_);
+      };
+      alaya::vamana::prune_neighbors(node_id,
+                                     pool,
+                                     update_alpha_,
+                                     max_degree_,
+                                     static_cast<uint32_t>(pool.size()),
+                                     new_nbrs,
+                                     occlude_scratch,
+                                     dist_fn);
+    }
+
+    if (!same_neighbor_set(nd.nbrs, new_nbrs)) {
+      page_io_->write_node_neighbors(node_id,
+                                     static_cast<uint32_t>(new_nbrs.size()),
+                                     new_nbrs.data());
+    }
+    if (ins_it != update_ctx_.inserted_edges_.end()) {
+      update_ctx_.inserted_edges_.erase(ins_it);
+    }
+  }
+
+  /// Lightweight consolidation: just strip dangling edges to tombstoned nodes.
+  void maybe_safety_net_reconnect() {
+    if (!update_ctx_.needs_safety_net_reconnect(safety_net_ratio_,
+                                                max_slot_id_,
+                                                ops_since_last_insert_,
+                                                safety_net_ops_)) {
+      return;
+    }
+    std::unordered_set<uint32_t> affected;
+    for (const auto &entry : update_ctx_.removed_node_nbrs_) {
+      for (const uint32_t nb : entry.second) {
+        if (!slot_alloc_.is_deleted(nb)) {
+          affected.insert(nb);
+        }
+      }
+    }
+    page_io_->clear_cache();
+    for (const uint32_t nid : affected) {
+      const DiskPageIO::NodeData nd = page_io_->read_node(nid);
+      std::vector<uint32_t> live;
+      for (const uint32_t nbr : nd.nbrs) {
+        if (!slot_alloc_.is_deleted(nbr)) {
+          live.push_back(nbr);
+        }
+      }
+      if (live.size() != nd.nbrs.size()) {
+        page_io_->write_node_neighbors(nid, static_cast<uint32_t>(live.size()), live.data());
+      }
+    }
+    ops_since_last_insert_ = 0;
+    ++safety_net_fires_;
+  }
+
+  /// Grow labels_ on append; assign in place on slot reuse.
+  void set_label(uint32_t slot, uint64_t label) {
+    if (slot >= labels_.size()) {
+      labels_.resize(static_cast<size_t>(slot) + 1, kNoLabel);
+    }
+    labels_[slot] = label;
+  }
+
+  /// Order-independent equality of two neighbor id lists.
+  static bool same_neighbor_set(const std::vector<uint32_t> &a, const std::vector<uint32_t> &b) {
+    if (a.size() != b.size()) {
+      return false;
+    }
+    const std::unordered_set<uint32_t> sa(a.begin(), a.end());
+    for (const uint32_t x : b) {
+      if (sa.find(x) == sa.end()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   ThreadData *acquire() const {
@@ -464,6 +931,9 @@ class DiskANNIndex {
     }
     thread_data_storage_.clear();
     reader_.reset();
+    page_io_.reset();
+    update_ctx_.clear();
+    updatable_ = false;
     loaded_ = false;
   }
 
@@ -488,6 +958,8 @@ class DiskANNIndex {
     w(&m.pq_n_chunks, sizeof(m.pq_n_chunks));
     w(&m.node_len, sizeof(m.node_len));
     w(&m.nodes_per_sector, sizeof(m.nodes_per_sector));
+    w(&m.max_slot_id, sizeof(m.max_slot_id));  // v2
+    w(&m.live_count, sizeof(m.live_count));    // v2
     if (!out) {
       throw std::runtime_error("DiskANNIndex: meta write failed " + p);
     }
@@ -520,7 +992,17 @@ class DiskANNIndex {
     if (magic != kMetaMagic) {
       throw std::runtime_error("DiskANNIndex::load: bad meta magic " + p);
     }
-    if (version != kMetaVersion) {
+    if (version == 1) {
+      // v1 predates in-place updates: every slot is live, capacity == num_points.
+      m.max_slot_id = m.num_points;
+      m.live_count = m.num_points;
+    } else if (version == 2) {
+      r(&m.max_slot_id, sizeof(m.max_slot_id));
+      r(&m.live_count, sizeof(m.live_count));
+      if (!in) {
+        throw std::runtime_error("DiskANNIndex::load: meta.bin truncated/corrupt " + p);
+      }
+    } else {
       throw std::runtime_error("DiskANNIndex::load: unsupported meta version " + p);
     }
     if (m.num_points == 0 || m.dim == 0) {
@@ -581,6 +1063,22 @@ class DiskANNIndex {
   // thread-scratch pool
   std::vector<std::unique_ptr<ThreadData>> thread_data_storage_;
   mutable ::ConcurrentQueue<ThreadData *> thread_data_pool_;
+
+  // in-place update state (active only when updatable_)
+  bool updatable_ = false;
+  uint64_t max_slot_id_ = 0;  ///< file capacity in slots (valid-id bound; only grows)
+  uint64_t live_count_ = 0;   ///< live (non-tombstoned) vector count
+  std::string index_dir_;     ///< saved at load for flush() output paths
+  std::unique_ptr<DiskPageIO> page_io_;
+  SlotAllocator slot_alloc_;
+  DiskUpdateContext update_ctx_;
+  mutable std::mutex update_mutex_;  ///< serialises search + mutation (v1)
+  uint64_t ops_since_last_insert_ = 0;
+  uint64_t safety_net_fires_ = 0;
+  float update_alpha_ = 1.2f;
+  uint32_t update_search_l_ = 100;
+  double safety_net_ratio_ = 0.05;
+  uint64_t safety_net_ops_ = 16;
 };
 
 }  // namespace alaya::diskann
