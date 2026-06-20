@@ -21,6 +21,7 @@
 
 #include <cstdint>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -121,6 +122,9 @@ class SlotAllocator {
       if (!in) {
         throw std::runtime_error("SlotAllocator::load: free list truncated " + path);
       }
+    }
+    if (next > std::numeric_limits<uint32_t>::max()) {
+      throw std::runtime_error("SlotAllocator::load: next_fresh_id overflows u32 " + path);
     }
     next_fresh_id_ = static_cast<uint32_t>(next);
     tombstone_.deserialize(in);

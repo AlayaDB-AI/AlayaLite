@@ -30,6 +30,9 @@
 
 namespace alaya::diskann {
 
+static_assert(std::endian::native == std::endian::little,
+              "TombstoneBitmap on-disk format assumes little-endian host");
+
 class TombstoneBitmap {
  public:
   static constexpr uint64_t kMagic = 0x414C5954424D5031ULL;  // "ALYTBMP1"

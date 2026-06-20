@@ -581,6 +581,9 @@ class DiskANNIndex {
     if (node_id >= max_slot_id_) {
       throw std::invalid_argument("DiskANNIndex::update_node: node_id out of range");
     }
+    if (slot_alloc_.is_deleted(node_id)) {
+      throw std::invalid_argument("DiskANNIndex::update_node: node_id is deleted");
+    }
     page_io_->clear_cache();
     update_node_impl(node_id);
   }
@@ -708,7 +711,7 @@ class DiskANNIndex {
     }
 
     if (!cand.empty()) {
-      const std::vector<float> self_coords = page_io_->read_coords_cached(node_id);
+      const std::vector<float> &self_coords = page_io_->read_coords_cached(node_id);
       const auto l2 = alaya::simd::get_l2_sqr_func();
       std::vector<alaya::vamana::Neighbor> pool;
       pool.reserve(cand.size());
@@ -787,7 +790,7 @@ class DiskANNIndex {
       }
     }
 
-    const std::vector<float> self_coords = page_io_->read_coords_cached(node_id);
+    const std::vector<float> &self_coords = page_io_->read_coords_cached(node_id);
     const auto l2 = alaya::simd::get_l2_sqr_func();
     std::vector<std::pair<float, uint32_t>> scored;
     for (const uint32_t c : candidates) {
@@ -810,6 +813,7 @@ class DiskANNIndex {
   /// Lightweight consolidation: just strip dangling edges to tombstoned nodes.
   void maybe_safety_net_reconnect() {
     if (!update_ctx_.needs_safety_net_reconnect(safety_net_ratio_,
+                                                slot_alloc_.tombstone_count(),
                                                 max_slot_id_,
                                                 ops_since_last_insert_,
                                                 safety_net_ops_)) {
@@ -882,6 +886,8 @@ class DiskANNIndex {
       }
     }
     thread_data_storage_.clear();
+    while (thread_data_pool_.pop() != nullptr) {
+    }
     reader_.reset();
     page_io_.reset();
     update_ctx_.clear();
@@ -1013,7 +1019,7 @@ class DiskANNIndex {
 
   // thread-scratch pool
   std::vector<std::unique_ptr<ThreadData>> thread_data_storage_;
-  mutable ::ConcurrentQueue<ThreadData *> thread_data_pool_;
+  mutable ::ConcurrentQueue<ThreadData *> thread_data_pool_{nullptr};
 
   // in-place update state (active only when updatable_)
   bool updatable_ = false;

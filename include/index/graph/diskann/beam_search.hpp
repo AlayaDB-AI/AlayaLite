@@ -120,10 +120,9 @@ inline void scan_and_insert_neighbors(alaya::vamana::NeighborPriorityQueue &rets
     if (m >= num_points) {
       continue;  // defensive: ignore corrupt neighbor ids
     }
-    if (visited.find(m) != visited.end()) {
+    if (!visited.insert(m).second) {
       continue;
     }
-    visited.insert(m);
     retset.insert(alaya::vamana::Neighbor(m, pq.pq_distance(m, pq_table)));
   }
 }
@@ -200,14 +199,12 @@ inline std::vector<std::pair<uint32_t, float>> disk_greedy_search(const SearchCo
   // IP-DiskANN: tombstoned nodes are skipped (graph repaired at delete time).
   const TombstoneBitmap *tomb = ctx.tombstone;
   auto consider = [&](uint32_t m, auto &&emit) {
-    if (m >= ctx.num_points || visited.find(m) != visited.end()) {
+    if (m >= ctx.num_points || !visited.insert(m).second) {
       return;
     }
     if (tomb != nullptr && tomb->is_deleted(m)) {
-      visited.insert(m);
       return;
     }
-    visited.insert(m);
     emit(m);
   };
 

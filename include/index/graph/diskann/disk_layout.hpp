@@ -29,6 +29,7 @@
 #pragma once
 
 #include <algorithm>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -39,6 +40,9 @@
 #include <vector>
 
 namespace alaya::diskann {
+
+static_assert(std::endian::native == std::endian::little,
+              "DiskANN on-disk layout assumes little-endian host");
 
 /// Sector size (O_DIRECT page granularity). All reads must be aligned to this.
 inline constexpr uint64_t kSectorLen = 4096;

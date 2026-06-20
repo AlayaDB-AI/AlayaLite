@@ -35,22 +35,19 @@ struct DiskUpdateContext {
   /// data no longer describes the node now living in the slot.
   void forget_slot(uint32_t slot) { removed_node_nbrs_.erase(slot); }
 
-  /// Fraction of @p total slots that are currently tombstoned (0 when total==0).
-  [[nodiscard]] double tombstone_ratio(uint64_t total) const {
-    if (total == 0) {
-      return 0.0;
-    }
-    return static_cast<double>(removed_node_nbrs_.size()) / static_cast<double>(total);
-  }
-
   /// True when the safety-net proactive reconnect should fire: the tombstone
   /// ratio has reached @p ratio_threshold AND no insert-driven reconnect has run
   /// for at least @p ops_threshold operations (delete-heavy workload).
   [[nodiscard]] bool needs_safety_net_reconnect(double ratio_threshold,
+                                                uint64_t tombstone_count,
                                                 uint64_t total,
                                                 uint64_t ops_since_last_insert,
                                                 uint64_t ops_threshold) const {
-    return ops_since_last_insert >= ops_threshold && tombstone_ratio(total) >= ratio_threshold;
+    if (total == 0) {
+      return false;
+    }
+    const double ratio = static_cast<double>(tombstone_count) / static_cast<double>(total);
+    return ops_since_last_insert >= ops_threshold && ratio >= ratio_threshold;
   }
 };
 

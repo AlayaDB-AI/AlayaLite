@@ -10,7 +10,7 @@ resolution-markers = [
 
 [[package]]
 name = "alayalite"
-version = "1.0.0"
+version = "1.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "pandas" },
