@@ -244,7 +244,7 @@ class DiskANNIndex {
     }
 
     const MetaHeader meta = read_meta(path(index_dir, "meta.bin"));
-    num_points_ = meta.num_points;
+    const uint64_t num_points = meta.num_points;
     dim_ = meta.dim;
     max_degree_ = meta.max_degree;
     medoid_ = meta.medoid;
@@ -262,7 +262,7 @@ class DiskANNIndex {
     if (has_pq_) {
       pq_.load(path(index_dir, "pq_pivots.bin"),
                path(index_dir, "pq_compressed.bin"),
-               num_points_,
+               num_points,
                dim_,
                pq_n_chunks_);
     }
@@ -474,7 +474,6 @@ class DiskANNIndex {
     }
     std::lock_guard<std::mutex> lock(update_mutex_);
     page_io_->clear_cache();
-    const auto l2 = alaya::simd::get_l2_sqr_func();
 
     const auto cand = run_update_search(query, update_search_l_);
 
@@ -485,10 +484,8 @@ class DiskANNIndex {
     }
     std::vector<uint32_t> pruned;
     std::vector<float> occlude_scratch;
-    auto dist_fn = [this, &l2](uint32_t a, uint32_t b) -> float {
-      const std::vector<float> &ca = page_io_->read_coords_cached(a);
-      const std::vector<float> &cb = page_io_->read_coords_cached(b);
-      return l2(ca.data(), cb.data(), dim_);
+    auto dist_fn = [this](uint32_t a, uint32_t b) -> float {
+      return cached_l2(a, b);
     };
     const uint32_t maxc = std::max<uint32_t>(max_degree_, static_cast<uint32_t>(pool.size()));
     alaya::vamana::prune_neighbors(kNoSelf,
@@ -537,7 +534,6 @@ class DiskANNIndex {
     // 1. Read coords + old neighbors before tombstoning.
     const DiskPageIO::NodeData nd = page_io_->read_node(internal_id);
     update_ctx_.removed_node_nbrs_[internal_id] = nd.nbrs;
-    update_ctx_.removed_vertices_.insert(internal_id);
 
     // 2. Tombstone + free slot.
     slot_alloc_.free(internal_id);
@@ -689,30 +685,19 @@ class DiskANNIndex {
     return results;
   }
 
-  /// Reconnect node_id's neighbor list: candidates = live old + two-hop through
-  /// deleted + inserted reverse edges, exact-L2 ranked, alpha-RNG pruned.
-  void update_node_impl(uint32_t node_id) {
+  /// Cached L2 distance between two nodes via the page IO coords cache.
+  float cached_l2(uint32_t a, uint32_t b) {
     const auto l2 = alaya::simd::get_l2_sqr_func();
-    const DiskPageIO::NodeData nd = page_io_->read_node(node_id);
+    const std::vector<float> &ca = page_io_->read_coords_cached(a);
+    const std::vector<float> &cb = page_io_->read_coords_cached(b);
+    return l2(ca.data(), cb.data(), dim_);
+  }
 
-    std::unordered_set<uint32_t> cand;
-    for (const uint32_t nbr : nd.nbrs) {
-      if (nbr == node_id) {
-        continue;
-      }
-      if (slot_alloc_.is_deleted(nbr)) {
-        const auto it = update_ctx_.removed_node_nbrs_.find(nbr);
-        if (it != update_ctx_.removed_node_nbrs_.end()) {
-          for (const uint32_t o : it->second) {  // two-hop: live old neighbors of the dead node
-            if (o != node_id && !slot_alloc_.is_deleted(o)) {
-              cand.insert(o);
-            }
-          }
-        }
-      } else {
-        cand.insert(nbr);  // live old neighbor
-      }
-    }
+  /// Shared reconnect backbone: score candidates, prune, write if changed,
+  /// consume inserted_edges for node_id.
+  void prune_and_write(uint32_t node_id,
+                       const std::vector<uint32_t> &old_nbrs,
+                       std::unordered_set<uint32_t> &cand) {
     const auto ins_it = update_ctx_.inserted_edges_.find(node_id);
     if (ins_it != update_ctx_.inserted_edges_.end()) {
       for (const uint32_t v : ins_it->second) {
@@ -723,7 +708,8 @@ class DiskANNIndex {
     }
 
     if (!cand.empty()) {
-      const std::vector<float> self_coords = page_io_->read_coords_cached(node_id);  // copy
+      const std::vector<float> self_coords = page_io_->read_coords_cached(node_id);
+      const auto l2 = alaya::simd::get_l2_sqr_func();
       std::vector<alaya::vamana::Neighbor> pool;
       pool.reserve(cand.size());
       for (const uint32_t c : cand) {
@@ -739,24 +725,20 @@ class DiskANNIndex {
         }
       } else {
         std::vector<float> occlude_scratch;
-        auto dist_fn = [this, &l2](uint32_t a, uint32_t b) -> float {
-          const std::vector<float> &ca = page_io_->read_coords_cached(a);
-          const std::vector<float> &cb = page_io_->read_coords_cached(b);
-          return l2(ca.data(), cb.data(), dim_);
+        auto dist_fn = [this](uint32_t a, uint32_t b) -> float {
+          return cached_l2(a, b);
         };
-        const uint32_t maxc = static_cast<uint32_t>(pool.size());
         alaya::vamana::prune_neighbors(node_id,
                                        pool,
                                        update_alpha_,
                                        max_degree_,
-                                       maxc,
+                                       static_cast<uint32_t>(pool.size()),
                                        new_nbrs,
                                        occlude_scratch,
                                        dist_fn);
       }
 
-      // No unnecessary disk write when the neighbor set is unchanged.
-      if (!same_neighbor_set(nd.nbrs, new_nbrs)) {
+      if (!same_neighbor_set(old_nbrs, new_nbrs)) {
         page_io_->write_node_neighbors(node_id,
                                        static_cast<uint32_t>(new_nbrs.size()),
                                        new_nbrs.data());
@@ -764,34 +746,49 @@ class DiskANNIndex {
     }
 
     if (ins_it != update_ctx_.inserted_edges_.end()) {
-      update_ctx_.inserted_edges_.erase(ins_it);  // consume the reverse edges
+      update_ctx_.inserted_edges_.erase(ins_it);
     }
+  }
+
+  /// Reconnect node_id's neighbor list: candidates = live old + two-hop through
+  /// deleted + inserted reverse edges, exact-L2 ranked, alpha-RNG pruned.
+  void update_node_impl(uint32_t node_id) {
+    const DiskPageIO::NodeData nd = page_io_->read_node(node_id);
+
+    std::unordered_set<uint32_t> cand;
+    for (const uint32_t nbr : nd.nbrs) {
+      if (nbr == node_id) {
+        continue;
+      }
+      if (slot_alloc_.is_deleted(nbr)) {
+        const auto it = update_ctx_.removed_node_nbrs_.find(nbr);
+        if (it != update_ctx_.removed_node_nbrs_.end()) {
+          for (const uint32_t o : it->second) {
+            if (o != node_id && !slot_alloc_.is_deleted(o)) {
+              cand.insert(o);
+            }
+          }
+        }
+      } else {
+        cand.insert(nbr);
+      }
+    }
+    prune_and_write(node_id, nd.nbrs, cand);
   }
 
   /// IP-DiskANN reconnect: keep live old neighbors + c closest candidates, prune.
   void update_node_ipdiskann(uint32_t node_id, const std::vector<uint32_t> &candidates) {
-    const auto l2 = alaya::simd::get_l2_sqr_func();
     const DiskPageIO::NodeData nd = page_io_->read_node(node_id);
 
     std::unordered_set<uint32_t> cand;
-
-    // Live old neighbors.
     for (const uint32_t nbr : nd.nbrs) {
       if (nbr != node_id && !slot_alloc_.is_deleted(nbr)) {
         cand.insert(nbr);
       }
     }
-    // Inserted reverse edges.
-    const auto ins_it = update_ctx_.inserted_edges_.find(node_id);
-    if (ins_it != update_ctx_.inserted_edges_.end()) {
-      for (const uint32_t v : ins_it->second) {
-        if (v != node_id && !slot_alloc_.is_deleted(v)) {
-          cand.insert(v);
-        }
-      }
-    }
-    // IP-DiskANN: add closest c candidates from the delete search.
+
     const std::vector<float> self_coords = page_io_->read_coords_cached(node_id);
+    const auto l2 = alaya::simd::get_l2_sqr_func();
     std::vector<std::pair<float, uint32_t>> scored;
     for (const uint32_t c : candidates) {
       if (c != node_id && !slot_alloc_.is_deleted(c) && cand.find(c) == cand.end()) {
@@ -799,56 +796,15 @@ class DiskANNIndex {
         scored.emplace_back(l2(self_coords.data(), cc.data(), dim_), c);
       }
     }
-    std::sort(scored.begin(), scored.end());
+    std::partial_sort(scored.begin(),
+                      scored.begin() +
+                          static_cast<ptrdiff_t>(std::min<size_t>(kIPDiskANNCopies, scored.size())),
+                      scored.end());
     for (size_t i = 0; i < std::min<size_t>(kIPDiskANNCopies, scored.size()); ++i) {
       cand.insert(scored[i].second);
     }
 
-    if (cand.empty()) {
-      if (ins_it != update_ctx_.inserted_edges_.end()) {
-        update_ctx_.inserted_edges_.erase(ins_it);
-      }
-      return;
-    }
-
-    std::vector<alaya::vamana::Neighbor> pool;
-    pool.reserve(cand.size());
-    for (const uint32_t c : cand) {
-      const std::vector<float> &cc = page_io_->read_coords_cached(c);
-      pool.emplace_back(c, l2(self_coords.data(), cc.data(), dim_));
-    }
-
-    std::vector<uint32_t> new_nbrs;
-    if (pool.size() <= max_degree_) {
-      std::sort(pool.begin(), pool.end());
-      for (const auto &nb : pool) {
-        new_nbrs.push_back(nb.id);
-      }
-    } else {
-      std::vector<float> occlude_scratch;
-      auto dist_fn = [this, &l2](uint32_t a, uint32_t b) -> float {
-        const std::vector<float> &ca = page_io_->read_coords_cached(a);
-        const std::vector<float> &cb = page_io_->read_coords_cached(b);
-        return l2(ca.data(), cb.data(), dim_);
-      };
-      alaya::vamana::prune_neighbors(node_id,
-                                     pool,
-                                     update_alpha_,
-                                     max_degree_,
-                                     static_cast<uint32_t>(pool.size()),
-                                     new_nbrs,
-                                     occlude_scratch,
-                                     dist_fn);
-    }
-
-    if (!same_neighbor_set(nd.nbrs, new_nbrs)) {
-      page_io_->write_node_neighbors(node_id,
-                                     static_cast<uint32_t>(new_nbrs.size()),
-                                     new_nbrs.data());
-    }
-    if (ins_it != update_ctx_.inserted_edges_.end()) {
-      update_ctx_.inserted_edges_.erase(ins_it);
-    }
+    prune_and_write(node_id, nd.nbrs, cand);
   }
 
   /// Lightweight consolidation: just strip dangling edges to tombstoned nodes.
@@ -893,17 +849,13 @@ class DiskANNIndex {
   }
 
   /// Order-independent equality of two neighbor id lists.
-  static bool same_neighbor_set(const std::vector<uint32_t> &a, const std::vector<uint32_t> &b) {
+  static bool same_neighbor_set(std::vector<uint32_t> a, std::vector<uint32_t> b) {
     if (a.size() != b.size()) {
       return false;
     }
-    const std::unordered_set<uint32_t> sa(a.begin(), a.end());
-    for (const uint32_t x : b) {
-      if (sa.find(x) == sa.end()) {
-        return false;
-      }
-    }
-    return true;
+    std::sort(a.begin(), a.end());
+    std::sort(b.begin(), b.end());
+    return a == b;
   }
 
   ThreadData *acquire() const {
@@ -1043,7 +995,6 @@ class DiskANNIndex {
   }
 
   // metadata
-  uint64_t num_points_ = 0;
   uint64_t dim_ = 0;
   uint32_t max_degree_ = 0;
   uint32_t medoid_ = 0;

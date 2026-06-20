@@ -561,6 +561,7 @@ inline std::vector<std::pair<uint32_t, float>> cached_beam_search(const SearchCo
 
   // ---------------- Result extraction (PQ) ----------------
   std::vector<std::pair<uint32_t, float>> out;
+  std::vector<AlignedRead> rerank_req(1);
 
   auto read_exact_sync = [&](uint32_t id) -> float {
     const auto it = exact_by_id.find(id);
@@ -568,9 +569,8 @@ inline std::vector<std::pair<uint32_t, float>> cached_beam_search(const SearchCo
       return it->second;
     }
     char *buf = td.sector_scratch;
-    std::vector<AlignedRead> r1;
-    r1.emplace_back(geom.get_page_offset(id), page_size, id, buf);
-    reader.read(r1, td.ctx_);
+    rerank_req[0] = {geom.get_page_offset(id), page_size, id, buf};
+    reader.read(rerank_req, td.ctx_);
     NodeRecordView view{buf + geom.offset_to_node(id), dim};
     const float ex = l2(query, view.coords(), dim);
     exact_by_id[id] = ex;
