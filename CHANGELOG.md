@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-20
+
+### Added
+- Self-contained DiskANN disk index (`alaya::diskann::DiskANNIndex`): in-memory
+  Vamana build, sector-aligned disk layout, optional PQ, BFS node cache, and
+  cached beam search (PQ + No-PQ greedy) with async-pipelined I/O and opt-in
+  deterministic mode for byte-exact batch/sequential reproducibility.
+- IP-DiskANN in-place update with tombstone, slot reuse, and proactive graph
+  repair: `insert()` / `remove()` / `flush()` on the No-PQ disk index,
+  following the IP-DiskANN design (search + c=3 replacement edges at delete
+  time). New components: `TombstoneBitmap`, `SlotAllocator`, `DiskPageIO`,
+  `DiskUpdateContext`. Meta v2 with backward-compatible v1 read.
+
+### Changed
+- Refactored DiskANN update internals: extracted shared reconnect backbone
+  (`cached_l2`, `prune_and_write`) from `update_node_impl` and
+  `update_node_ipdiskann`, eliminating ~60 lines of duplication. Removed
+  redundant `removed_vertices_` set from `DiskUpdateContext`. Replaced
+  `unordered_set` with sorted comparison in `same_neighbor_set`. Reuse
+  `AlignedRead` in PQ rerank loop. Use `partial_sort` for IP-DiskANN top-3
+  candidate selection.
+
 ## [1.0.0] - 2026-05-22
 
 First stable release of AlayaLite. Highlights since the 0.1.x alpha line:
@@ -277,7 +299,8 @@ First stable release of AlayaLite. Highlights since the 0.1.x alpha line:
 - RAG components (embedders, chunkers)
 - Basic CI/CD pipeline
 
-[Unreleased]: https://github.com/AlayaDB-AI/AlayaLite/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/AlayaDB-AI/AlayaLite/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/AlayaDB-AI/AlayaLite/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/AlayaDB-AI/AlayaLite/compare/v0.1.1a1...v1.0.0
 [0.1.1-alpha1]: https://github.com/AlayaDB-AI/AlayaLite/compare/v0.1.0a3...v0.1.1a1
 [0.1.0-alpha3]: https://github.com/AlayaDB-AI/AlayaLite/compare/v0.1.0a2...v0.1.0a3
