@@ -256,7 +256,7 @@ class Collection:
             # Collection always requires scalar data storage
             self.__index_params.has_scalar_data = True
 
-            self.__index_py = Index(self.__name, self.__index_params)
+            index = Index(self.__name, self.__index_params)
 
             # Prepare batch data
             vectors = np.array([item[2] for item in items], dtype=dt)
@@ -270,7 +270,7 @@ class Collection:
                 build_threads = 1
             else:
                 _assert(build_threads > 0, "index_params.build_threads must be greater than 0")
-            self.__index_py.fit(
+            index.fit(
                 vectors,
                 ef_construction=400,
                 num_threads=build_threads,
@@ -278,6 +278,7 @@ class Collection:
                 documents=documents,
                 metadata_list=metadata_list,
             )
+            self.__index_py = index
             self.__cpp_index = self.__index_py.get_cpp_index()
             self._maybe_persist_schema_for_recovery()
         else:

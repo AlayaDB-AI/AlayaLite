@@ -31,7 +31,7 @@ class Index:
     The Index class provides a Python interface for managing and querying vector indices.
     """
 
-    def __init__(self, name: str = "default", params: IndexParams = IndexParams()):
+    def __init__(self, name: str = "default", params: Optional[IndexParams] = None):
         """
         Initialize a new Index instance.
 
@@ -40,7 +40,7 @@ class Index:
             params (IndexParams): Configuration parameters for the index.
         """
         self.__name = name
-        self.__params = params
+        self.__params = params if params is not None else IndexParams()
         self.__index = None  # late initialization
         self.__is_initialized = False
         self.__dim = None  # It will be set when fitting the index
@@ -104,10 +104,7 @@ class Index:
         vectors = vectors.astype(self.__params.data_type, copy=False)
 
         self.__params.fill_none_values()
-        self.__dim = vectors.shape[1]
-        self.__index = _PyIndexInterface(self.__params.to_cpp_params())
-        self.__is_initialized = True
-
+        dim = vectors.shape[1]
         vectors = normalize_vectors_for_cosine_metric(vectors, self.__params.metric)
 
         print(
@@ -115,13 +112,22 @@ class Index:
             f"  vectors.shape: {vectors.shape}, num_threads: {num_threads}, ef_construction: {ef_construction}\n"
             f"start fitting index..."
         )
-        self.__index.fit(vectors, ef_construction, num_threads, item_ids, documents, metadata_list)
+        index = _PyIndexInterface(self.__params.to_cpp_params())
+        try:
+            index.fit(vectors, ef_construction, num_threads, item_ids, documents, metadata_list)
+        except Exception:
+            index.close_db()
+            raise
+        self.__index = index
+        self.__dim = dim
+        self.__is_initialized = True
 
     def insert(self, vectors: VectorLike, ef: int = 100):
         """
         Insert a new vector into the index.
         """
         _assert(self.__index is not None, "Index is not init yet")
+        vectors = np.asarray(vectors, dtype=self.__params.data_type)
         _assert(vectors.ndim == 1, "vectors must be a 1D array")
         _assert(
             vectors.shape[0] == self.__dim,

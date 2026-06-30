@@ -99,6 +99,18 @@ class TestCollection(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Duplicate item_id: dup"):
             self.collection.insert(items)
 
+    def test_initial_insert_failure_leaves_collection_retryable(self):
+        bad_items = [
+            ("dup", "Document 1", np.array([0.1, 0.2, 0.3], dtype=np.float32), {"category": "A"}),
+            ("dup", "Document 2", np.array([0.4, 0.5, 0.6], dtype=np.float32), {"category": "B"}),
+        ]
+        with self.assertRaisesRegex(RuntimeError, "Duplicate item_id: dup"):
+            self.collection.insert(bad_items)
+
+        self.collection.insert([("ok", "Document OK", np.array([0.1, 0.2, 0.3], dtype=np.float32), {"category": "A"})])
+        result = self.collection.get_by_id(["ok"])
+        self.assertEqual(result["document"], ["Document OK"])
+
     def test_get_cpp_index_before_first_insert_has_actionable_error(self):
         """Accessing the native index before first insert should explain how to initialize it."""
         with self.assertRaisesRegex(RuntimeError, "Call insert\\(\\) with the first batch of data first"):

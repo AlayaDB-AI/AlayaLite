@@ -106,7 +106,7 @@ class TestClient(unittest.TestCase):
         self.client.create_collection("test_collection")
         with self.assertRaises(RuntimeError):  # Without url
             self.client.delete_collection("test_collection", True)
-        self.assertNotIn("test_collection", self.client.list_collections())
+        self.assertIn("test_collection", self.client.list_collections())
         with self.assertRaises(RuntimeError):
             self.client.delete_collection("non_exist")
 
@@ -114,7 +114,7 @@ class TestClient(unittest.TestCase):
         self.client.create_index("test_index")
         with self.assertRaises(RuntimeError):  # Without url
             self.client.delete_index("test_index", True)
-        self.assertNotIn("test_index", self.client.list_indices())
+        self.assertIn("test_index", self.client.list_indices())
         with self.assertRaises(RuntimeError):
             self.client.delete_index("non_exist")
 
@@ -165,6 +165,14 @@ class TestClient(unittest.TestCase):
 
         self.assertTrue(native.closed)
         self.assertIsNone(index._Index__index)
+
+    def test_default_index_instances_do_not_share_params(self):
+        first = Index("first")
+        second = Index("second")
+
+        self.assertIsNot(first.get_params(), second.get_params())
+        first.get_params().metric = "ip"
+        self.assertIsNone(second.get_params().metric)
 
     def test_get_non_exist(self):
         index = self.client.get_index("non_exist")

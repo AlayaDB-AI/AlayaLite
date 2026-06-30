@@ -7,10 +7,14 @@ Unit tests for the update functionality of the AlayaLite Index,
 such as inserting vectors and handling capacity limits.
 """
 
+import os
+import tempfile
 import unittest
 
 import numpy as np
 from alayalite import Client
+from alayalite.index import Index
+from alayalite.schema import IndexParams
 
 
 class TestAlayaLiteUpdate(unittest.TestCase):
@@ -39,6 +43,41 @@ class TestAlayaLiteUpdate(unittest.TestCase):
 
         vector_2 = index.get_data_by_id(1001)
         self.assertTrue(np.allclose(vector_2, new_vector_2))
+
+    def test_insert_accepts_list_vector(self):
+        index = self.client.create_index()
+        index.fit(np.array([[1.0, 2.0, 3.0]], dtype=np.float32))
+
+        new_id = index.insert([4.0, 5.0, 6.0])
+
+        self.assertEqual(new_id, 1)
+        self.assertTrue(np.allclose(index.get_data_by_id(1), np.array([4.0, 5.0, 6.0], dtype=np.float32)))
+
+    def test_fit_failure_leaves_index_retryable(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            index = Index(
+                "retryable_index",
+                IndexParams(
+                    rocksdb_path=os.path.join(tmp_dir, "rocksdb"),
+                    has_scalar_data=True,
+                ),
+            )
+            vectors = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32)
+            with self.assertRaisesRegex(RuntimeError, "Duplicate item_id: dup"):
+                index.fit(
+                    vectors,
+                    item_ids=["dup", "dup"],
+                    documents=["Document 1", "Document 2"],
+                    metadata_list=[{}, {}],
+                )
+
+            index.fit(
+                vectors[:1],
+                item_ids=["ok"],
+                documents=["Document OK"],
+                metadata_list=[{}],
+            )
+            self.assertEqual(index.search([1.0, 2.0, 3.0], 1)[0], 0)
 
     def test_index_out_of_scope(self):
         """Test that inserting into a full index raises a RuntimeError."""

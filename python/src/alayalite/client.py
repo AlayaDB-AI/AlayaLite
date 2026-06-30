@@ -207,11 +207,11 @@ class Client:
         """
         if collection_name not in self.__collection_map:
             raise RuntimeError(f"Collection '{collection_name}' does not exist")
+        if delete_on_disk and self.__url is None:
+            raise RuntimeError("Client is not initialized with a url for disk operations")
         collection = self.__collection_map.pop(collection_name)
         self._close_collection(collection)
         if delete_on_disk:
-            if self.__url is None:
-                raise RuntimeError("Client is not initialized with a url for disk operations")
             collection_url = os.path.join(self.__url, collection_name)
             if os.path.exists(collection_url):
                 shutil.rmtree(collection_url)
@@ -230,11 +230,11 @@ class Client:
         """
         if index_name not in self.__index_map:
             raise RuntimeError(f"Index '{index_name}' does not exist")
+        if delete_on_disk and self.__url is None:
+            raise RuntimeError("Client is not initialized with a url for disk operations")
         index = self.__index_map.pop(index_name)
         self._close_index(index)
         if delete_on_disk:
-            if self.__url is None:
-                raise RuntimeError("Client is not initialized with a url for disk operations")
             index_url = os.path.join(self.__url, index_name)
             if os.path.exists(index_url):
                 shutil.rmtree(index_url)
