@@ -8,6 +8,7 @@ and querying a single vector index.
 """
 
 import os
+import shutil
 from typing import List, Optional
 
 import numpy as np
@@ -22,6 +23,30 @@ from .common import (
 )
 from .schema import IndexParams, load_schema
 from .utils import normalize_vectors_for_cosine_metric
+
+
+def _record_cleanup_error(fit_error: Exception, cleanup_step: str, cleanup_error: Exception) -> None:
+    message = f"{cleanup_step} failed during failed fit cleanup: {cleanup_error}"
+    add_note = getattr(fit_error, "add_note", None)
+    if add_note is not None:
+        add_note(message)
+        return
+    fit_error.args = (*fit_error.args, message)
+
+
+def _cleanup_failed_fit(index: _PyIndexInterface, rocksdb_path: str, fit_error: Exception) -> None:
+    try:
+        index.close_db()
+    except Exception as cleanup_error:  # pylint: disable=broad-exception-caught
+        _record_cleanup_error(fit_error, "close_db", cleanup_error)
+
+    if not rocksdb_path or not os.path.exists(rocksdb_path):
+        return
+
+    try:
+        shutil.rmtree(rocksdb_path)
+    except Exception as cleanup_error:  # pylint: disable=broad-exception-caught
+        _record_cleanup_error(fit_error, f"remove RocksDB path {rocksdb_path!r}", cleanup_error)
 
 
 # Pylint is incorrectly flagging used private members.
@@ -115,8 +140,8 @@ class Index:
         index = _PyIndexInterface(self.__params.to_cpp_params())
         try:
             index.fit(vectors, ef_construction, num_threads, item_ids, documents, metadata_list)
-        except Exception:
-            index.close_db()
+        except Exception as fit_error:
+            _cleanup_failed_fit(index, self.__params.rocksdb_path, fit_error)
             raise
         self.__index = index
         self.__dim = dim

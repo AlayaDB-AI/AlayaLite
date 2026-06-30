@@ -10,6 +10,7 @@ such as inserting vectors and handling capacity limits.
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 from alayalite import Client
@@ -55,10 +56,11 @@ class TestAlayaLiteUpdate(unittest.TestCase):
 
     def test_fit_failure_leaves_index_retryable(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
+            rocksdb_path = os.path.join(tmp_dir, "rocksdb")
             index = Index(
                 "retryable_index",
                 IndexParams(
-                    rocksdb_path=os.path.join(tmp_dir, "rocksdb"),
+                    rocksdb_path=rocksdb_path,
                     has_scalar_data=True,
                 ),
             )
@@ -71,6 +73,8 @@ class TestAlayaLiteUpdate(unittest.TestCase):
                     metadata_list=[{}, {}],
                 )
 
+            self.assertFalse(os.path.exists(rocksdb_path))
+
             index.fit(
                 vectors[:1],
                 item_ids=["ok"],
@@ -78,6 +82,78 @@ class TestAlayaLiteUpdate(unittest.TestCase):
                 metadata_list=[{}],
             )
             self.assertEqual(index.search([1.0, 2.0, 3.0], 1)[0], 0)
+
+    def test_fit_failure_removes_created_rocksdb_path(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rocksdb_path = os.path.join(tmp_dir, "rocksdb")
+
+            class FailingNativeIndex:
+                """Native index double that creates RocksDB files before fit fails."""
+
+                def __init__(self, params):
+                    self.params = params
+                    self.closed = False
+
+                def fit(self, *_args):
+                    os.makedirs(rocksdb_path)
+                    with open(os.path.join(rocksdb_path, "orphan"), "w", encoding="utf-8") as f:
+                        f.write("orphaned scalar data")
+                    raise RuntimeError("native fit failed")
+
+                def close_db(self):
+                    self.closed = True
+
+            index = Index(
+                "failed_index",
+                IndexParams(rocksdb_path=rocksdb_path, has_scalar_data=True),
+            )
+
+            with patch("alayalite.index._PyIndexInterface", FailingNativeIndex):
+                with self.assertRaisesRegex(RuntimeError, "native fit failed"):
+                    index.fit(
+                        np.array([[1.0, 2.0, 3.0]], dtype=np.float32),
+                        item_ids=["item"],
+                        documents=["Document"],
+                        metadata_list=[{}],
+                    )
+
+            self.assertFalse(os.path.exists(rocksdb_path))
+
+    def test_fit_cleanup_preserves_original_error_when_close_fails(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rocksdb_path = os.path.join(tmp_dir, "rocksdb")
+
+            class CloseFailingNativeIndex:
+                """Native index double whose close path fails after fit fails."""
+
+                def __init__(self, params):
+                    self.params = params
+
+                def fit(self, *_args):
+                    os.makedirs(rocksdb_path)
+                    raise RuntimeError("native fit failed")
+
+                def close_db(self):
+                    raise RuntimeError("close failed")
+
+            index = Index(
+                "close_failed_index",
+                IndexParams(rocksdb_path=rocksdb_path, has_scalar_data=True),
+            )
+
+            with patch("alayalite.index._PyIndexInterface", CloseFailingNativeIndex):
+                with self.assertRaisesRegex(RuntimeError, "native fit failed") as raised:
+                    index.fit(
+                        np.array([[1.0, 2.0, 3.0]], dtype=np.float32),
+                        item_ids=["item"],
+                        documents=["Document"],
+                        metadata_list=[{}],
+                    )
+
+            notes = getattr(raised.exception, "__notes__", [])
+            cleanup_details = "\n".join(notes) or str(raised.exception)
+            self.assertIn("close_db failed during failed fit cleanup", cleanup_details)
+            self.assertFalse(os.path.exists(rocksdb_path))
 
     def test_index_out_of_scope(self):
         """Test that inserting into a full index raises a RuntimeError."""
