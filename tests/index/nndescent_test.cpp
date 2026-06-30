@@ -24,8 +24,7 @@ namespace alaya {
 class NnDescentTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
-    ds_ = load_dataset(sift_micro(data_dir));
+    ds_ = load_dataset(sift_tiny(resolve_data_dir()));
 
     space_ = std::make_shared<RawSpace<>>(ds_.data_num_, ds_.dim_, MetricType::L2);
     space_->fit(ds_.data_.data(), ds_.data_num_);
@@ -53,8 +52,7 @@ TEST_F(NnDescentTest, BuildGraphTest) {
 class NnDescentSearchTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    std::filesystem::path data_dir = std::filesystem::current_path().parent_path() / "data";
-    ds_ = load_dataset(sift_micro(data_dir));
+    ds_ = load_dataset(sift_tiny(resolve_data_dir()));
   }
 
   void TearDown() override {}

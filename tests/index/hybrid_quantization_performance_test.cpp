@@ -147,27 +147,6 @@ auto load_benchmark_settings() -> BenchmarkSettings {
   return settings;
 }
 
-auto resolve_data_dir() -> std::filesystem::path {
-  if (const char *env = std::getenv("ALAYALITE_DATA_DIR"); env != nullptr && *env != '\0') {
-    return env;
-  }
-
-  auto current = std::filesystem::current_path();
-  while (true) {
-    auto candidate = current / "data";
-    if (std::filesystem::exists(candidate / "deep1M")) {
-      return candidate;
-    }
-    auto parent = current.parent_path();
-    if (parent == current) {
-      break;
-    }
-    current = parent;
-  }
-
-  return std::filesystem::current_path() / "data";
-}
-
 void normalize_counts(std::vector<uint32_t> &counts, uint32_t min_value, uint32_t max_value) {
   for (auto &count : counts) {
     count = std::max(min_value, std::min(count, max_value));

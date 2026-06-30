@@ -40,6 +40,20 @@ add_test(NAME executor_test_task_queue COMMAND $<TARGET_FILE:task_queue_test>)
 add_test(NAME executor_test_worker COMMAND $<TARGET_FILE:worker_test>)
 
 set_tests_properties(
+  executor_test_coro
+  executor_test_search_graph
+  executor_test_search_hybrid
+  executor_test_search_rabitq_graph_job
+  executor_test_search_rabitq_hybrid
+  executor_test_update
+  executor_test_mutex
+  executor_test_scheduler
+  executor_test_task_queue
+  executor_test_worker
+  PROPERTIES LABELS "unit"
+)
+
+set_tests_properties(
   executor_test_search_graph executor_test_search_hybrid executor_test_search_rabitq_graph_job
   executor_test_search_rabitq_hybrid PROPERTIES WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )

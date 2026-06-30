@@ -108,6 +108,15 @@ class DynamicBitset {
   void set_all() { std::ranges::fill(data_, ~0ULL); }
 
   /**
+   * @brief Invert all storage bits in-place.
+   */
+  void flip_all() {
+    for (auto &block : data_) {
+      block = ~block;
+    }
+  }
+
+  /**
    * @brief Clear all bits to 0 (mark all as unvisited)
    */
   void clear() { std::ranges::fill(data_, 0ULL); }
@@ -296,6 +305,9 @@ struct LinearPool {
   }
 
   auto insert(IDType u, DistanceType dist) -> bool {
+    if (capacity_ == 0) {
+      return false;
+    }
     if (size_ == capacity_ && dist >= data_[size_ - 1].distance_) {
       return false;
     }
@@ -316,7 +328,10 @@ struct LinearPool {
   }
 
   void emplace_insert(IDType u, DistanceType dist) {
-    if (dist >= data_[size_ - 1].distance) {
+    if (size_ == 0) {
+      return;
+    }
+    if (dist >= data_[size_ - 1].distance_) {
       return;
     }
     int lo = find_bsearch(dist);

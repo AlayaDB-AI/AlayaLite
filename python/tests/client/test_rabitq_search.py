@@ -26,6 +26,21 @@ def calc_gt_ip(data, query, topk):
     return gt
 
 
+def _normalize_vectors(vectors):
+    norms = np.linalg.norm(vectors, axis=-1, keepdims=True)
+    return (vectors / np.maximum(norms, np.finfo(np.float32).eps)).astype(np.float32)
+
+
+def make_ip_test_data(num_vectors=1000, dim=128, num_queries=None, seed=42):
+    rng = np.random.default_rng(seed)
+    vectors = _normalize_vectors(rng.standard_normal((num_vectors, dim), dtype=np.float32))
+    if num_queries is None:
+        query = _normalize_vectors(rng.standard_normal(dim, dtype=np.float32))
+        return vectors, query
+    queries = _normalize_vectors(rng.standard_normal((num_queries, dim), dtype=np.float32))
+    return vectors, queries
+
+
 class TestAlayaLiteRaBitQSearch(unittest.TestCase):
     """Test cases for RaBitQ implementation."""
 

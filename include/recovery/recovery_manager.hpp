@@ -8,12 +8,14 @@
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
 #include "recovery/snapshot_manifest.hpp"
 #include "recovery/write_ahead_log.hpp"
 #include "utils/log.hpp"
+#include "utils/parser.hpp"
 #include "utils/platform_fs.hpp"
 
 namespace alaya::recovery {
@@ -156,12 +158,17 @@ class RecoveryManager {
    * @brief Replaces the active RocksDB directory with the checkpoint stored in a snapshot.
    *
    * If RocksDB recovery is not configured or the snapshot does not include a checkpoint, the method
-   * exits without modifying the active directory. Existing active contents are removed before the
-   * checkpoint is copied into place.
+   * exits without modifying the active directory. The checkpoint is copied to a staging directory,
+   * then published through a backup rename so a failed publish can keep or restore a valid active
+   * directory.
    */
   auto restore_active_rocksdb_from_snapshot(const SnapshotManifest &manifest,
                                             const fs::path &snapshot_dir) const -> void {
     if (active_rocksdb_path_.empty() || manifest.rocksdb_dir_.empty()) {
+      return;
+    }
+
+    if (active_rocksdb_matches_snapshot(manifest)) {
       return;
     }
 
@@ -170,16 +177,125 @@ class RecoveryManager {
       LOG_WARN("recovery: snapshot rocksdb checkpoint missing at {}", source.string());
       return;
     }
+    validate_snapshot_complete(manifest, snapshot_dir);
 
     fs::create_directories(active_rocksdb_path_.parent_path());
     std::error_code ec;
-    fs::remove_all(active_rocksdb_path_, ec);
+    auto staging_path = restore_staging_path();
+    fs::remove_all(staging_path, ec);
+    if (ec) {
+      throw std::runtime_error("Failed to remove stale RocksDB restore staging directory " +
+                               staging_path.string() + ": " + ec.message());
+    }
     ec.clear();
-    copy_directory_recursive(source, active_rocksdb_path_);
+    copy_directory_recursive(source, staging_path);
+    publish_staged_rocksdb_restore(staging_path);
+    write_text_atomically(restored_rocksdb_marker_path(), manifest.snapshot_id_ + "\n");
     LOG_INFO("recovery: restored rocksdb checkpoint from {}", source.string());
   }
 
  private:
+  [[nodiscard]] auto restored_rocksdb_marker_path() const -> fs::path {
+    return root_dir_ / "ACTIVE_ROCKSDB_SNAPSHOT";
+  }
+
+  [[nodiscard]] auto restore_staging_path() const -> fs::path {
+    auto staging_path = active_rocksdb_path_;
+    staging_path += ".restore.tmp";
+    return staging_path;
+  }
+
+  [[nodiscard]] auto restore_backup_path() const -> fs::path {
+    auto backup_path = active_rocksdb_path_;
+    backup_path += ".restore.bak";
+    return backup_path;
+  }
+
+  [[nodiscard]] auto active_rocksdb_matches_snapshot(const SnapshotManifest &manifest) const
+      -> bool {
+    if (!fs::is_directory(active_rocksdb_path_) || !fs::exists(active_rocksdb_path_ / "CURRENT")) {
+      return false;
+    }
+
+    auto marker = read_text(restored_rocksdb_marker_path());
+    return marker.has_value() && trim(marker.value()) == manifest.snapshot_id_;
+  }
+
+  auto publish_staged_rocksdb_restore(const fs::path &staging_path) const -> void {
+    std::error_code ec;
+    auto backup_path = restore_backup_path();
+    fs::remove_all(backup_path, ec);
+    if (ec) {
+      std::error_code cleanup_ec;
+      fs::remove_all(staging_path, cleanup_ec);
+      throw std::runtime_error("Failed to remove stale RocksDB restore backup directory " +
+                               backup_path.string() + ": " + ec.message());
+    }
+
+    auto active_existed = fs::exists(active_rocksdb_path_);
+    if (active_existed) {
+      fs::rename(active_rocksdb_path_, backup_path, ec);
+      if (ec) {
+        std::error_code cleanup_ec;
+        fs::remove_all(staging_path, cleanup_ec);
+        throw std::runtime_error("Failed to move active RocksDB directory " +
+                                 active_rocksdb_path_.string() + " to restore backup " +
+                                 backup_path.string() + ": " + ec.message());
+      }
+    }
+
+    fs::rename(staging_path, active_rocksdb_path_, ec);
+    if (ec) {
+      std::error_code cleanup_ec;
+      fs::remove_all(staging_path, cleanup_ec);
+      if (active_existed) {
+        std::error_code rollback_ec;
+        fs::rename(backup_path, active_rocksdb_path_, rollback_ec);
+        if (rollback_ec) {
+          LOG_ERROR("Failed to roll back RocksDB restore backup {} to {}: {}",
+                    backup_path.string(),
+                    active_rocksdb_path_.string(),
+                    rollback_ec.message());
+        }
+      }
+      throw std::runtime_error("Failed to publish restored RocksDB directory " +
+                               active_rocksdb_path_.string() + ": " + ec.message());
+    }
+
+    auto parent = active_rocksdb_path_.parent_path();
+    if (!parent.empty()) {
+      platform::sync_directory(parent);
+    }
+
+    fs::remove_all(backup_path, ec);
+    if (ec) {
+      LOG_WARN("Failed to remove old RocksDB restore backup {}: {}",
+               backup_path.string(),
+               ec.message());
+    }
+  }
+
+  static auto require_snapshot_component(const fs::path &snapshot_dir,
+                                         const std::string &relative_path,
+                                         const char *component_name) -> void {
+    if (relative_path.empty()) {
+      return;
+    }
+    auto component_path = snapshot_dir / relative_path;
+    if (!fs::exists(component_path)) {
+      throw std::runtime_error(std::string("Recovery snapshot is incomplete: missing ") +
+                               component_name + " at " + component_path.string());
+    }
+  }
+
+  static auto validate_snapshot_complete(const SnapshotManifest &manifest,
+                                         const fs::path &snapshot_dir) -> void {
+    require_snapshot_component(snapshot_dir, manifest.graph_file_, "graph snapshot");
+    require_snapshot_component(snapshot_dir, manifest.data_file_, "data snapshot");
+    require_snapshot_component(snapshot_dir, manifest.quant_file_, "quant snapshot");
+    require_snapshot_component(snapshot_dir, manifest.rocksdb_dir_, "RocksDB checkpoint");
+  }
+
   /**
    * @brief Removes stale snapshot directories after a new snapshot is published.
    *

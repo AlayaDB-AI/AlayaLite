@@ -421,6 +421,100 @@ TEST_F(RecoveryManagerTest, CurrentSnapshotTreatsMalformedManifestAsNoSnapshot) 
   EXPECT_FALSE(mgr.current_snapshot().has_value());
 }
 
+TEST_F(RecoveryManagerTest, RestoreRocksDBSnapshotIsIdempotentForSameSnapshot) {
+  auto mgr = make_manager();
+  mgr.ensure_layout();
+
+  auto snapshot_dir = root_dir_ / "snapshots" / "snapshot-restore";
+  auto snapshot_rocksdb = snapshot_dir / "rocksdb";
+  fs::create_directories(snapshot_rocksdb);
+
+  {
+    std::ofstream current(snapshot_rocksdb / "CURRENT", std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(current.is_open());
+    current << "MANIFEST-000001\n";
+  }
+  {
+    std::ofstream manifest_file(snapshot_rocksdb / "MANIFEST-000001",
+                                std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(manifest_file.is_open());
+    manifest_file << "manifest contents\n";
+  }
+
+  auto manifest = make_manifest("snapshot-restore", 1);
+  manifest.rocksdb_dir_ = "rocksdb";
+
+  mgr.restore_active_rocksdb_from_snapshot(manifest, snapshot_dir);
+  ASSERT_TRUE(fs::exists(active_rocksdb_ / "CURRENT"));
+
+  {
+    std::ofstream lock_file(active_rocksdb_ / "LOCK", std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(lock_file.is_open());
+    lock_file << "reader lock\n";
+  }
+
+  auto staging_path = active_rocksdb_;
+  staging_path += ".restore.tmp";
+  mgr.restore_active_rocksdb_from_snapshot(manifest, snapshot_dir);
+
+  EXPECT_TRUE(fs::exists(active_rocksdb_ / "LOCK"));
+  EXPECT_FALSE(fs::exists(staging_path));
+
+  std::ifstream marker(root_dir_ / "ACTIVE_ROCKSDB_SNAPSHOT");
+  ASSERT_TRUE(marker.is_open());
+  std::string marker_value;
+  std::getline(marker, marker_value);
+  EXPECT_EQ(marker_value, "snapshot-restore");
+}
+
+TEST_F(RecoveryManagerTest, RestoreRocksDBSnapshotPublishesViaBackupAndCleansIt) {
+  auto mgr = make_manager();
+  mgr.ensure_layout();
+
+  fs::create_directories(active_rocksdb_);
+  {
+    std::ofstream current(active_rocksdb_ / "CURRENT", std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(current.is_open());
+    current << "OLD-MANIFEST\n";
+  }
+  {
+    std::ofstream stale(active_rocksdb_ / "STALE", std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(stale.is_open());
+    stale << "old data\n";
+  }
+
+  auto snapshot_dir = root_dir_ / "snapshots" / "snapshot-restore-backup";
+  auto snapshot_rocksdb = snapshot_dir / "rocksdb";
+  fs::create_directories(snapshot_rocksdb);
+  {
+    std::ofstream current(snapshot_rocksdb / "CURRENT", std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(current.is_open());
+    current << "NEW-MANIFEST\n";
+  }
+  {
+    std::ofstream fresh(snapshot_rocksdb / "FRESH", std::ios::binary | std::ios::trunc);
+    ASSERT_TRUE(fresh.is_open());
+    fresh << "new data\n";
+  }
+
+  auto manifest = make_manifest("snapshot-restore-backup", 1);
+  manifest.rocksdb_dir_ = "rocksdb";
+
+  mgr.restore_active_rocksdb_from_snapshot(manifest, snapshot_dir);
+
+  fs::path backup_path = active_rocksdb_;
+  backup_path += ".restore.bak";
+  EXPECT_FALSE(fs::exists(backup_path));
+  EXPECT_FALSE(fs::exists(active_rocksdb_ / "STALE"));
+  EXPECT_TRUE(fs::exists(active_rocksdb_ / "FRESH"));
+
+  std::ifstream current(active_rocksdb_ / "CURRENT");
+  ASSERT_TRUE(current.is_open());
+  std::string current_value;
+  std::getline(current, current_value);
+  EXPECT_EQ(current_value, "NEW-MANIFEST");
+}
+
 TEST_F(RecoveryManagerTest, OldSnapshotsRemovedAfterPublish) {
   auto mgr = make_manager();
   mgr.ensure_layout();
