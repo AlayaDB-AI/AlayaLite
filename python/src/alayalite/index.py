@@ -34,13 +34,26 @@ def _record_cleanup_error(fit_error: Exception, cleanup_step: str, cleanup_error
     fit_error.args = (*fit_error.args, message)
 
 
-def _cleanup_failed_fit(index: _PyIndexInterface, rocksdb_path: str, fit_error: Exception) -> None:
+def _can_remove_rocksdb_path_on_failed_fit(rocksdb_path: str) -> bool:
+    if not rocksdb_path:
+        return False
+    if not os.path.exists(rocksdb_path):
+        return True
+    return os.path.isdir(rocksdb_path) and not os.listdir(rocksdb_path)
+
+
+def _cleanup_failed_fit(
+    index: _PyIndexInterface,
+    rocksdb_path: str,
+    remove_rocksdb_path: bool,
+    fit_error: Exception,
+) -> None:
     try:
         index.close_db()
     except Exception as cleanup_error:  # pylint: disable=broad-exception-caught
         _record_cleanup_error(fit_error, "close_db", cleanup_error)
 
-    if not rocksdb_path or not os.path.exists(rocksdb_path):
+    if not remove_rocksdb_path or not os.path.exists(rocksdb_path):
         return
 
     try:
@@ -138,10 +151,16 @@ class Index:
             f"start fitting index..."
         )
         index = _PyIndexInterface(self.__params.to_cpp_params())
+        remove_rocksdb_path_on_failure = _can_remove_rocksdb_path_on_failed_fit(self.__params.rocksdb_path)
         try:
             index.fit(vectors, ef_construction, num_threads, item_ids, documents, metadata_list)
         except Exception as fit_error:
-            _cleanup_failed_fit(index, self.__params.rocksdb_path, fit_error)
+            _cleanup_failed_fit(
+                index,
+                self.__params.rocksdb_path,
+                remove_rocksdb_path_on_failure,
+                fit_error,
+            )
             raise
         self.__index = index
         self.__dim = dim

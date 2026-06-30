@@ -155,6 +155,44 @@ class TestAlayaLiteUpdate(unittest.TestCase):
             self.assertIn("close_db failed during failed fit cleanup", cleanup_details)
             self.assertFalse(os.path.exists(rocksdb_path))
 
+    def test_fit_failure_keeps_preexisting_rocksdb_path(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            rocksdb_path = os.path.join(tmp_dir, "rocksdb")
+            os.makedirs(rocksdb_path)
+            existing_file = os.path.join(rocksdb_path, "existing")
+            with open(existing_file, "w", encoding="utf-8") as f:
+                f.write("existing scalar data")
+
+            class FailingNativeIndex:
+                """Native index double that fails after seeing existing RocksDB data."""
+
+                def __init__(self, params):
+                    self.params = params
+
+                def fit(self, *_args):
+                    with open(os.path.join(rocksdb_path, "orphan"), "w", encoding="utf-8") as f:
+                        f.write("new failed fit data")
+                    raise RuntimeError("native fit failed")
+
+                def close_db(self):
+                    pass
+
+            index = Index(
+                "preexisting_path_index",
+                IndexParams(rocksdb_path=rocksdb_path, has_scalar_data=True),
+            )
+
+            with patch("alayalite.index._PyIndexInterface", FailingNativeIndex):
+                with self.assertRaisesRegex(RuntimeError, "native fit failed"):
+                    index.fit(
+                        np.array([[1.0, 2.0, 3.0]], dtype=np.float32),
+                        item_ids=["item"],
+                        documents=["Document"],
+                        metadata_list=[{}],
+                    )
+
+            self.assertTrue(os.path.exists(existing_file))
+
     def test_index_out_of_scope(self):
         """Test that inserting into a full index raises a RuntimeError."""
         index = self.client.create_index(capacity=1000)
