@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -27,6 +28,17 @@
 
 #if defined(__linux__)
   #include <unistd.h>
+#endif
+
+// TSan serializes the repair wave's atomic traffic; the full-size repair
+// contract tests run for hours under it. Keep every code path but shrink the
+// workload so the sanitizer suite stays runnable.
+#if defined(__SANITIZE_THREAD__)
+  #define ALAYA_UPDATE_E2E_TSAN 1
+#elif defined(__has_feature)
+  #if __has_feature(thread_sanitizer)
+    #define ALAYA_UPDATE_E2E_TSAN 1
+  #endif
 #endif
 
 namespace {
@@ -190,6 +202,178 @@ class UpdateE2ETest : public ::testing::Test {
     std::vector<float> out_d(k);
     idx_->search(q, k, out_l.data(), out_d.data(), sp);
     return std::find(out_l.begin(), out_l.end(), label) != out_l.end();
+  }
+
+  std::vector<uint32_t> take_random_deletable(uint32_t count, std::mt19937 &rng) {
+    std::vector<uint32_t> ids;
+    ids.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+      std::uniform_int_distribution<size_t> pick(0, deletable_.size() - 1);
+      const size_t j = pick(rng);
+      ids.push_back(deletable_[j]);
+      deletable_[j] = deletable_.back();
+      deletable_.pop_back();
+    }
+    return ids;
+  }
+
+  std::unordered_set<uint64_t> mirror_batch_remove(const std::vector<uint32_t> &ids) {
+    std::unordered_set<uint64_t> labels;
+    labels.reserve(ids.size());
+    for (const uint32_t id : ids) {
+      const uint64_t label = id_label_.at(id);
+      labels.insert(label);
+      live_.erase(label);
+    }
+    idx_->batch_remove(ids.data(), static_cast<uint32_t>(ids.size()));
+    return labels;
+  }
+
+  std::vector<float> base_queries_for_ids(const std::vector<uint32_t> &ids,
+                                          uint32_t max_queries) const {
+    const uint32_t n = std::min<uint32_t>(max_queries, static_cast<uint32_t>(ids.size()));
+    std::vector<float> queries;
+    queries.reserve(static_cast<uint64_t>(n) * dim_);
+    for (uint32_t i = 0; i < n; ++i) {
+      const auto v = vec_at(base_vecs_, ids[i]);
+      queries.insert(queries.end(), v.begin(), v.end());
+    }
+    return queries;
+  }
+
+  void expect_searches_omit_labels(const std::vector<float> &queries,
+                                   uint32_t k,
+                                   uint32_t l,
+                                   const std::unordered_set<uint64_t> &forbidden) const {
+    ASSERT_NE(dim_, 0u);
+    ASSERT_EQ(queries.size() % static_cast<size_t>(dim_), 0u);
+    std::vector<uint64_t> out_l(k);
+    std::vector<float> out_d(k);
+    const DiskANNSearchParams sp{/*L=*/l,
+                                 /*use_pq=*/false,
+                                 /*rerank=*/false,
+                                 /*rerank_count=*/0,
+                                 /*deterministic=*/true};
+    const size_t nq = queries.size() / static_cast<size_t>(dim_);
+    for (size_t qi = 0; qi < nq; ++qi) {
+      idx_->search(queries.data() + qi * dim_, k, out_l.data(), out_d.data(), sp);
+      for (const uint64_t label : out_l) {
+        if (label != DiskANNIndex::kNoLabel) {
+          EXPECT_EQ(forbidden.count(label), 0u) << "deleted label " << label
+                                                << " returned for query " << qi;
+        }
+      }
+    }
+  }
+
+  void assert_indegree_matches_recount() {
+    const auto rc = idx_->debug_recount_in_degree();
+    for (uint32_t i = 0; i < rc.size(); ++i) {
+      ASSERT_EQ(rc[i], idx_->in_degree_of(i)) << i;
+    }
+  }
+
+  void exercise_repair_remove_contract(uint32_t repair_search_l, bool check_recall_floor) {
+#if defined(ALAYA_UPDATE_E2E_TSAN)
+    constexpr uint32_t kN = 900;
+    constexpr uint32_t kDelete = 90;
+#else
+    constexpr uint32_t kN = 3000;
+    constexpr uint32_t kDelete = 300;
+#endif
+    constexpr uint32_t kDim = 32;
+
+    DiskANNLoadParams lp;
+    lp.update_repair = true;
+    lp.repair_search_l = repair_search_l;
+    lp.safety_net_ops = 1000000;
+    build_and_load(kN, kDim, 32, lp);
+
+    std::vector<uint32_t> deleted(deletable_.begin(), deletable_.begin() + kDelete);
+    const uint64_t cap_before = idx_->max_slot_id();
+    const auto deleted_labels = mirror_batch_remove(deleted);
+
+    EXPECT_EQ(idx_->live_count(), static_cast<uint64_t>(kN - kDelete));
+    EXPECT_EQ(idx_->tombstone_count(), static_cast<uint64_t>(kDelete));
+    EXPECT_EQ(idx_->free_slot_count(), static_cast<uint64_t>(kDelete));
+    EXPECT_EQ(idx_->max_slot_id(), cap_before);
+    for (const uint32_t id : deleted) {
+      EXPECT_TRUE(idx_->is_deleted(id));
+    }
+
+    const auto deleted_queries = base_queries_for_ids(deleted, 32);
+    const auto random_queries = make_vectors(30, kDim, /*seed=*/1701 + repair_search_l);
+    expect_searches_omit_labels(deleted_queries, /*k=*/10, /*l=*/100, deleted_labels);
+    expect_searches_omit_labels(random_queries, /*k=*/10, /*l=*/100, deleted_labels);
+    if (check_recall_floor) {
+      EXPECT_GE(recall_at_k(random_queries, 30, 10, 100), 0.85);
+    }
+
+    const auto nv = make_vectors(kDelete, kDim, /*seed=*/8801 + repair_search_l);
+    std::unordered_set<uint32_t> reused;
+    reused.reserve(kDelete);
+    for (uint32_t i = 0; i < kDelete; ++i) {
+      reused.insert(do_insert(vec_at(nv, i)));
+    }
+
+    EXPECT_EQ(idx_->live_count(), static_cast<uint64_t>(kN));
+    EXPECT_EQ(idx_->free_slot_count(), 0u);
+    EXPECT_EQ(idx_->max_slot_id(), cap_before);
+    for (const uint32_t id : deleted) {
+      EXPECT_TRUE(reused.count(id) != 0) << "freed slot " << id << " should be reused";
+      EXPECT_FALSE(idx_->is_deleted(id));
+    }
+    expect_searches_omit_labels(deleted_queries, /*k=*/10, /*l=*/100, deleted_labels);
+    expect_searches_omit_labels(random_queries, /*k=*/10, /*l=*/100, deleted_labels);
+  }
+
+  double run_repair_churn(bool update_repair) {
+#if defined(ALAYA_UPDATE_E2E_TSAN)
+    constexpr uint32_t kN = 1000;
+    constexpr uint32_t kRounds = 2;
+    constexpr uint32_t kChurn = 80;
+#else
+    constexpr uint32_t kN = 4000;
+    constexpr uint32_t kRounds = 3;
+    constexpr uint32_t kChurn = 240;
+#endif
+    constexpr uint32_t kDim = 32;
+    constexpr uint32_t kNq = 50;
+    constexpr uint32_t kK = 10;
+    constexpr uint32_t kL = 160;
+
+    idx_.reset();
+    std::error_code ec;
+    std::filesystem::remove_all(dir_, ec);
+
+    DiskANNLoadParams lp;
+    lp.update_repair = update_repair;
+    lp.repair_search_l = 0;
+    lp.safety_net_ops = 1000000;
+    // The eval L exceeds the 150-slot scratch default; the neighbor pool is
+    // provisioned at load time and does not grow per query.
+    lp.scratch_search_list_size = kL;
+    build_and_load(kN, kDim, 48, lp);
+
+    const auto queries = make_vectors(kNq, kDim, /*seed=*/7);
+    const auto extra = make_vectors(kRounds * kChurn, kDim, /*seed=*/555);
+    uint32_t extra_idx = 0;
+    std::mt19937 rng(2026);
+
+    for (uint32_t round = 0; round < kRounds; ++round) {
+      const std::vector<uint32_t> deleted = take_random_deletable(kChurn, rng);
+      mirror_batch_remove(deleted);
+      EXPECT_EQ(idx_->live_count(), static_cast<uint64_t>(kN - kChurn));
+      EXPECT_EQ(idx_->free_slot_count(), static_cast<uint64_t>(kChurn));
+
+      for (uint32_t i = 0; i < kChurn; ++i) {
+        const uint32_t id = do_insert(vec_at(extra, extra_idx++));
+        deletable_.push_back(id);
+      }
+      EXPECT_EQ(idx_->live_count(), static_cast<uint64_t>(kN));
+      EXPECT_EQ(idx_->free_slot_count(), 0u);
+    }
+    return recall_at_k(queries, kNq, kK, kL);
   }
 
   std::filesystem::path dir_;
@@ -775,6 +959,199 @@ TEST_F(UpdateE2ETest, BatchRemoveHidesVectorsAndFeedsFreeList) {
   for (const uint32_t id : deleted) {
     EXPECT_TRUE(reused.count(id) != 0);
   }
+}
+
+TEST_F(UpdateE2ETest, RepairPreservesRemoveContract) {
+  exercise_repair_remove_contract(/*repair_search_l=*/0, /*check_recall_floor=*/false);
+}
+
+TEST_F(UpdateE2ETest, RepairChurnRecallFloor) {
+  const double repair_off = run_repair_churn(/*update_repair=*/false);
+  const double repair_on = run_repair_churn(/*update_repair=*/true);
+
+  EXPECT_GE(repair_on, repair_off - 0.02)
+      << "repair_on=" << repair_on << " repair_off=" << repair_off;
+  EXPECT_GE(repair_on, 0.90) << "repair_on=" << repair_on;
+}
+
+TEST_F(UpdateE2ETest, RepairWithSearchDiscovery) {
+  exercise_repair_remove_contract(/*repair_search_l=*/32, /*check_recall_floor=*/true);
+}
+
+// Repair supersedes the lazy path's safety net. Under DEFAULT arming (5%
+// tombstones, 16 deletes) a 10% batch delete satisfies both thresholds, so
+// this pins the skip: without it every armed batch pays a redundant scan of
+// the whole delete history that can never find an edge to fix.
+TEST_F(UpdateE2ETest, RepairSkipsSafetyNetUnderDefaultArming) {
+#if defined(ALAYA_UPDATE_E2E_TSAN)
+  constexpr uint32_t kN = 600;
+  constexpr uint32_t kDelete = 60;
+#else
+  constexpr uint32_t kN = 1500;
+  constexpr uint32_t kDelete = 150;
+#endif
+  constexpr uint32_t kDim = 32;
+
+  DiskANNLoadParams lp;
+  lp.update_repair = true;  // safety_net_ratio/ops stay at their defaults
+  build_and_load(kN, kDim, 32, lp);
+
+  std::mt19937 rng(4242);
+  const std::vector<uint32_t> deleted = take_random_deletable(kDelete, rng);
+  const auto deleted_labels = mirror_batch_remove(deleted);
+  EXPECT_EQ(idx_->safety_net_fire_count(), 0u);
+  EXPECT_EQ(idx_->free_slot_count(), static_cast<uint64_t>(kDelete));
+
+  const std::vector<uint32_t> deleted_again = take_random_deletable(kDelete, rng);
+  const auto deleted_labels_again = mirror_batch_remove(deleted_again);
+  EXPECT_EQ(idx_->safety_net_fire_count(), 0u);
+
+  std::unordered_set<uint64_t> forbidden(deleted_labels.begin(), deleted_labels.end());
+  forbidden.insert(deleted_labels_again.begin(), deleted_labels_again.end());
+  const auto deleted_queries = base_queries_for_ids(deleted, 32);
+  expect_searches_omit_labels(deleted_queries, /*k=*/10, /*l=*/100, forbidden);
+}
+
+TEST_F(UpdateE2ETest, InDegreeCounterInvariant) {
+#if defined(ALAYA_UPDATE_E2E_TSAN)
+  constexpr uint32_t kN = 400;
+  constexpr uint32_t kInsertFirst = 30;
+  constexpr uint32_t kDelete = 25;
+  constexpr uint32_t kInsertSecond = 20;
+  constexpr uint32_t kGardenBudget = 8;
+#else
+  constexpr uint32_t kN = 800;
+  constexpr uint32_t kInsertFirst = 60;
+  constexpr uint32_t kDelete = 50;
+  constexpr uint32_t kInsertSecond = 40;
+  constexpr uint32_t kGardenBudget = 16;
+#endif
+  constexpr uint32_t kDim = 32;
+
+  DiskANNLoadParams lp;
+  lp.track_in_degree = true;
+  lp.update_repair = true;
+  lp.safety_net_ops = 1000000;
+  build_and_load(kN, kDim, 32, lp);
+  assert_indegree_matches_recount();
+
+  const auto extra = make_vectors(kInsertFirst + kInsertSecond, kDim, /*seed=*/9091);
+  for (uint32_t i = 0; i < kInsertFirst; ++i) {
+    do_insert(vec_at(extra, i));
+  }
+  assert_indegree_matches_recount();
+
+  std::mt19937 rng(707);
+  const std::vector<uint32_t> deleted = take_random_deletable(kDelete, rng);
+  mirror_batch_remove(deleted);
+  assert_indegree_matches_recount();
+
+  for (uint32_t i = 0; i < kInsertSecond; ++i) {
+    do_insert(vec_at(extra, kInsertFirst + i));
+  }
+  assert_indegree_matches_recount();
+
+  const uint64_t live_before = idx_->live_count();
+  const uint64_t tomb_before = idx_->tombstone_count();
+  const uint64_t free_before = idx_->free_slot_count();
+  const auto gs = idx_->garden_refresh(kGardenBudget);
+  EXPECT_LE(gs.refreshed, kGardenBudget);
+  EXPECT_GE(gs.selected, gs.refreshed);
+  EXPECT_EQ(idx_->live_count(), live_before);
+  EXPECT_EQ(idx_->tombstone_count(), tomb_before);
+  EXPECT_EQ(idx_->free_slot_count(), free_before);
+  assert_indegree_matches_recount();
+}
+
+TEST_F(UpdateE2ETest, GardenLiftsStarvedTail) {
+#if defined(ALAYA_UPDATE_E2E_TSAN)
+  constexpr uint32_t kN = 600;
+  constexpr uint32_t kRounds = 2;
+  constexpr uint32_t kChurn = 50;
+#else
+  constexpr uint32_t kN = 1500;
+  constexpr uint32_t kRounds = 3;
+  constexpr uint32_t kChurn = 120;
+#endif
+  constexpr uint32_t kDim = 32;
+  constexpr uint32_t kNq = 40;
+  constexpr uint32_t kK = 10;
+  constexpr uint32_t kL = 100;
+
+  DiskANNLoadParams lp;
+  lp.track_in_degree = true;
+  lp.update_repair = false;
+  lp.safety_net_ops = 1000000;
+  build_and_load(kN, kDim, 32, lp);
+
+  const auto queries = make_vectors(kNq, kDim, /*seed=*/7);
+  const auto extra = make_vectors(kRounds * kChurn, kDim, /*seed=*/555);
+  uint32_t extra_idx = 0;
+  std::mt19937 rng(2026);
+  std::vector<uint32_t> removed_ids;
+  removed_ids.reserve(kRounds * kChurn);
+  std::unordered_set<uint64_t> removed_labels;
+  removed_labels.reserve(kRounds * kChurn);
+
+  for (uint32_t round = 0; round < kRounds; ++round) {
+    const std::vector<uint32_t> deleted = take_random_deletable(kChurn, rng);
+    const auto labels = mirror_batch_remove(deleted);
+    removed_ids.insert(removed_ids.end(), deleted.begin(), deleted.end());
+    removed_labels.insert(labels.begin(), labels.end());
+    EXPECT_EQ(idx_->live_count(), static_cast<uint64_t>(kN - kChurn));
+    EXPECT_EQ(idx_->free_slot_count(), static_cast<uint64_t>(kChurn));
+
+    for (uint32_t i = 0; i < kChurn; ++i) {
+      const uint32_t id = do_insert(vec_at(extra, extra_idx++));
+      deletable_.push_back(id);
+    }
+    EXPECT_EQ(idx_->live_count(), static_cast<uint64_t>(kN));
+    EXPECT_EQ(idx_->free_slot_count(), 0u);
+  }
+
+  const auto before = idx_->in_degree_percentiles();
+  const auto gs = idx_->garden_refresh(kN / 10);
+  const auto after = idx_->in_degree_percentiles();
+
+  EXPECT_GT(gs.refreshed, 0u);
+  EXPECT_GE(after.p10, before.p10);
+  EXPECT_GE(gs.indeg_p10_after, gs.indeg_p10_before);
+  EXPECT_GE(recall_at_k(queries, kNq, kK, kL), 0.85);
+
+  const auto deleted_queries = base_queries_for_ids(removed_ids, 32);
+  expect_searches_omit_labels(deleted_queries, kK, kL, removed_labels);
+  expect_searches_omit_labels(queries, kK, kL, removed_labels);
+}
+
+TEST_F(UpdateE2ETest, GardenContractWithoutTracking) {
+#if defined(ALAYA_UPDATE_E2E_TSAN)
+  constexpr uint32_t kN = 200;
+#else
+  constexpr uint32_t kN = 300;
+#endif
+  constexpr uint32_t kDim = 32;
+
+  DiskANNLoadParams lp;
+  build_and_load(kN, kDim, 32, lp);
+  EXPECT_THROW(idx_->garden_refresh(4), std::runtime_error);
+  EXPECT_EQ(idx_->in_degree_of(0), 0u);
+  const auto ip = idx_->in_degree_percentiles();
+  EXPECT_EQ(ip.p10, 0u);
+  EXPECT_EQ(ip.p50, 0u);
+  EXPECT_EQ(ip.p90, 0u);
+
+  idx_.reset();
+  std::error_code ec;
+  std::filesystem::remove_all(dir_, ec);
+
+  DiskANNLoadParams tracked_lp;
+  tracked_lp.track_in_degree = true;
+  build_and_load(kN, kDim, 32, tracked_lp);
+  EXPECT_NO_THROW({
+    const auto gs = idx_->garden_refresh(0);
+    EXPECT_EQ(gs.refreshed, 0u);
+    EXPECT_EQ(gs.selected, 0u);
+  });
 }
 
 // 7.5 -----------------------------------------------------------------------

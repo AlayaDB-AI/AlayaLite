@@ -44,6 +44,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <spdlog/spdlog.h>
+
 #include "coro/sync_wait.hpp"
 #include "coro/task.hpp"
 #include "coro/thread_pool.hpp"
@@ -115,18 +117,33 @@ struct DiskANNLoadParams {
   ///< largest DiskANNSearchParams::search_list_size used after load.
 
   // --- In-place update mode ---
-  bool updatable = false;             ///< open O_RDWR + enable insert/remove/update_node/flush
-  uint32_t update_search_l = 0;       ///< L for the insert NN-search; 0 => max_degree + 32
-                                      ///< (Yi's build_k = degree + 32 rule)
-  bool update_rerank = true;          ///< re-rank insert search candidates by exact L2 (via the
-                                      ///< coords cache) before taking the top max_degree. Matches
-                                      ///< Yi's trace benchmark (_rerank_flag defaults true); Yi's
-                                      ///< sequential UpdateRunner sets it false.
-  bool update_insert_prune = false;   ///< alpha-RNG prune the insert pool instead of linking the
-                                      ///< top max_degree candidates. Yi never prunes at insert
-                                      ///< (its top_k == degree makes the prune branch dead code);
-                                      ///< reconnect re-prunes on overflow either way.
-  float update_alpha = 1.2f;          ///< alpha-RNG pruning for insert/reconnect (Vamana default)
+  bool updatable = false;            ///< open O_RDWR + enable insert/remove/update_node/flush
+  uint32_t update_search_l = 0;      ///< L for the insert NN-search; 0 => max_degree + 32
+                                     ///< (Yi's build_k = degree + 32 rule)
+  bool update_rerank = true;         ///< re-rank insert search candidates by exact L2 (via the
+                                     ///< coords cache) before taking the top max_degree. Matches
+                                     ///< Yi's trace benchmark (_rerank_flag defaults true); Yi's
+                                     ///< sequential UpdateRunner sets it false.
+  bool update_insert_prune = false;  ///< alpha-RNG prune the insert pool instead of linking the
+                                     ///< top max_degree candidates. Yi never prunes at insert
+                                     ///< (its top_k == degree makes the prune branch dead code);
+                                     ///< reconnect re-prunes on overflow either way.
+  float update_alpha = 1.2f;         ///< alpha-RNG pruning for insert/reconnect (Vamana default)
+  bool update_repair = false;        ///< delete-time in-neighbor repair: tombstone the batch,
+                                     ///< discover each deleted node's approximate in-neighbors,
+                                     ///< rebuild their lists (drop dead edges + two-hop splice),
+                                     ///< and only then release the slots for reuse. Supersedes
+                                     ///< the lazy path's safety-net reconnect (never fires: its
+                                     ///< affected set is the discovery set's subset)
+  uint32_t repair_search_l = 0;      ///< 0 = discovery uses only the deleted node's own
+                                     ///< out-neighbors (symmetry approximation, no extra search);
+                                     ///< >0 = also run an insert-style candidate search per delete
+                                     ///< and merge the top repair_search_l results
+  bool track_in_degree = false;
+  ///< allocate + maintain live in-degree counters (updatable mode only); adds
+  ///< a one-time full neighbor-list scan at load
+  uint32_t garden_search_l = 0;
+  ///< L for garden_refresh's candidate search; 0 => update_search_l
   double safety_net_ratio = 0.05;     ///< tombstone ratio that arms the safety-net reconnect
   uint64_t safety_net_ops = 16;       ///< deletes without an insert before the safety net may fire
   size_t page_cache_capacity = 4096;  ///< update-path page LRU cache capacity; 0 disables it
@@ -365,6 +382,7 @@ class DiskANNIndex {
         std::min<uint64_t>(1024, std::max<uint64_t>(2ull * beam_width_, nopq_depth));
     const uint32_t scratch_list_size = std::max({DiskANNSearchParams{}.search_list_size,
                                                  params.update_search_l,
+                                                 params.garden_search_l,
                                                  params.scratch_search_list_size});
     ThreadDataScratchConfig scratch_config;
     scratch_config.n_page_slots = scratch_slots;
@@ -795,6 +813,79 @@ class DiskANNIndex {
     return slot_alloc_.is_deleted(id);
   }
 
+  struct GardenStats {
+    uint64_t refreshed = 0;
+    uint64_t selected = 0;
+    uint32_t indeg_p10_before = 0;
+    uint32_t indeg_p50_before = 0;
+    uint32_t indeg_p10_after = 0;
+    uint32_t indeg_p50_after = 0;
+    uint64_t elapsed_us = 0;
+  };
+
+  struct InDegreePercentiles {
+    uint32_t p10 = 0;
+    uint32_t p50 = 0;
+    uint32_t p90 = 0;
+  };
+
+  GardenStats garden_refresh(uint32_t budget, coro::thread_pool *pool = nullptr) {
+    const auto start = std::chrono::steady_clock::now();
+    if (!updatable_) {
+      throw std::runtime_error("DiskANNIndex::garden_refresh: index not loaded in updatable mode");
+    }
+    if (!track_in_degree_) {
+      throw std::runtime_error("DiskANNIndex::garden_refresh: track_in_degree is disabled");
+    }
+
+    std::lock_guard<std::mutex> update_guard(update_serial_mutex_);
+    page_io_->clear_cache();
+
+    GardenStats stats;
+    if (pool == nullptr) {
+      const uint32_t workers = std::max<uint32_t>(1, update_insert_threads_);
+      coro::thread_pool local_pool{{.thread_count = workers,
+                                    .on_thread_start_functor = nullptr,
+                                    .on_thread_stop_functor = nullptr}};
+      try {
+        stats = garden_refresh_locked(budget, local_pool);
+        local_pool.shutdown();
+      } catch (...) {
+        local_pool.shutdown();
+        throw;
+      }
+    } else {
+      stats = garden_refresh_locked(budget, *pool);
+    }
+
+    stats.elapsed_us = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                                 std::chrono::steady_clock::now() - start)
+                                                 .count());
+    return stats;
+  }
+
+  InDegreePercentiles in_degree_percentiles() const {
+    if (!track_in_degree_) {
+      return {};
+    }
+    return percentiles_from_pairs(collect_live_in_degree_pairs(true));
+  }
+
+  uint32_t in_degree_of(uint32_t internal_id) const {
+    if (!track_in_degree_ || !in_degree_ || internal_id >= in_degree_size_) {
+      return 0;
+    }
+    return in_degree_[internal_id].load(std::memory_order_relaxed);
+  }
+
+  std::vector<uint32_t> debug_recount_in_degree() {
+    if (!updatable_) {
+      return {};
+    }
+    std::lock_guard<std::mutex> update_guard(update_serial_mutex_);
+    return recount_in_degree(nullptr);
+  }
+
   /// Sentinel label for padded (missing) result slots.
   static constexpr uint64_t kNoLabel = std::numeric_limits<uint64_t>::max();
 
@@ -874,8 +965,8 @@ class DiskANNIndex {
     return batch_insert_locked_with_pool(vectors, labels, count, batch_size, pool);
   }
 
-  /// Lazy-delete: cache old neighbors for two-hop, tombstone + free the slot.
-  /// Reconnect is deferred to the next insert or the safety net.
+  /// Delete one slot. The default lazy path frees immediately; repair mode
+  /// keeps the slot tombstoned until discovered in-neighbors are rebuilt.
   void remove(uint32_t internal_id) {
     if (!updatable_) {
       throw std::runtime_error("DiskANNIndex::remove: index not loaded in updatable mode");
@@ -885,15 +976,11 @@ class DiskANNIndex {
       std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
       validate_removable_slot(internal_id);
     }
-    page_io_->clear_cache();
-    remove_unlocked(internal_id);
-    if (maybe_safety_net_reconnect()) {
-      page_io_->flush_dirty_pages();
-    }
+    remove_batch_locked(&internal_id, 1, nullptr, true);
   }
 
-  /// Lazy-delete a batch using a caller-owned coroutine pool. This mirrors
-  /// batch_remove() but avoids creating an update-private worker pool.
+  /// Delete a batch using a caller-owned coroutine pool. Repair mode uses the
+  /// pool for discovery searches and reconnect waves.
   void batch_remove_with_pool(const uint32_t *internal_ids,
                               uint32_t count,
                               coro::thread_pool &pool) {
@@ -906,23 +993,11 @@ class DiskANNIndex {
       std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
       validate_remove_batch(internal_ids, count);
     }
-    page_io_->clear_cache();
-    std::vector<std::vector<uint32_t>> old_neighbors =
-        read_delete_neighbors(internal_ids, count, &pool);
-    {
-      std::unique_lock<std::shared_mutex> state_lock(update_mutex_);
-      for (uint32_t i = 0; i < count; ++i) {
-        remove_unlocked_with_neighbors(internal_ids[i], std::move(old_neighbors[i]));
-      }
-    }
-    if (maybe_safety_net_reconnect()) {
-      page_io_->flush_dirty_pages();
-    }
+    remove_batch_locked(internal_ids, count, &pool, false);
   }
 
-  /// Lazy-delete a batch of internal ids using the same semantics as remove().
-  /// The batch form amortizes update locking and cache setup over Yi-style
-  /// delete rounds.
+  /// Delete a batch of internal ids using the same semantics as remove(). The
+  /// batch form amortizes update locking and cache setup over Yi-style rounds.
   void batch_remove(const uint32_t *internal_ids, uint32_t count) {
     if (!updatable_) {
       throw std::runtime_error("DiskANNIndex::batch_remove: index not loaded in updatable mode");
@@ -938,18 +1013,7 @@ class DiskANNIndex {
       std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
       validate_remove_batch(internal_ids, count);
     }
-    page_io_->clear_cache();
-    std::vector<std::vector<uint32_t>> old_neighbors =
-        read_delete_neighbors(internal_ids, count, nullptr);
-    {
-      std::unique_lock<std::shared_mutex> state_lock(update_mutex_);
-      for (uint32_t i = 0; i < count; ++i) {
-        remove_unlocked_with_neighbors(internal_ids[i], std::move(old_neighbors[i]));
-      }
-    }
-    if (maybe_safety_net_reconnect()) {
-      page_io_->flush_dirty_pages();
-    }
+    remove_batch_locked(internal_ids, count, nullptr, false);
   }
 
   /**
@@ -1029,6 +1093,25 @@ class DiskANNIndex {
   /// neighbor; without the cap the pool inflates to the deleted node's whole
   /// ex-neighborhood and reconnect cost explodes.
   static constexpr uint32_t kTwoHopBypassPerDeleted = 5;
+  // Fresh slots allocated beyond load-time capacity+headroom are silently
+  // untracked by the guarded in-degree helpers; brand-new slots are not garden
+  // targets.
+  static constexpr uint64_t kInDegreeHeadroomSlots = 1ULL << 20;
+  /// Load-time recount ids per wave. Each wave backs its unique pages with ONE
+  /// contiguous aligned buffer and keeps them all in flight (the reactor
+  /// submits in ring-depth chunks regardless), so the bound is wave-buffer
+  /// memory, not SQ depth: 8192 ids cap the worst case (one node per page,
+  /// high-dim) at 32 MiB while staying far above the ring depth, which is what
+  /// saturates the one-time scan.
+  static constexpr uint32_t kInDegreeRecountChunk = 8192;
+  /// when_all fan-out per repair/garden wave. Chunking at the worker count
+  /// re-created the intra-batch barrier convoy batch_insert removed (each
+  /// chunk waits on its slowest member and the AsyncGate never fills); one
+  /// unbounded when_all would queue every prefetch wave ahead of the first
+  /// resume and churn the whole page LRU. 1024 amortizes the barrier ~32x
+  /// past the worker count while in-flight fast-path waves (~1 page each)
+  /// stay a fraction of the default 4096-page cache.
+  static constexpr uint32_t kUpdateWaveChunk = 1024;
   /// Yi heap-caps the reconnect pool at build_k = degree + 32 before pruning.
   static constexpr uint32_t kReconnectPoolSlack = 32;
 
@@ -1081,6 +1164,10 @@ class DiskANNIndex {
     update_search_l_ = params.update_search_l != 0 ? params.update_search_l : max_degree_ + 32;
     update_rerank_ = params.update_rerank;
     update_insert_prune_ = params.update_insert_prune;
+    update_repair_ = params.update_repair;
+    repair_search_l_ = params.repair_search_l;
+    track_in_degree_ = params.track_in_degree;
+    garden_search_l_ = params.garden_search_l;
     safety_net_ratio_ = params.safety_net_ratio;
     safety_net_ops_ = params.safety_net_ops;
     if (params.update_reconnect_threads == 0) {
@@ -1149,6 +1236,26 @@ class DiskANNIndex {
       slot_alloc_.reset(static_cast<uint32_t>(max_slot_id_));
     }
     updatable_ = true;
+    if (track_in_degree_) {
+      in_degree_size_ = static_cast<uint64_t>(slot_alloc_.next_fresh_id()) + kInDegreeHeadroomSlots;
+      in_degree_overflow_warned_ = false;
+      in_degree_ = std::make_unique<std::atomic<uint32_t>[]>(static_cast<size_t>(in_degree_size_));
+      for (uint64_t i = 0; i < in_degree_size_; ++i) {
+        in_degree_[i].store(0, std::memory_order_relaxed);
+      }
+      const auto scan_start = std::chrono::steady_clock::now();
+      const std::vector<uint32_t> counts = recount_in_degree(nullptr);
+      for (uint64_t i = 0; i < counts.size() && i < in_degree_size_; ++i) {
+        in_degree_[i].store(counts[static_cast<size_t>(i)], std::memory_order_relaxed);
+      }
+      const uint64_t scan_us =
+          static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                    std::chrono::steady_clock::now() - scan_start)
+                                    .count());
+      spdlog::info("DiskANNIndex::load: in-degree recount scanned {} slots in {} us",
+                   counts.size(),
+                   scan_us);
+    }
   }
 
   /// The unified-pool handle searches should use, or nullptr. Non-null only
@@ -1263,23 +1370,236 @@ class DiskANNIndex {
     co_return run_update_search(query, l);
   }
 
+  void indeg_inc(uint32_t internal_id) {
+    if (!track_in_degree_ || !in_degree_ || internal_id >= in_degree_size_) {
+      return;
+    }
+    in_degree_[internal_id].fetch_add(1, std::memory_order_relaxed);
+  }
+
+  void indeg_dec(uint32_t internal_id) {
+    if (!track_in_degree_ || !in_degree_ || internal_id >= in_degree_size_) {
+      return;
+    }
+    in_degree_[internal_id].fetch_sub(1, std::memory_order_relaxed);
+  }
+
+  std::vector<uint32_t> recount_in_degree(coro::thread_pool *pool) {
+    if (!updatable_ || page_io_ == nullptr) {
+      return {};
+    }
+    if (pool == nullptr) {
+      const uint32_t workers = std::max<uint32_t>(1, update_insert_threads_);
+      coro::thread_pool local_pool{{.thread_count = workers,
+                                    .on_thread_start_functor = nullptr,
+                                    .on_thread_stop_functor = nullptr}};
+      try {
+        std::vector<uint32_t> out = recount_in_degree(&local_pool);
+        local_pool.shutdown();
+        return out;
+      } catch (...) {
+        local_pool.shutdown();
+        throw;
+      }
+    }
+
+    const uint32_t next_fresh = slot_alloc_.next_fresh_id();
+    std::vector<uint32_t> counts(next_fresh, 0);
+    std::vector<uint32_t> ids;
+    ids.reserve(kInDegreeRecountChunk);
+    for (uint32_t begin = 0; begin < next_fresh; begin += kInDegreeRecountChunk) {
+      const uint32_t end = std::min<uint32_t>(next_fresh, begin + kInDegreeRecountChunk);
+      ids.clear();
+      for (uint32_t id = begin; id < end; ++id) {
+        if (!slot_alloc_.is_deleted(id)) {
+          ids.push_back(id);
+        }
+      }
+      if (ids.empty()) {
+        continue;
+      }
+      const std::vector<std::vector<uint32_t>> nbrs =
+          read_delete_neighbors(ids.data(), static_cast<uint32_t>(ids.size()), pool);
+      for (const auto &list : nbrs) {
+        for (const uint32_t target : list) {
+          if (target < counts.size()) {
+            ++counts[target];
+          }
+        }
+      }
+    }
+    return counts;
+  }
+
+  static InDegreePercentiles percentiles_from_values(std::vector<uint32_t> values) {
+    if (values.empty()) {
+      return {};
+    }
+    std::sort(values.begin(), values.end());
+    const auto rank = [&values](uint32_t percentile) {
+      return values[((values.size() - 1) * percentile) / 100];
+    };
+    InDegreePercentiles out;
+    out.p10 = rank(10);
+    out.p50 = rank(50);
+    out.p90 = rank(90);
+    return out;
+  }
+
+  static InDegreePercentiles percentiles_from_pairs(
+      const std::vector<std::pair<uint32_t, uint32_t>> &pairs) {
+    std::vector<uint32_t> values;
+    values.reserve(pairs.size());
+    for (const auto &entry : pairs) {
+      values.push_back(entry.first);
+    }
+    return percentiles_from_values(std::move(values));
+  }
+
+  std::vector<std::pair<uint32_t, uint32_t>> collect_live_in_degree_pairs(
+      bool include_medoid) const {
+    std::vector<std::pair<uint32_t, uint32_t>> out;
+    if (!track_in_degree_ || !in_degree_) {
+      return out;
+    }
+    std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
+    const uint32_t next_fresh = slot_alloc_.next_fresh_id();
+    out.reserve(static_cast<size_t>(std::min<uint64_t>(live_count_, next_fresh)));
+    for (uint32_t id = 0; id < next_fresh && id < in_degree_size_; ++id) {
+      if (!include_medoid && id == medoid_) {
+        continue;
+      }
+      if (!slot_alloc_.is_deleted(id)) {
+        out.emplace_back(in_degree_[id].load(std::memory_order_relaxed), id);
+      }
+    }
+    return out;
+  }
+
+  GardenStats garden_refresh_locked(uint32_t budget, coro::thread_pool &pool) {
+    GardenStats stats;
+    std::vector<std::pair<uint32_t, uint32_t>> candidates = collect_live_in_degree_pairs(false);
+    const InDegreePercentiles before = percentiles_from_pairs(candidates);
+    stats.indeg_p10_before = before.p10;
+    stats.indeg_p50_before = before.p50;
+
+    const size_t selected = std::min<size_t>(budget, candidates.size());
+    stats.selected = selected;
+    if (selected == 0) {
+      const InDegreePercentiles after = percentiles_from_pairs(candidates);
+      stats.indeg_p10_after = after.p10;
+      stats.indeg_p50_after = after.p50;
+      return stats;
+    }
+    if (selected < candidates.size()) {
+      std::nth_element(candidates.begin(), candidates.begin() + selected, candidates.end());
+      candidates.resize(selected);
+    }
+
+    std::vector<uint32_t> picked;
+    picked.reserve(candidates.size());
+    for (const auto &entry : candidates) {
+      picked.push_back(entry.second);
+    }
+
+    std::atomic<uint64_t> refreshed{0};
+    auto refresh_one = [this, &pool, &refreshed](uint32_t node_id) -> coro::task<> {
+      co_await pool.schedule();
+      auto mark = std::chrono::steady_clock::now();
+      DiskPageIO::NodeData nd;
+      if (page_io_->reactor_enabled()) {
+        nd = co_await page_io_->read_node_async(node_id, pool);
+      } else {
+        nd = page_io_->read_node(node_id);
+      }
+      const uint32_t l = garden_search_l_ != 0 ? garden_search_l_ : update_search_l_;
+      std::vector<std::pair<uint32_t, float>> cand =
+          co_await run_update_search_async(nd.coords.data(), l, pool);
+      cand.erase(std::remove_if(cand.begin(),
+                                cand.end(),
+                                [node_id](const auto &entry) {
+                                  return entry.first == node_id;
+                                }),
+                 cand.end());
+      co_await wave_selection_coords(cand, pool);
+      std::vector<uint32_t> pruned =
+          select_insert_neighbors_from(nd.coords.data(), std::move(cand));
+      if (pruned.empty()) {
+        co_return;
+      }
+
+      if (page_io_->reactor_enabled()) {
+        // One wave warms every page this refresh will RMW — the node's own
+        // plus each pruned neighbor's (the reverse-edge loop rewrites them) —
+        // mirroring insert_one's single warm wave.
+        std::vector<uint32_t> warm;
+        warm.reserve(pruned.size() + 1);
+        warm.push_back(node_id);
+        warm.insert(warm.end(), pruned.begin(), pruned.end());
+        co_await page_io_->prefetch_pages(warm.data(), warm.size(), pool);
+      }
+
+      {
+        std::lock_guard<std::mutex> node_lock(update_node_mutex(node_id));
+        update_node_impl(node_id, pruned);
+      }
+
+      const std::vector<uint32_t> extra{node_id};
+      for (const uint32_t neighbor : pruned) {
+        if (!has_pq_) {
+          co_await prefetch_reconnect_inputs(neighbor, extra, pool);
+        }
+        std::lock_guard<std::mutex> node_lock(update_node_mutex(neighbor));
+        update_node_impl(neighbor, extra);
+      }
+
+      st_garden_us_.fetch_add(stage_us_since(mark), std::memory_order_relaxed);
+      st_gardens_.fetch_add(1, std::memory_order_relaxed);
+      refreshed.fetch_add(1, std::memory_order_relaxed);
+    };
+
+    for (uint32_t off = 0; off < picked.size(); off += kUpdateWaveChunk) {
+      const uint32_t end =
+          std::min<uint32_t>(static_cast<uint32_t>(picked.size()), off + kUpdateWaveChunk);
+      auto run = [&]() -> coro::task<> {
+        std::vector<coro::task<>> tasks;
+        tasks.reserve(end - off);
+        for (uint32_t i = off; i < end; ++i) {
+          tasks.emplace_back(refresh_one(picked[i]));
+        }
+        co_await coro::when_all(std::move(tasks));
+      };
+      coro::sync_wait(run());
+    }
+
+    stats.refreshed = refreshed.load(std::memory_order_relaxed);
+    const InDegreePercentiles after = percentiles_from_pairs(collect_live_in_degree_pairs(false));
+    stats.indeg_p10_after = after.p10;
+    stats.indeg_p50_after = after.p50;
+    return stats;
+  }
+
  public:
   /// Wall-microseconds by update stage, aggregated across coroutines since the
   /// last take (wall, not CPU: a stage that yields through the pool queue books
   /// its scheduling latency here — that is the point of measuring it).
   struct UpdateStageStats {
-    uint64_t gate_us = 0;         ///< waiting for a search ThreadData
-    uint64_t greedy_us = 0;       ///< async greedy search proper
-    uint64_t search_us = 0;       ///< whole selection stage (incl. gate+greedy)
-    uint64_t alloc_us = 0;        ///< slot alloc + PQ encode
-    uint64_t prefetch_us = 0;     ///< slot page warm wave
-    uint64_t write_us = 0;        ///< write_inserted_node + publish + staging
-    uint64_t reconnect_us = 0;    ///< when_all over the insert's reconnects
+    uint64_t gate_us = 0;       ///< waiting for a search ThreadData
+    uint64_t greedy_us = 0;     ///< async greedy search proper
+    uint64_t search_us = 0;     ///< whole selection stage (incl. gate+greedy)
+    uint64_t alloc_us = 0;      ///< slot alloc + PQ encode
+    uint64_t prefetch_us = 0;   ///< slot page warm wave
+    uint64_t write_us = 0;      ///< write_inserted_node + publish + staging
+    uint64_t reconnect_us = 0;  ///< when_all over the insert's reconnects
+    uint64_t repair_us = 0;     ///< delete-time discovery + repair wave
+    uint64_t garden_us = 0;
     uint64_t rc_prefetch_us = 0;  ///< reconnect input warm waves
     uint64_t rc_lock_us = 0;      ///< node mutex acquisition wait
     uint64_t rc_impl_us = 0;      ///< sync update_node_impl body
     uint64_t inserts = 0;
     uint64_t reconnects = 0;
+    uint64_t repairs = 0;
+    uint64_t gardens = 0;
   };
 
   /// Snapshot-and-reset the stage stats (benchmark instrumentation).
@@ -1292,11 +1612,15 @@ class DiskANNIndex {
     out.prefetch_us = st_prefetch_us_.exchange(0, std::memory_order_acq_rel);
     out.write_us = st_write_us_.exchange(0, std::memory_order_acq_rel);
     out.reconnect_us = st_reconnect_us_.exchange(0, std::memory_order_acq_rel);
+    out.repair_us = st_repair_us_.exchange(0, std::memory_order_acq_rel);
+    out.garden_us = st_garden_us_.exchange(0, std::memory_order_acq_rel);
     out.rc_prefetch_us = st_rc_prefetch_us_.exchange(0, std::memory_order_acq_rel);
     out.rc_lock_us = st_rc_lock_us_.exchange(0, std::memory_order_acq_rel);
     out.rc_impl_us = st_rc_impl_us_.exchange(0, std::memory_order_acq_rel);
     out.inserts = st_inserts_.exchange(0, std::memory_order_acq_rel);
     out.reconnects = st_reconnects_.exchange(0, std::memory_order_acq_rel);
+    out.repairs = st_repairs_.exchange(0, std::memory_order_acq_rel);
+    out.gardens = st_gardens_.exchange(0, std::memory_order_acq_rel);
     return out;
   }
 
@@ -1431,27 +1755,36 @@ class DiskANNIndex {
     return update_insert_prune_;
   }
 
-  /// select_insert_neighbors with the disk work made awaitable: the candidate
-  /// coords the selection will score are wave-prefetched through the reactor
-  /// (one suspension, all misses in flight together) before the sync selection
-  /// logic runs against warm caches.
+  /// Wave-prefetch the candidate coords an insert-style selection will score
+  /// (one suspension, all misses in flight together), so the sync selection
+  /// logic runs against warm caches. No-op when the selection variant does no
+  /// exact-coords work (see insert_selection_needs_coords).
+  coro::task<> wave_selection_coords(const std::vector<std::pair<uint32_t, float>> &cand,
+                                     coro::thread_pool &pool) {
+    if (!page_io_->reactor_enabled() || !insert_selection_needs_coords() || cand.empty()) {
+      co_return;
+    }
+    std::vector<uint32_t> want;
+    want.reserve(cand.size());
+    for (const auto &c : cand) {
+      // exact_query_distance (PQ rerank) is served by the NodeCache first;
+      // cached_l2 (No-PQ prune) always goes through the coords cache.
+      if (!has_pq_ || !cache_.lookup_record(c.first)) {
+        want.push_back(c.first);
+      }
+    }
+    if (!want.empty()) {
+      co_await page_io_->prefetch_coords(want.data(), want.size(), pool);
+    }
+    co_return;
+  }
+
+  /// select_insert_neighbors with the disk work made awaitable via the
+  /// selection coords wave above.
   coro::task<std::vector<uint32_t>> select_insert_neighbors_async(const float *query,
                                                                   coro::thread_pool &pool) {
     auto cand = co_await run_update_search_async(query, update_search_l_, pool);
-    if (page_io_->reactor_enabled() && insert_selection_needs_coords() && !cand.empty()) {
-      std::vector<uint32_t> want;
-      want.reserve(cand.size());
-      for (const auto &c : cand) {
-        // exact_query_distance (PQ rerank) is served by the NodeCache first;
-        // cached_l2 (No-PQ prune) always goes through the coords cache.
-        if (!has_pq_ || !cache_.lookup_record(c.first)) {
-          want.push_back(c.first);
-        }
-      }
-      if (!want.empty()) {
-        co_await page_io_->prefetch_coords(want.data(), want.size(), pool);
-      }
-    }
+    co_await wave_selection_coords(cand, pool);
     co_return select_insert_neighbors_from(query, std::move(cand));
   }
 
@@ -1462,6 +1795,14 @@ class DiskANNIndex {
   uint32_t allocate_update_slot_unlocked(uint64_t label) {
     const uint32_t slot = slot_alloc_.alloc();
     update_ctx_.forget_slot(slot);
+    if (track_in_degree_ && slot >= in_degree_size_ && !in_degree_overflow_warned_) {
+      in_degree_overflow_warned_ = true;
+      spdlog::warn(
+          "DiskANNIndex: slot {} exceeds in-degree tracking capacity {}; slots past it stay "
+          "untracked (counters no-op, garden_refresh ignores them) until the next load",
+          slot,
+          in_degree_size_);
+    }
     max_slot_id_ = std::max<uint64_t>(max_slot_id_, slot_alloc_.next_fresh_id());
     set_label(slot, label);
     ++live_count_;
@@ -1557,7 +1898,239 @@ class DiskANNIndex {
     return page_io_->read_neighbors_batch_parallel(internal_ids, count, update_insert_threads_);
   }
 
+  /// Full delete records for repair. Reactor mode warms each chunk with one
+  /// page wave, then uses awaitable node reads for any cache-disabled misses.
+  std::vector<DiskPageIO::NodeData> read_delete_nodes(const uint32_t *internal_ids,
+                                                      uint32_t count,
+                                                      coro::thread_pool &pool) {
+    std::vector<DiskPageIO::NodeData> out(count);
+    // The warm wave's pages must survive in the LRU until the chunk's reads
+    // land, so the chunk is bounded by half the cache (worker-count chunks
+    // made a 10k-delete batch pay ~300 tiny waves). Cache off => prefetch
+    // no-ops and the chunk only bounds the read fan-out.
+    const uint32_t chunk_size =
+        std::max<uint32_t>(1,
+                           page_io_->page_cache_enabled()
+                               ? static_cast<uint32_t>(
+                                     std::min<size_t>(page_io_->page_cache_capacity() / 2,
+                                                      kUpdateWaveChunk))
+                               : kUpdateWaveChunk);
+    for (uint32_t off = 0; off < count; off += chunk_size) {
+      const uint32_t n = std::min<uint32_t>(count - off, chunk_size);
+      if (page_io_->reactor_enabled()) {
+        auto warm = [&]() -> coro::task<> {
+          co_await page_io_->prefetch_pages(internal_ids + off, n, pool);
+        };
+        coro::sync_wait(warm());
+      }
+      std::vector<DiskPageIO::NodeData> chunk =
+          page_io_->read_nodes_async(internal_ids + off, n, pool);
+      std::move(chunk.begin(), chunk.end(), out.begin() + off);
+    }
+    return out;
+  }
+
+  /// Mark the whole delete batch dead before any repair search snapshots
+  /// tombstones; the slots are not allocatable until release_removed_batch().
+  void mark_removed_batch(const uint32_t *internal_ids,
+                          const std::vector<DiskPageIO::NodeData> &old_nodes,
+                          uint32_t count) {
+    std::unique_lock<std::shared_mutex> state_lock(update_mutex_);
+    for (uint32_t i = 0; i < count; ++i) {
+      update_ctx_.removed_node_nbrs_[internal_ids[i]] = old_nodes[i].nbrs;
+      if (track_in_degree_) {
+        for (const uint32_t target : old_nodes[i].nbrs) {
+          indeg_dec(target);
+        }
+      }
+      slot_alloc_.mark_removed(internal_ids[i]);
+      --live_count_;
+      ++ops_since_last_insert_;
+    }
+  }
+
+  /// End the repair window: after in-neighbors have been rebuilt, inserts may
+  /// reuse the tombstoned slots through the allocator free list.
+  void release_removed_batch(const uint32_t *internal_ids, uint32_t count) {
+    std::unique_lock<std::shared_mutex> state_lock(update_mutex_);
+    for (uint32_t i = 0; i < count; ++i) {
+      slot_alloc_.release(internal_ids[i]);
+    }
+  }
+
+  /// Approximate the deleted batch's in-neighbors from old out-neighbors and,
+  /// optionally, a tombstone-aware insert-style search around each deleted
+  /// vector. The returned ids are live and unique across the batch.
+  std::vector<uint32_t> discover_delete_repair_targets(
+      const std::vector<DiskPageIO::NodeData> &old_nodes,
+      uint32_t count,
+      coro::thread_pool &pool) {
+    std::unordered_set<uint32_t> unique;
+    unique.reserve(static_cast<size_t>(count) *
+                   static_cast<size_t>(std::max<uint32_t>(1, max_degree_)));
+
+    if (repair_search_l_ == 0) {
+      // Symmetry-only discovery reads nothing: the batch's old out-neighbors
+      // are already in memory, so skip the coroutine machinery outright.
+      for (uint32_t i = 0; i < count; ++i) {
+        for (const uint32_t nbr : old_nodes[i].nbrs) {
+          if (!slot_alloc_.is_deleted(nbr)) {
+            unique.insert(nbr);
+          }
+        }
+      }
+      return {unique.begin(), unique.end()};
+    }
+
+    std::vector<std::vector<uint32_t>> discovered(count);
+    auto discover_one = [this, &old_nodes, &discovered, &pool](uint32_t i) -> coro::task<> {
+      co_await pool.schedule();
+      std::vector<uint32_t> &out = discovered[i];
+      out.reserve(old_nodes[i].nbrs.size() + repair_search_l_);
+      const auto push = [&](uint32_t v) {
+        if (!slot_alloc_.is_deleted(v)) {
+          out.push_back(v);
+        }
+      };
+      for (const uint32_t nbr : old_nodes[i].nbrs) {
+        push(nbr);
+      }
+      const std::vector<std::pair<uint32_t, float>> search =
+          co_await run_update_search_async(old_nodes[i].coords.data(), repair_search_l_, pool);
+      for (const auto &cand : search) {
+        push(cand.first);
+      }
+    };
+
+    for (uint32_t off = 0; off < count; off += kUpdateWaveChunk) {
+      const uint32_t end = std::min<uint32_t>(count, off + kUpdateWaveChunk);
+      auto run = [&]() -> coro::task<> {
+        std::vector<coro::task<>> tasks;
+        tasks.reserve(end - off);
+        for (uint32_t i = off; i < end; ++i) {
+          tasks.emplace_back(discover_one(i));
+        }
+        co_await coro::when_all(std::move(tasks));
+      };
+      coro::sync_wait(run());
+      for (uint32_t i = off; i < end; ++i) {
+        for (const uint32_t id : discovered[i]) {
+          unique.insert(id);
+        }
+        discovered[i].clear();
+      }
+    }
+
+    std::vector<uint32_t> targets;
+    targets.reserve(unique.size());
+    for (const uint32_t id : unique) {
+      targets.push_back(id);
+    }
+    return targets;
+  }
+
+  /// Rebuild each discovered in-neighbor once while the deleted slots are still
+  /// tombstoned, so update_node_impl can drop dead edges and two-hop splice.
+  void repair_removed_batch(const std::vector<DiskPageIO::NodeData> &old_nodes,
+                            uint32_t count,
+                            coro::thread_pool &pool) {
+    auto mark = std::chrono::steady_clock::now();
+    const std::vector<uint32_t> targets = discover_delete_repair_targets(old_nodes, count, pool);
+
+    auto repair_one = [this, &pool](uint32_t node_id) -> coro::task<> {
+      co_await pool.schedule();
+      const std::vector<uint32_t> no_extra;
+      co_await prefetch_reconnect_inputs(node_id, no_extra, pool);
+      update_node_impl_locked(node_id, no_extra);
+    };
+
+    for (uint32_t off = 0; off < targets.size(); off += kUpdateWaveChunk) {
+      const uint32_t end =
+          std::min<uint32_t>(static_cast<uint32_t>(targets.size()), off + kUpdateWaveChunk);
+      auto run = [&]() -> coro::task<> {
+        std::vector<coro::task<>> tasks;
+        tasks.reserve(end - off);
+        for (uint32_t i = off; i < end; ++i) {
+          tasks.emplace_back(repair_one(targets[i]));
+        }
+        co_await coro::when_all(std::move(tasks));
+      };
+      coro::sync_wait(run());
+    }
+    st_repair_us_.fetch_add(stage_us_since(mark), std::memory_order_relaxed);
+    st_repairs_.fetch_add(targets.size(), std::memory_order_relaxed);
+  }
+
+  /// Shared remove tail. With delete-time repair disabled this preserves the
+  /// existing lazy-delete sequence; with it enabled, slots stay dark until the
+  /// discovered in-neighbors have been rebuilt.
+  void remove_batch_locked(const uint32_t *internal_ids,
+                           uint32_t count,
+                           coro::thread_pool *pool,
+                           bool single_remove) {
+    if (update_repair_ && pool == nullptr) {
+      // Same worker count with or without the reactor: repair runs per-node
+      // discovery searches and RMWs, the shape batch_insert drives with a
+      // full worker pool over the reactor (not read_delete_neighbors' single
+      // batched wave, where one thread suffices).
+      const uint32_t workers =
+          std::min<uint32_t>(count, std::max<uint32_t>(1, update_insert_threads_));
+      coro::thread_pool local_pool{{.thread_count = workers,
+                                    .on_thread_start_functor = nullptr,
+                                    .on_thread_stop_functor = nullptr}};
+      try {
+        remove_batch_locked(internal_ids, count, &local_pool, single_remove);
+        local_pool.shutdown();
+        return;
+      } catch (...) {
+        local_pool.shutdown();
+        throw;
+      }
+    }
+
+    page_io_->clear_cache();
+    if (!update_repair_) {
+      if (single_remove) {
+        remove_unlocked(internal_ids[0]);
+      } else {
+        std::vector<std::vector<uint32_t>> old_neighbors =
+            read_delete_neighbors(internal_ids, count, pool);
+        std::unique_lock<std::shared_mutex> state_lock(update_mutex_);
+        for (uint32_t i = 0; i < count; ++i) {
+          remove_unlocked_with_neighbors(internal_ids[i], std::move(old_neighbors[i]));
+        }
+      }
+      if (maybe_safety_net_reconnect()) {
+        page_io_->flush_dirty_pages();
+      }
+      return;
+    }
+
+    std::vector<DiskPageIO::NodeData> old_nodes = read_delete_nodes(internal_ids, count, *pool);
+    mark_removed_batch(internal_ids, old_nodes, count);
+    try {
+      repair_removed_batch(old_nodes, count, *pool);
+    } catch (...) {
+      // Degrade to lazy-delete semantics rather than leak the slots: they are
+      // tombstoned with their two-hop cache in place, so the free list may
+      // reuse them like any lazy delete.
+      release_removed_batch(internal_ids, count);
+      throw;
+    }
+    release_removed_batch(internal_ids, count);
+    // No safety net here: it strips dead edges from the out-neighbors of every
+    // outstanding tombstone, and repair just rebuilt a superset of exactly
+    // those nodes (discovery = out-neighbors + optional search) — under the
+    // lazy path's default arming (5% tombstones, 16 deletes) it would re-scan
+    // the whole history after every batch and never find an edge to fix.
+  }
+
   void remove_unlocked_with_neighbors(uint32_t internal_id, std::vector<uint32_t> old_neighbors) {
+    if (track_in_degree_) {
+      for (const uint32_t target : old_neighbors) {
+        indeg_dec(target);
+      }
+    }
     update_ctx_.removed_node_nbrs_[internal_id] = std::move(old_neighbors);
     slot_alloc_.free(internal_id);
     --live_count_;
@@ -1569,6 +2142,11 @@ class DiskANNIndex {
                            const std::vector<uint32_t> &neighbors) {
     page_io_->write_node(slot, query, static_cast<uint32_t>(neighbors.size()), neighbors.data());
     cache_.upsert_node(slot, query, static_cast<uint32_t>(neighbors.size()), neighbors.data());
+    if (track_in_degree_) {
+      for (const uint32_t target : neighbors) {
+        indeg_inc(target);
+      }
+    }
   }
 
   /// Staged reverse edges for a batch — Yi's `_inserted_edges` analog. Each
@@ -1764,9 +2342,9 @@ class DiskANNIndex {
     return prune_candidate_pool_with_dist(node_id, pool, dist_fn);
   }
 
-  /// Shared reconnect backbone (Yi's co_update tail): pools at or under the
-  /// degree bound are kept verbatim with no distance work; larger pools are
-  /// scored, capped to degree+32 nearest (Yi's build_k heap), and alpha-pruned.
+  /// Shared reconnect backbone (Yi's co_update tail): update_node_impl* paths
+  /// funnel here; because only the write branch changes neighbor lists, the
+  /// in-degree counter diff belongs in that branch.
   void prune_and_write(uint32_t node_id,
                        const std::vector<uint32_t> &old_nbrs,
                        const std::vector<uint32_t> &cand) {
@@ -1786,6 +2364,14 @@ class DiskANNIndex {
       page_io_->write_node_neighbors(node_id,
                                      static_cast<uint32_t>(new_nbrs.size()),
                                      new_nbrs.data());
+      if (track_in_degree_) {
+        for (const uint32_t target : old_nbrs) {
+          indeg_dec(target);
+        }
+        for (const uint32_t target : new_nbrs) {
+          indeg_inc(target);
+        }
+      }
       mirror_neighbors_to_cache(node_id, new_nbrs);
     }
   }
@@ -2026,6 +2612,14 @@ class DiskANNIndex {
       }
       if (live.size() != nd.nbrs.size()) {
         page_io_->write_node_neighbors(nid, static_cast<uint32_t>(live.size()), live.data());
+        if (track_in_degree_) {
+          for (const uint32_t target : nd.nbrs) {
+            indeg_dec(target);
+          }
+          for (const uint32_t target : live) {
+            indeg_inc(target);
+          }
+        }
         mirror_neighbors_to_cache(nid, live);
       }
     }
@@ -2099,6 +2693,11 @@ class DiskANNIndex {
     page_io_.reset();
     update_reactor_.reset();  // after page_io_: it holds a raw pointer to the reactor
     update_ctx_.clear();
+    in_degree_.reset();
+    in_degree_size_ = 0;
+    track_in_degree_ = false;
+    in_degree_overflow_warned_ = false;
+    garden_search_l_ = 0;
     updatable_ = false;
     loaded_ = false;
   }
@@ -2269,7 +2868,15 @@ class DiskANNIndex {
   bool updatable_ = false;
   uint64_t max_slot_id_ = 0;  ///< file capacity in slots (valid-id bound; only grows)
   uint64_t live_count_ = 0;   ///< live (non-tombstoned) vector count
-  std::string index_dir_;     ///< saved at load for flush() output paths
+  /// in_degree_[s] == number of edges from non-tombstoned nodes' current
+  /// on-disk neighbor lists that point at s; reused slots keep stale inbound
+  /// counts until their live owners rewrite.
+  std::unique_ptr<std::atomic<uint32_t>[]> in_degree_;
+  uint64_t in_degree_size_ = 0;
+  bool track_in_degree_ = false;
+  bool in_degree_overflow_warned_ = false;
+  uint32_t garden_search_l_ = 0;
+  std::string index_dir_;                                ///< saved at load for flush() output paths
   std::unique_ptr<alaya::UringReactor> update_reactor_;  ///< declared before page_io_ so the
                                                          ///< page IO (raw-pointer user) dies first
   std::unique_ptr<DiskPageIO> page_io_;
@@ -2286,6 +2893,8 @@ class DiskANNIndex {
   uint32_t update_search_l_ = 100;
   bool update_rerank_ = true;
   bool update_insert_prune_ = false;
+  bool update_repair_ = false;
+  uint32_t repair_search_l_ = 0;
   double safety_net_ratio_ = 0.05;
   uint64_t safety_net_ops_ = 16;
   uint32_t update_insert_threads_ = kDefaultDiskANNUpdateInsertThreads;
@@ -2299,11 +2908,15 @@ class DiskANNIndex {
   std::atomic<uint64_t> st_prefetch_us_{0};
   std::atomic<uint64_t> st_write_us_{0};
   std::atomic<uint64_t> st_reconnect_us_{0};
+  std::atomic<uint64_t> st_repair_us_{0};
+  std::atomic<uint64_t> st_garden_us_{0};
   std::atomic<uint64_t> st_rc_prefetch_us_{0};
   std::atomic<uint64_t> st_rc_lock_us_{0};
   std::atomic<uint64_t> st_rc_impl_us_{0};
   std::atomic<uint64_t> st_inserts_{0};
   std::atomic<uint64_t> st_reconnects_{0};
+  std::atomic<uint64_t> st_repairs_{0};
+  std::atomic<uint64_t> st_gardens_{0};
 
   static uint64_t stage_us_since(std::chrono::steady_clock::time_point &mark) {
     const auto now = std::chrono::steady_clock::now();

@@ -83,6 +83,7 @@ class DiskPageIO {
       const size_t shard_capacity =
           page_cache_capacity == 0 ? 0 : std::max<size_t>(1, page_cache_capacity / num_shards_);
       cache_enabled_ = shard_capacity > 0;
+      page_cache_capacity_ = cache_enabled_ ? shard_capacity * num_shards_ : 0;
       shards_.reserve(num_shards_);
       for (uint32_t s = 0; s < num_shards_; ++s) {
         shards_.push_back(std::make_unique<Shard>(shard_capacity, geom_.page_size));
@@ -742,6 +743,11 @@ class DiskPageIO {
   /// the search-side peek/fill pair below is pointless without them.
   [[nodiscard]] bool page_cache_enabled() const { return cache_enabled_; }
 
+  /// Effective total page capacity across shards (0 when the cache is
+  /// disabled). Prefetch-then-read waves must stay under this or the wave
+  /// evicts its own pages before the reads land.
+  [[nodiscard]] size_t page_cache_capacity() const { return page_cache_capacity_; }
+
   /// Peek + version snapshot, the read half of the search fill protocol.
   /// Hit: the page is copied into @p out and true is returned. Miss: false,
   /// and @p version_out receives the page's current write version so the
@@ -902,6 +908,7 @@ class DiskPageIO {
   std::atomic<uint64_t> file_size_{0};
   uint32_t num_shards_ = kNumShards;
   bool cache_enabled_ = false;
+  size_t page_cache_capacity_ = 0;
   std::vector<std::unique_ptr<Shard>> shards_;
   std::unordered_map<uint32_t, std::vector<float>> vec_cache_;
   mutable std::mutex vec_mutex_;

@@ -95,6 +95,8 @@ struct Options {
   bool mixed = false;
   bool update_rerank = true;          ///< Yi trace-bench parity (_rerank_flag=true)
   bool update_insert_prune = false;   ///< Yi never alpha-prunes at insert
+  bool update_repair = false;         ///< delete-time in-neighbor repair
+  bool track_indegree = false;        ///< track live-slot in-degree percentiles
   bool mixed_round0_baseline = true;  ///< Yi UpdateRunner: round 0 runs no updates
   MixedMode mixed_mode = MixedMode::Background;
   uint32_t max_rounds = 0;
@@ -107,6 +109,9 @@ struct Options {
   uint32_t search_l = 100;
   uint32_t rerank_count = 0;
   uint32_t update_l = kDefaultBenchmarkUpdateSearchL;
+  uint32_t repair_search_l = 0;  ///< 0 => deleted-node out-neighbors only
+  uint32_t garden_budget = 0;    ///< per-round low-in-degree refresh budget
+  uint32_t garden_l = 0;         ///< 0 => update_l
   uint32_t beam = 4;
   uint32_t search_threads = 1;
   uint32_t eval_pipeline = 0;  ///< >1: eval via search_pipelined with this many
@@ -124,6 +129,17 @@ struct Options {
   alaya::diskann::DiskANNUpdateIO update_io = alaya::diskann::DiskANNUpdateIO::kAuto;
   uint32_t update_search_concurrency = 0;  // 0 = library default (4x insert threads)
   bool search_page_cache = true;           // searches peek+fill the shard page cache
+  std::string oracle_ids;  ///< when set: batch-rebuild the graph on exactly this live
+                           ///< label set (ids.bin format), then eval once — the
+                           ///< "best achievable graph on the survivor set" reference
+                           ///< that separates intrinsic geometry floor from
+                           ///< incremental-process slack.
+  uint32_t garden_pass = 0;        ///< when set with --eval_only on a kept index: run
+                                   ///< garden_refresh(garden_pass) this many nodes per
+                                   ///< iteration and re-eval, to test whether broader
+                                   ///< garden COVERAGE (vs a full rebuild) recovers the
+                                   ///< residual — coverage lever vs global-structural.
+  uint32_t garden_pass_iters = 3;  ///< garden passes to run in --garden_pass mode.
 };
 
 DatasetFiles resolve_dataset_files(const std::filesystem::path &data_dir) {
@@ -238,6 +254,34 @@ MixedMode parse_mixed_mode(const std::string &value) {
   throw std::invalid_argument("bad --mixed_mode: " + value);
 }
 
+void print_usage(const char *argv0) {
+  std::cerr << "Usage:\n"
+            << "  " << argv0 << " [data_dir] [trace_dir] [index_dir] [out_csv] [flags]\n\n"
+            << "Flags:\n"
+            << "  --rebuild                  force a fresh index build\n"
+            << "  --deterministic            deterministic search barriers\n"
+            << "  --flush_rounds             flush dirty pages after each round\n"
+            << "  --no_flush_rounds          skip per-round dirty-page flush\n"
+            << "  --no_update_rerank         disable update rerank\n"
+            << "  --update_insert_prune      alpha-prune insert candidates\n"
+            << "  --update_repair            enable delete-time in-neighbor repair\n"
+            << "  --no_update_repair         disable delete-time in-neighbor repair\n"
+            << "  --repair_search_l N        repair search list (0 => deleted-node out-neighbors)\n"
+            << "  --track_indegree           track live-slot in-degree percentiles\n"
+            << "  --garden_budget N          refresh up to N low-in-degree live nodes per round\n"
+            << "  --garden_l N               garden search list (0 => use --update_L)\n"
+            << "  --garden_pass N            eval_only: garden_refresh(N) per pass, then re-eval\n"
+            << "  --garden_pass_iters N      garden passes in --garden_pass mode (default 3)\n"
+            << "  --oracle_ids FILE          batch-rebuild on FILE's ids.bin label set, eval once\n"
+            << "  --build_only               build the initial index and exit\n"
+            << "  --eval_only                replay live mask and run eval only\n"
+            << "  --single_updates           issue single remove/insert calls\n"
+            << "  --mixed                    run mixed update/search workload\n"
+            << "  --mixed_mode MODE          background or shared_queue\n"
+            << "  --rounds N                 cap update rounds\n"
+            << "  --nq N                     cap eval queries (0 => all)\n";
+}
+
 TraceManifest read_manifest(const std::filesystem::path &path) {
   std::ifstream in(path);
   if (!in) {
@@ -299,12 +343,25 @@ Options parse_args(int argc, char **argv) {
       opt.update_rerank = false;
     } else if (arg == "--update_insert_prune") {
       opt.update_insert_prune = true;
+    } else if (arg == "--update_repair") {
+      opt.update_repair = true;
+    } else if (arg == "--no_update_repair") {
+      opt.update_repair = false;
+    } else if (arg == "--track_indegree") {
+      opt.track_indegree = true;
     } else if (arg == "--no_mixed_round0") {
       opt.mixed_round0_baseline = false;
     } else if (arg == "--build_only") {
       opt.build_only = true;
     } else if (arg == "--eval_only") {
       opt.eval_only = true;
+    } else if (arg == "--oracle_ids" && i + 1 < argc) {
+      opt.oracle_ids = argv[++i];
+    } else if (arg == "--garden_pass" && i + 1 < argc) {
+      opt.garden_pass = parse_u32(argv[++i], "--garden_pass");
+      opt.track_indegree = true;
+    } else if (arg == "--garden_pass_iters" && i + 1 < argc) {
+      opt.garden_pass_iters = parse_u32(argv[++i], "--garden_pass_iters");
     } else if (arg == "--single_updates") {
       opt.single_updates = true;
     } else if (arg == "--mixed") {
@@ -328,6 +385,12 @@ Options parse_args(int argc, char **argv) {
       opt.rerank_count = parse_u32(argv[++i], "--rerank_count");
     } else if (arg == "--update_L" && i + 1 < argc) {
       opt.update_l = parse_u32(argv[++i], "--update_L");  // 0 => R + 32
+    } else if (arg == "--repair_search_l" && i + 1 < argc) {
+      opt.repair_search_l = parse_u32(argv[++i], "--repair_search_l");
+    } else if (arg == "--garden_budget" && i + 1 < argc) {
+      opt.garden_budget = parse_u32(argv[++i], "--garden_budget");
+    } else if (arg == "--garden_l" && i + 1 < argc) {
+      opt.garden_l = parse_u32(argv[++i], "--garden_l");
     } else if (arg == "--beam" && i + 1 < argc) {
       opt.beam = parse_u32(argv[++i], "--beam");
     } else if (arg == "--threads" && i + 1 < argc) {
@@ -388,6 +451,9 @@ Options parse_args(int argc, char **argv) {
   if (pos.size() > 3) {
     opt.out_csv = pos[3];
   }
+  if (opt.garden_budget > 0) {
+    opt.track_indegree = true;
+  }
   return opt;
 }
 
@@ -404,6 +470,36 @@ TraceRound limit_round_updates(TraceRound round, const Options &opt) {
   return round;
 }
 
+// ids.bin format (matches the on-disk index and fig13_forensics.load_ids):
+// [uint64 count][count x uint64 label]. Used to seed the oracle rebuild's live
+// label set directly from a kept index's ids.bin.
+std::vector<uint64_t> read_ids_file(const std::string &path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    throw std::runtime_error("cannot open oracle ids file: " + path);
+  }
+  uint64_t count = 0;
+  in.read(reinterpret_cast<char *>(&count), sizeof(count));
+  if (!in) {
+    throw std::runtime_error("oracle ids file truncated header: " + path);
+  }
+  // Validate the header count against the actual file size BEFORE allocating:
+  // a corrupt count would otherwise request a giant vector up front.
+  const uint64_t payload_bytes =
+      static_cast<uint64_t>(std::filesystem::file_size(path)) - sizeof(uint64_t);
+  if (count > payload_bytes / sizeof(uint64_t)) {
+    throw std::runtime_error("oracle ids file count " + std::to_string(count) +
+                             " exceeds file size: " + path);
+  }
+  std::vector<uint64_t> labels(count);
+  in.read(reinterpret_cast<char *>(labels.data()),
+          static_cast<std::streamsize>(count * sizeof(uint64_t)));
+  if (!in) {
+    throw std::runtime_error("oracle ids file truncated body: " + path);
+  }
+  return labels;
+}
+
 void build_initial_index(const Options &opt,
                          const FloatMatrix &base,
                          const TraceManifest &manifest) {
@@ -415,10 +511,6 @@ void build_initial_index(const Options &opt,
     std::cout << "[update_bench] reusing index " << opt.index_dir << "\n";
     return;
   }
-  std::vector<uint64_t> labels(manifest.initial_count);
-  for (uint32_t id = 0; id < manifest.initial_count; ++id) {
-    labels[id] = id;
-  }
   DiskANNBuildParams bp;
   bp.R = opt.build_r;
   bp.L = opt.build_l;
@@ -429,6 +521,33 @@ void build_initial_index(const Options &opt,
   bp.num_threads = 96;
   bp.seed = 1234;
   bp.verbose = true;
+
+  if (!opt.oracle_ids.empty()) {
+    // Oracle: batch-rebuild the graph on exactly the survivor+inserted label
+    // set (original numbering preserved), gathering each node's coords from the
+    // base by label. Preserving labels lets the same GT + age buckets score it.
+    const std::vector<uint64_t> labels = read_ids_file(opt.oracle_ids);
+    const uint32_t n = static_cast<uint32_t>(labels.size());
+    std::vector<float> coords(static_cast<size_t>(n) * base.dim);
+    for (uint32_t i = 0; i < n; ++i) {
+      const uint64_t label = labels[i];
+      if (label >= base.n) {
+        throw std::runtime_error("oracle label out of base range: " + std::to_string(label));
+      }
+      std::copy_n(base.data.data() + static_cast<size_t>(label) * base.dim,
+                  base.dim,
+                  coords.data() + static_cast<size_t>(i) * base.dim);
+    }
+    std::cout << "[update_bench] building ORACLE PQ index (batch rebuild on survivor set), n="
+              << n << " dir=" << opt.index_dir << "\n";
+    DiskANNIndex::build(opt.index_dir, coords.data(), labels.data(), n, base.dim, bp);
+    return;
+  }
+
+  std::vector<uint64_t> labels(manifest.initial_count);
+  for (uint32_t id = 0; id < manifest.initial_count; ++id) {
+    labels[id] = id;
+  }
   std::cout << "[update_bench] building initial PQ index, n=" << manifest.initial_count
             << " dir=" << opt.index_dir << "\n";
   DiskANNIndex::build(opt.index_dir,
@@ -1023,6 +1142,13 @@ void run_warmup_searches(const DiskANNIndex &idx,
 
 int main(int argc, char **argv) {
   try {
+    for (int i = 1; i < argc; ++i) {
+      const std::string arg = argv[i];
+      if (arg == "-h" || arg == "--help") {
+        print_usage(argv[0]);
+        return 0;
+      }
+    }
     const Options opt = parse_args(argc, argv);
     const std::filesystem::path data_dir = opt.data_dir;
     const std::filesystem::path trace_dir = opt.trace_dir;
@@ -1051,6 +1177,10 @@ int main(int argc, char **argv) {
     lp.update_search_l = opt.update_l;
     lp.update_rerank = opt.update_rerank;
     lp.update_insert_prune = opt.update_insert_prune;
+    lp.update_repair = opt.update_repair;
+    lp.repair_search_l = opt.repair_search_l;
+    lp.track_in_degree = opt.track_indegree;
+    lp.garden_search_l = opt.garden_l;
     lp.update_insert_threads = opt.update_insert_threads;
     lp.update_reconnect_threads = opt.update_reconnect_threads;
     lp.page_cache_capacity = opt.page_cache_capacity;
@@ -1062,6 +1192,22 @@ int main(int argc, char **argv) {
 
     std::vector<uint8_t> live(manifest.total_count, 0);
     std::vector<uint32_t> label_to_slot(manifest.total_count, kMissingSlot);
+    if (!opt.oracle_ids.empty()) {
+      // Oracle: the live set is exactly the rebuilt label set. Mark them alive so
+      // the same masked-recall + age buckets score the batch-rebuilt graph.
+      const std::vector<uint64_t> oracle_labels = read_ids_file(opt.oracle_ids);
+      for (const uint64_t label : oracle_labels) {
+        if (label < live.size()) {
+          live[label] = 1;
+        }
+      }
+      run_warmup_searches(idx, queries, gt, live, opt);
+      const RecallResult recall = evaluate_search(idx, queries, gt, live, opt);
+      std::cout << "[oracle] n=" << oracle_labels.size()
+                << " masked_recall@10=" << recall.recall()
+                << " search_mean_us=" << recall.mean_us << " search_qps=" << recall.qps << "\n";
+      return 0;
+    }
     for (uint32_t id = 0; id < manifest.initial_count; ++id) {
       live[id] = 1;
       label_to_slot[id] = id;
@@ -1079,6 +1225,19 @@ int main(int argc, char **argv) {
       const RecallResult recall = evaluate_search(idx, queries, gt, live, opt);
       std::cout << "[eval_only] rounds=" << rounds << " masked_recall@10=" << recall.recall()
                 << " search_mean_us=" << recall.mean_us << " search_qps=" << recall.qps << "\n";
+      // Coverage probe: does gardening the WHOLE survivor set (vs garden's 50k/
+      // round tail budget) close the residual toward the batch-rebuild ceiling?
+      // If it plateaus below, the slack is global-structural (rebuild-only); if
+      // it climbs, garden just needs more coverage budget.
+      for (uint32_t it = 0; opt.garden_pass > 0 && it < opt.garden_pass_iters; ++it) {
+        const auto gs = idx.garden_refresh(opt.garden_pass);
+        const RecallResult r = evaluate_search(idx, queries, gt, live, opt);
+        std::cout << "[garden_pass " << it << "] refreshed=" << gs.refreshed
+                  << " p10 " << gs.indeg_p10_before << "->" << gs.indeg_p10_after
+                  << " p50 " << gs.indeg_p50_before << "->" << gs.indeg_p50_after
+                  << " ms=" << static_cast<double>(gs.elapsed_us) / 1000.0
+                  << " masked_recall@10=" << r.recall() << "\n";
+      }
       return 0;
     }
 
@@ -1145,6 +1304,27 @@ int main(int argc, char **argv) {
         if (mixed_started) {
           mixed_search = finish_mixed_search(mixed_state);
         }
+        if (opt.garden_budget > 0 && !baseline_round) {
+          coro::thread_pool *garden_pool = mixed_pool ? mixed_pool.get() : nullptr;
+          const auto g0 = std::chrono::steady_clock::now();
+          auto gs = idx.garden_refresh(opt.garden_budget, garden_pool);
+          const auto garden_wall_us =
+              std::chrono::duration_cast<std::chrono::microseconds>(
+                  std::chrono::steady_clock::now() - g0)
+                  .count();
+          if (gs.elapsed_us == 0 && garden_wall_us > 0) {
+            gs.elapsed_us = static_cast<uint64_t>(garden_wall_us);
+          }
+          std::cout << "[garden] refreshed=" << gs.refreshed << " selected=" << gs.selected
+                    << " p10 " << gs.indeg_p10_before << "->" << gs.indeg_p10_after
+                    << " p50 " << gs.indeg_p50_before << "->" << gs.indeg_p50_after
+                    << " ms=" << static_cast<double>(gs.elapsed_us) / 1000.0 << "\n";
+        }
+        if (opt.track_indegree) {
+          const auto ip = idx.in_degree_percentiles();
+          std::cout << "[indeg] p10=" << ip.p10 << " p50=" << ip.p50
+                    << " p90=" << ip.p90 << "\n";
+        }
         if (mixed_pool) {
           mixed_pool->shutdown();
         }
@@ -1178,7 +1358,10 @@ int main(int argc, char **argv) {
                     << " lock=" << per(stg.rc_lock_us) << " impl=" << per(stg.rc_impl_us)
                     << ") reconnects/insert="
                     << static_cast<double>(stg.reconnects) / static_cast<double>(stg.inserts)
-                    << "\n";
+                    << " repair_ms=" << static_cast<double>(stg.repair_us) / 1000.0
+                    << " repairs=" << stg.repairs
+                    << " garden_ms=" << static_cast<double>(stg.garden_us) / 1000.0
+                    << " gardens=" << stg.gardens << "\n";
         }
         const size_t round_updates = round.deletes.size() + round.inserts.size();
         const double update_qps =
