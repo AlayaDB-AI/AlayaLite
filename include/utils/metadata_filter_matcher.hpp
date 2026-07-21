@@ -60,6 +60,13 @@ class MetadataFilterExecutor {
   }
 
   [[nodiscard]] auto filter() const -> const MetadataFilter & { return filter_; }
+
+  /**
+   * @brief Returns true only when the filter expression is empty and therefore matches every row.
+   *
+   * This says nothing about scalar-index availability. A non-empty unindexed filter returns false
+   * and must still be evaluated through the residual/full-scan path.
+   */
   [[nodiscard]] auto is_trivially_true() const -> bool { return filter_.is_empty(); }
   [[nodiscard]] auto has_index_fast_path() const -> bool { return has_index_fast_path_; }
   [[nodiscard]] auto index_fast_path_is_exact() const -> bool { return index_fast_path_exact_; }

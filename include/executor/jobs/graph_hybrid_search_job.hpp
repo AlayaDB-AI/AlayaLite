@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -55,6 +56,23 @@ struct GraphHybridSearchJob {
   // `kIndexedExact` skips bitset construction and computes exact top-k directly on indexed ids.
   enum class Mode : uint8_t { kPlainSearch, kBitsetPrefilter, kIterativeFilter, kIndexedExact };
 
+  struct HybridPlanStats {
+    Mode initial_mode_ = Mode::kPlainSearch;   ///< Mode selected before runtime fallback.
+    Mode executed_mode_ = Mode::kPlainSearch;  ///< Mode that produced the final results.
+    size_t matched_count_ = 0;                 ///< Rows accepted by the scalar filter, when known.
+    size_t data_count_ = 0;                    ///< Total vector slots visible to the search job.
+    double pass_rate_ = 0.0;                   ///< matched_count / data_count, when known.
+    uint32_t requested_ef_ = 0;                ///< Caller-provided graph-search breadth.
+    uint32_t effective_ef_ = 0;                ///< Graph-search breadth after legacy adjustment.
+    uint32_t fanout_ = 0;                      ///< Partitions searched; zero in legacy execution.
+    uint32_t result_count_ = 0;                ///< Valid results produced by the query.
+    bool matched_count_known_ = false;         ///< Whether matched_count and pass_rate are valid.
+    bool fallback_ = false;                    ///< Whether execution switched modes at runtime.
+    std::string fallback_reason_;              ///< Stable reason code; empty without fallback.
+  };
+
+  using PlanStatsHook = std::function<void(const HybridPlanStats &)>;
+
   explicit GraphHybridSearchJob(std::shared_ptr<DistanceSpaceType> space,
                                 std::shared_ptr<Graph<DataType, IDType>> graph = nullptr,
                                 std::shared_ptr<BuildSpaceType> build_space = nullptr)
@@ -68,6 +86,15 @@ struct GraphHybridSearchJob {
       }
     }
   }
+
+  /**
+   * @brief Installs the observer invoked after each legacy hybrid query.
+   * @param hook Observer to install, or an empty function to disable observation.
+   *
+   * Configure the hook before starting concurrent searches; replacing it concurrently with a
+   * query is unsupported. The callback itself must tolerate concurrent invocations from searches.
+   */
+  void set_plan_stats_hook(PlanStatsHook hook) { plan_stats_hook_ = std::move(hook); }
 
   // clang-format off
   void materialize_item_ids(const IDType *ids,
@@ -115,6 +142,36 @@ struct GraphHybridSearchJob {
         return "indexed_exact";
     }
     return "unknown";
+  }
+
+  /**
+   * @brief Creates the initial observation without changing the selected legacy search strategy.
+   * @param mode Mode selected by the existing strategy logic.
+   * @param search_info Caller-provided search parameters.
+   * @param filter_executor Executor that may already know the exact indexed match count.
+   * @return Initial statistics; match-derived fields remain invalid when counting would require a
+   * full scalar scan.
+   */
+  [[nodiscard]] auto make_plan_stats(Mode mode,
+                                     const SearchInfo &search_info,
+                                     const MetadataFilterExecutor<IDType> &filter_executor) const
+      -> HybridPlanStats requires(DistanceSpaceType::has_scalar_data) {
+    HybridPlanStats stats;
+    stats.initial_mode_ = mode;
+    stats.executed_mode_ = mode;
+    stats.data_count_ = static_cast<size_t>(space_->get_data_num());
+    stats.requested_ef_ = search_info.ef_;
+    stats.effective_ef_ = search_info.ef_;
+
+    if (filter_executor.is_trivially_true()) {
+      stats.matched_count_ = stats.data_count_;
+      stats.matched_count_known_ = true;
+    } else if (filter_executor.has_index_fast_path()) {
+      stats.matched_count_ = filter_executor.indexed_count();
+      stats.matched_count_known_ = true;
+    }
+    update_pass_rate(stats);
+    return stats;
   }
 
   [[nodiscard]] auto build_search_mode(const MetadataFilterExecutor<IDType> &filter_executor,
@@ -291,7 +348,8 @@ struct GraphHybridSearchJob {
                                 IDType *ids,
                                 const SearchInfo &search_info,
                                 const MetadataFilterExecutor<IDType> &filter_executor,
-                                const char *search_name)
+                                const char *search_name,
+                                HybridPlanStats *plan_stats = nullptr)
       -> uint32_t requires(DistanceSpaceType::has_scalar_data) {
     GraphSearchJob<DistanceSpaceType, BuildSpaceType> base_job(space_,
                                                                graph_,
@@ -324,6 +382,9 @@ struct GraphHybridSearchJob {
     }
 
     auto res_size = materialize_result_ids(result_pool, ids, search_info.topk_);
+    if (plan_stats != nullptr) {
+      plan_stats->effective_ef_ = search_info.ef_;
+    }
     LOG_DEBUG("{}: iterative_filter results={}, requested={}",
               search_name,
               res_size,
@@ -335,9 +396,15 @@ struct GraphHybridSearchJob {
                                 IDType *ids,
                                 const SearchInfo &search_info,
                                 const MetadataFilterExecutor<IDType> &filter_executor,
-                                const char *search_name)
+                                const char *search_name,
+                                HybridPlanStats *plan_stats = nullptr)
       -> uint32_t requires(DistanceSpaceType::has_scalar_data) {
     auto bitset_result = filter_executor.build_blocked_bitset();
+    if (plan_stats != nullptr) {
+      plan_stats->matched_count_ = bitset_result.matched_count_;
+      plan_stats->matched_count_known_ = true;
+      update_pass_rate(*plan_stats);
+    }
     if (bitset_result.matched_count_ == 0) {
       LOG_DEBUG("{}: bitset_prefilter matched zero rows", search_name);
       return 0;
@@ -348,6 +415,11 @@ struct GraphHybridSearchJob {
                                                                nullptr,
                                                                build_space_);
     if (bitset_result.matched_count_ == space_->get_data_num()) {
+      if (plan_stats != nullptr) {
+        plan_stats->executed_mode_ = Mode::kPlainSearch;
+        plan_stats->fallback_ = true;
+        plan_stats->fallback_reason_ = "filter_matches_all";
+      }
       LOG_DEBUG("{}: bitset_prefilter matched all rows, fallback to plain search", search_name);
       if constexpr (is_rabitq_space_v<DistanceSpaceType>) {
         base_job.rabitq_search_solo(query, search_info.topk_, ids, search_info.ef_);
@@ -367,6 +439,11 @@ struct GraphHybridSearchJob {
               search_info.ef_);
 
     if (should_use_brute_force_search(search_info, bitset_result.matched_count_)) {
+      if (plan_stats != nullptr) {
+        plan_stats->executed_mode_ = Mode::kIndexedExact;
+        plan_stats->fallback_ = true;
+        plan_stats->fallback_reason_ = "brute_force_cost_threshold";
+      }
       LOG_DEBUG("{}: bitset_prefilter switching to brute force, matched_rows={}, topk={}, ef={}",
                 search_name,
                 bitset_result.matched_count_,
@@ -381,6 +458,9 @@ struct GraphHybridSearchJob {
 
     auto adjusted_search_info =
         adjust_ef_in_search_info(search_info, bitset_result.matched_count_, search_name);
+    if (plan_stats != nullptr) {
+      plan_stats->effective_ef_ = adjusted_search_info.ef_;
+    }
     if constexpr (is_rabitq_space_v<DistanceSpaceType>) {
       base_job.rabitq_search_solo(query,
                                   adjusted_search_info.topk_,
@@ -398,6 +478,11 @@ struct GraphHybridSearchJob {
     auto required_results =
         static_cast<uint32_t>(std::min<size_t>(search_info.topk_, bitset_result.matched_count_));
     if (res_size < required_results) {
+      if (plan_stats != nullptr) {
+        plan_stats->executed_mode_ = Mode::kIndexedExact;
+        plan_stats->fallback_ = true;
+        plan_stats->fallback_reason_ = "ann_underfill";
+      }
       LOG_DEBUG("{}: bitset_prefilter underfilled results={}, expected={}, fallback to brute force",
                 search_name,
                 res_size,
@@ -421,6 +506,7 @@ struct GraphHybridSearchJob {
 
     auto filter_executor = make_filter_executor(filter);
     auto mode = build_search_mode(filter_executor, search_info);
+    auto plan_stats = make_plan_stats(mode, search_info, filter_executor);
     LOG_DEBUG("hybrid_search: plan={}, topk={}, ef={}, hint={}",
               mode_name(mode),
               search_info.topk_,
@@ -442,13 +528,23 @@ struct GraphHybridSearchJob {
                                             filter_executor,
                                             "hybrid_search");
     } else if (mode == Mode::kBitsetPrefilter) {
-      res_size =
-          execute_bitset_prefilter(query, ids, search_info, filter_executor, "hybrid_search");
+      res_size = execute_bitset_prefilter(query,
+                                          ids,
+                                          search_info,
+                                          filter_executor,
+                                          "hybrid_search",
+                                          &plan_stats);
     } else {
-      res_size =
-          execute_iterative_filter(query, ids, search_info, filter_executor, "hybrid_search");
+      res_size = execute_iterative_filter(query,
+                                          ids,
+                                          search_info,
+                                          filter_executor,
+                                          "hybrid_search",
+                                          &plan_stats);
     }
 
+    plan_stats.result_count_ = res_size;
+    emit_plan_stats("hybrid_search", plan_stats);
     materialize_item_ids(ids, res_size, res);
     if (res_size < search_info.topk_) {
       LOG_DEBUG("hybrid_search: only found {} results, requested {}", res_size, search_info.topk_);
@@ -498,6 +594,7 @@ struct GraphHybridSearchJob {
 
     auto filter_executor = make_filter_executor(filter);
     auto mode = build_search_mode(filter_executor, search_info);
+    auto plan_stats = make_plan_stats(mode, search_info, filter_executor);
     LOG_DEBUG("rabitq_hybrid_search: plan={}, topk={}, ef={}, hint={}",
               mode_name(mode),
               search_info.topk_,
@@ -523,15 +620,19 @@ struct GraphHybridSearchJob {
                                           ids,
                                           search_info,
                                           filter_executor,
-                                          "rabitq_hybrid_search");
+                                          "rabitq_hybrid_search",
+                                          &plan_stats);
     } else {
       res_size = execute_iterative_filter(query,
                                           ids,
                                           search_info,
                                           filter_executor,
-                                          "rabitq_hybrid_search");
+                                          "rabitq_hybrid_search",
+                                          &plan_stats);
     }
 
+    plan_stats.result_count_ = res_size;
+    emit_plan_stats("rabitq_hybrid_search", plan_stats);
     materialize_item_ids(ids, res_size, res);
     if (res_size < search_info.topk_) {
       LOG_DEBUG("rabitq_hybrid_search: only found {} results, requested {}",
@@ -603,6 +704,43 @@ struct GraphHybridSearchJob {
   }
 #endif
   // clang-format on
+
+ private:
+  /** Recomputes pass_rate_ when the executor supplied an exact match count. */
+  static void update_pass_rate(HybridPlanStats &stats) {
+    if (!stats.matched_count_known_) {
+      return;
+    }
+    stats.pass_rate_ = stats.data_count_ == 0 ? 0.0
+                                              : static_cast<double>(stats.matched_count_) /
+                                                    static_cast<double>(stats.data_count_);
+  }
+
+  /** Emits debug telemetry and invokes the optional observer after query execution. */
+  void emit_plan_stats(const char *search_name, const HybridPlanStats &stats) const {
+    LOG_DEBUG(
+        "{}: plan_stats initial={}, executed={}, matched_count={}, matched_known={}, "
+        "pass_rate={}, requested_ef={}, effective_ef={}, fanout={}, results={}, fallback={}, "
+        "fallback_reason={}",
+        search_name,
+        mode_name(stats.initial_mode_),
+        mode_name(stats.executed_mode_),
+        stats.matched_count_,
+        stats.matched_count_known_,
+        stats.pass_rate_,
+        stats.requested_ef_,
+        stats.effective_ef_,
+        stats.fanout_,
+        stats.result_count_,
+        stats.fallback_,
+        stats.fallback_reason_);
+
+    if (plan_stats_hook_) {
+      plan_stats_hook_(stats);
+    }
+  }
+
+  PlanStatsHook plan_stats_hook_;
 };
 
 }  // namespace alaya

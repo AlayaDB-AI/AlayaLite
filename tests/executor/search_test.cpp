@@ -801,8 +801,16 @@ TEST(GraphHybridSearchJobUnitTest, FilterMatchingAllRowsFallsBackToPlainSearch) 
   ScopedTempDbDir db_dir("hybrid_match_all_rows");
   auto space = make_one_dim_scalar_space({10.0F, 11.0F, 12.0F, 0.0F, 1.0F}, db_dir.path_, {"id"});
   auto graph = make_graph_from_edges({{1, 2}, {2}, {}, {4}, {}});
-  GraphHybridSearchJob<RawSpaceWithScalarType> hybrid_job(space, graph, space);
+  using HybridJobType = GraphHybridSearchJob<RawSpaceWithScalarType>;
+  HybridJobType hybrid_job(space, graph, space);
   GraphSearchJob<RawSpaceWithScalarType> base_job(space, graph);
+
+  HybridJobType::HybridPlanStats observed_stats;
+  bool hook_called = false;
+  hybrid_job.set_plan_stats_hook([&](const auto &stats) {
+    observed_stats = stats;
+    hook_called = true;
+  });
 
   MetadataFilter filter;
   filter.add_ge("group", static_cast<int64_t>(0));
@@ -822,6 +830,17 @@ TEST(GraphHybridSearchJobUnitTest, FilterMatchingAllRowsFallsBackToPlainSearch) 
   EXPECT_EQ(hybrid_ids, plain_ids);
   EXPECT_FALSE(results[0].empty());
   EXPECT_FALSE(results[1].empty());
+  EXPECT_TRUE(hook_called);
+  EXPECT_EQ(observed_stats.initial_mode_, HybridJobType::Mode::kBitsetPrefilter);
+  EXPECT_EQ(observed_stats.executed_mode_, HybridJobType::Mode::kPlainSearch);
+  EXPECT_TRUE(observed_stats.matched_count_known_);
+  EXPECT_EQ(observed_stats.matched_count_, 5U);
+  EXPECT_DOUBLE_EQ(observed_stats.pass_rate_, 1.0);
+  EXPECT_EQ(observed_stats.requested_ef_, 2U);
+  EXPECT_EQ(observed_stats.effective_ef_, 2U);
+  EXPECT_EQ(observed_stats.fanout_, 0U);
+  EXPECT_TRUE(observed_stats.fallback_);
+  EXPECT_EQ(observed_stats.fallback_reason_, "filter_matches_all");
   space->close_db();
 }
 
@@ -829,7 +848,15 @@ TEST(GraphHybridSearchJobUnitTest, UnderfilledBitsetPrefilterFallsBackToBruteFor
   ScopedTempDbDir db_dir("hybrid_underfilled_bitset");
   auto space = make_one_dim_scalar_space({10.0F, 11.0F, 12.0F, 0.0F, 1.0F}, db_dir.path_, {"id"});
   auto graph = make_graph_from_edges({{1, 2}, {2}, {}, {4}, {}});
-  GraphHybridSearchJob<RawSpaceWithScalarType> hybrid_job(space, graph, space);
+  using HybridJobType = GraphHybridSearchJob<RawSpaceWithScalarType>;
+  HybridJobType hybrid_job(space, graph, space);
+
+  HybridJobType::HybridPlanStats observed_stats;
+  bool hook_called = false;
+  hybrid_job.set_plan_stats_hook([&](const auto &stats) {
+    observed_stats = stats;
+    hook_called = true;
+  });
 
   MetadataFilter filter;
   filter.add_eq("group", static_cast<int64_t>(1));
@@ -851,6 +878,15 @@ TEST(GraphHybridSearchJobUnitTest, UnderfilledBitsetPrefilterFallsBackToBruteFor
   EXPECT_EQ(results, brute_force_results);
   EXPECT_EQ(ids[0], 3U);
   EXPECT_EQ(ids[1], 4U);
+  EXPECT_TRUE(hook_called);
+  EXPECT_EQ(observed_stats.initial_mode_, HybridJobType::Mode::kBitsetPrefilter);
+  EXPECT_EQ(observed_stats.executed_mode_, HybridJobType::Mode::kIndexedExact);
+  EXPECT_TRUE(observed_stats.matched_count_known_);
+  EXPECT_EQ(observed_stats.matched_count_, 2U);
+  EXPECT_DOUBLE_EQ(observed_stats.pass_rate_, 0.4);
+  EXPECT_EQ(observed_stats.result_count_, 2U);
+  EXPECT_TRUE(observed_stats.fallback_);
+  EXPECT_FALSE(observed_stats.fallback_reason_.empty());
   space->close_db();
 }
 
