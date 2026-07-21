@@ -78,4 +78,6 @@ __pycache__/
 # Tool memory files
 /CLAUDE.md
 /AGENTS.md
+/HYBRID_SEARCH_REFACTOR_PLAN.md
+/docs/HYBRID_SEARCH_BASELINE.md
 docs/pr
