@@ -16,6 +16,7 @@
 #include "index/graph/graph.hpp"
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "index/graph/qg/qg_builder.hpp"
+#include "search/legacy_graph_search_backend.hpp"
 #include "space/rabitq_space.hpp"
 #include "space/raw_space.hpp"
 #include "space/sq8_space.hpp"
@@ -44,9 +45,7 @@ using RawSpaceWithScalarType =
 using SQ8SpaceWithScalar =
     SQ8Space<float, float, uint32_t, SequentialStorage<uint8_t, uint32_t>, ScalarData>;
 
-auto test_data_dir() -> std::filesystem::path {
-  return resolve_data_dir();
-}
+auto test_data_dir() -> std::filesystem::path { return resolve_data_dir(); }
 
 auto test_cache_dir() -> const std::filesystem::path & {
   static const auto dir = [] {
@@ -73,9 +72,7 @@ struct ScopedTempDbDir {
   std::filesystem::path path_;
 };
 
-auto max_thread_num() -> uint32_t {
-  return configured_thread_limit();
-}
+auto max_thread_num() -> uint32_t { return configured_thread_limit(); }
 
 auto make_test_metadata(uint32_t item_cnt) -> std::vector<ScalarData> {
   std::vector<ScalarData> metadata(item_cnt);
@@ -212,7 +209,8 @@ auto run_parallel_search(SearchJobPtr &search_job, Dataset &ds, uint32_t topk, u
   Timer timer{};
   std::vector<std::vector<uint32_t>> res_pool(ds.query_num_, std::vector<uint32_t>(topk));
   const size_t search_thread_num =
-      std::min<size_t>(cap_thread_count(16), std::max<size_t>(1, static_cast<size_t>(ds.query_num_)));
+      std::min<size_t>(cap_thread_count(16),
+                       std::max<size_t>(1, static_cast<size_t>(ds.query_num_)));
   std::vector<std::thread> tasks(search_thread_num);
 
   auto search_knn = [&](uint32_t i) {
@@ -491,6 +489,84 @@ TEST(GraphSearchJobUnitTest, BlockedMaskSearchSkipsFilteredCandidates) {
 
   EXPECT_EQ(ids[0], 4U);
   EXPECT_EQ(std::find(ids.begin(), ids.end(), 3U), ids.end());
+}
+
+class RejectIdMask final : public IdMask<uint32_t> {
+ public:
+  explicit RejectIdMask(uint32_t rejected_id) : rejected_id_(rejected_id) {}
+
+  [[nodiscard]] auto accepts(uint32_t id) const -> bool override { return id != rejected_id_; }
+
+ private:
+  uint32_t rejected_id_;  ///< The single internal ID excluded from emitted results.
+};
+
+TEST(LegacyGraphSearchBackendTest, DirectSearchMatchesGraphJobAndReturnsDistances) {
+  auto space = make_one_dim_raw_space({10.0F, 20.0F, 30.0F, 0.0F, 1.0F});
+  auto graph = make_graph_from_edges({{3, 1}, {2}, {}, {4}, {}});
+  auto job = std::make_shared<GraphSearchJob<RawSpaceType>>(space, graph);
+  LegacyGraphSearchBackend<RawSpaceType> backend(job);
+
+  std::vector<float> query = {0.1F};
+  std::vector<uint32_t> expected_ids(2);
+  std::vector<float> expected_distances(2);
+  job->search_solo(query.data(), expected_ids.data(), expected_distances.data(), 2, 4);
+
+  auto result = backend.search(VectorSearchRequest<float, uint32_t>{.query_ = query.data(),
+                                                                    .topk_ = 2,
+                                                                    .candidate_budget_ = 4});
+
+  ASSERT_EQ(result.candidates_.size(), 2U);
+  EXPECT_EQ(result.candidates_[0].id_, expected_ids[0]);
+  EXPECT_EQ(result.candidates_[1].id_, expected_ids[1]);
+  EXPECT_FLOAT_EQ(result.candidates_[0].distance_, expected_distances[0]);
+  EXPECT_FLOAT_EQ(result.candidates_[1].distance_, expected_distances[1]);
+  EXPECT_TRUE(result.exhausted_);
+}
+
+TEST(LegacyGraphSearchBackendTest, QuantizedSearchUsesRawSpaceForExactDistances) {
+  auto raw_space = make_one_dim_raw_space({0.0F, 1.0F, 10.0F});
+  auto search_space = make_one_dim_sq8_space({0.0F, 1.0F, 10.0F});
+  auto graph = make_graph_from_edges({{1}, {2}, {}});
+  auto job = std::make_shared<GraphSearchJob<SQ8SpaceType, RawSpaceType>>(search_space,
+                                                                          graph,
+                                                                          nullptr,
+                                                                          raw_space);
+  LegacyGraphSearchBackend<SQ8SpaceType, RawSpaceType> backend(job);
+  std::vector<float> query = {0.25F};
+
+  auto result = backend.search(VectorSearchRequest<float, uint32_t>{.query_ = query.data(),
+                                                                    .topk_ = 2,
+                                                                    .candidate_budget_ = 3});
+
+  ASSERT_EQ(result.candidates_.size(), 2U);
+  for (const auto &candidate : result.candidates_) {
+    EXPECT_FLOAT_EQ(candidate.distance_, backend.exact_distance(query.data(), candidate.id_));
+  }
+}
+
+TEST(LegacyGraphSearchBackendTest, CursorOwnsTranslatedAcceptMaskAndContinuesTraversal) {
+  auto space = make_one_dim_raw_space({10.0F, 20.0F, 30.0F, 0.0F, 1.0F});
+  auto graph = make_graph_from_edges({{3, 1}, {2}, {}, {4}, {}});
+  auto job = std::make_shared<GraphSearchJob<RawSpaceType>>(space, graph);
+  LegacyGraphSearchBackend<RawSpaceType> backend(job);
+  RejectIdMask accept_mask(3);
+  std::vector<float> query = {0.1F};
+
+  auto cursor =
+      backend.open_cursor(VectorSearchRequest<float, uint32_t>{.query_ = query.data(),
+                                                               .topk_ = 2,
+                                                               .candidate_budget_ = 4,
+                                                               .accept_mask_ = &accept_mask});
+  auto first = cursor->next_batch(1);
+  auto second = cursor->next_batch(2);
+
+  ASSERT_EQ(first.candidates_.size(), 1U);
+  EXPECT_NE(first.candidates_[0].id_, 3U);
+  for (const auto &candidate : second.candidates_) {
+    EXPECT_NE(candidate.id_, 3U);
+  }
+  EXPECT_EQ(cursor->stats().emitted_, first.candidates_.size() + second.candidates_.size());
 }
 
 TEST(GraphSearchJobUnitTest, UpdatedSearchUsesSecondHopNeighborsFromJobContext) {
@@ -972,6 +1048,24 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithEmptyFilter) {
     }
   }
   EXPECT_GT(valid_count, 0U);
+}
+
+TEST_F(RaBitQHybridSearchTest, LegacyBackendSupportsDirectAndCursorSearch) {
+  using SearchJobType = GraphSearchJob<RaBitQSpaceWithScalar>;
+  auto search_job = std::make_shared<SearchJobType>(resources().plain_space_, nullptr);
+  LegacyGraphSearchBackend<RaBitQSpaceWithScalar> backend(search_job);
+  auto query = resources().ds_.queries_.data();
+  VectorSearchRequest<float, uint32_t> request{.query_ = query,
+                                               .topk_ = 5,
+                                               .candidate_budget_ = 86};
+
+  auto result = backend.search(request);
+  auto cursor = backend.open_cursor(request);
+  auto first_batch = cursor->next_batch(2);
+
+  EXPECT_FALSE(result.candidates_.empty());
+  EXPECT_FALSE(first_batch.candidates_.empty());
+  EXPECT_EQ(cursor->stats().emitted_, first_batch.candidates_.size());
 }
 
 TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithCategoryFilter) {
