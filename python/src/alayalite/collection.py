@@ -262,6 +262,7 @@ class Collection:
             metadata_list = [item[3] for item in items]
             self.fit(
                 vectors,
+                num_threads=build_threads,
                 item_ids=item_ids,
                 documents=documents,
                 metadata_list=metadata_list,
