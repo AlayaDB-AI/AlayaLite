@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "scalar/id_set_algebra.hpp"
 #include "utils/metadata_filter_matcher.hpp"
 
 namespace alaya {
@@ -94,7 +95,105 @@ void expect_matches(const std::vector<uint8_t> &matches, const std::vector<uint8
   }
 }
 
+class FakeScalarIndex final : public ScalarIndex<TestID> {
+ public:
+  [[nodiscard]] auto is_indexed_field(const std::string &field) const -> bool override {
+    return field == "category";
+  }
+
+  [[nodiscard]] auto lookup(const FilterCondition &condition) const
+      -> std::optional<std::vector<TestID>> override {
+    if (condition.field == "category" && condition.op == FilterOp::EQ &&
+        condition.value == MetadataValue{std::string("books")}) {
+      return std::vector<TestID>{0, 2};
+    }
+    return std::nullopt;
+  }
+};
+
+class FakeRecordStore final : public RecordStore<TestID> {
+ public:
+  explicit FakeRecordStore(const std::vector<ScalarData> &records) {
+    for (const auto &record : records) {
+      auto bytes = record.serialize();
+      records_.emplace_back(bytes.begin(), bytes.end());
+    }
+  }
+
+  auto get_raw_scalar(TestID id, std::string &value) const -> bool override {
+    if (id >= records_.size()) {
+      return false;
+    }
+    value = records_[id];
+    return true;
+  }
+
+  [[nodiscard]] auto batch_get_raw_scalars(const std::vector<TestID> &ids) const
+      -> std::vector<std::string> override {
+    std::vector<std::string> result;
+    result.reserve(ids.size());
+    for (auto id : ids) {
+      std::string value;
+      get_raw_scalar(id, value);
+      result.push_back(std::move(value));
+    }
+    return result;
+  }
+
+  [[nodiscard]] auto find_by_item_id(const std::string &item_id) const
+      -> std::optional<TestID> override {
+    const auto records = make_sample_records();
+    for (TestID id = 0; id < records.size(); ++id) {
+      if (records[id].item_id == item_id) {
+        return id;
+      }
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] auto size() const -> size_t override { return records_.size(); }
+
+ private:
+  std::vector<std::string> records_;  ///< Serialized canonical rows used by residual evaluation.
+};
+
 }  // namespace
+
+TEST(ScalarIdSetAlgebraTest, ComputesSortedSetOperationsAndComplement) {
+  EXPECT_EQ(ScalarIdSetAlgebra<TestID>::intersect({0, 2, 3}, {1, 2, 3}),
+            (std::vector<TestID>{2, 3}));
+  EXPECT_EQ(ScalarIdSetAlgebra<TestID>::unite({0, 2}, {1, 2, 3}),
+            (std::vector<TestID>{0, 1, 2, 3}));
+
+  auto [allow, matched_count] = ScalarIdSetAlgebra<TestID>::complement({1, 3}, 5);
+  EXPECT_EQ(matched_count, 3U);
+  EXPECT_TRUE(allow.get(0));
+  EXPECT_FALSE(allow.get(1));
+  EXPECT_TRUE(allow.get(2));
+  EXPECT_FALSE(allow.get(3));
+  EXPECT_TRUE(allow.get(4));
+}
+
+TEST(MetadataFilterExecutorInterfaceTest, UsesIndexCandidatesAndRecordStoreResiduals) {
+  FakeScalarIndex scalar_index;
+  FakeRecordStore record_store(make_sample_records());
+  MetadataFilter filter;
+  filter.add_eq("category", std::string("books")).add_gt("score", 2.0);
+
+  MetadataFilterExecutor<TestID> executor(filter,
+                                          &scalar_index,
+                                          &record_store,
+                                          record_store.size());
+
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_FALSE(executor.index_fast_path_is_exact());
+  EXPECT_FALSE(executor.match(0));
+  EXPECT_TRUE(executor.match(2));
+  EXPECT_FALSE(executor.match(3));
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 1U);
+  expect_mask(result, {true, true, false, true});
+}
 
 TEST(MetadataFilterConditionTest, EvaluatesAllComparisonOperators) {
   const MetadataMap metadata = {
