@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -15,7 +16,10 @@
 #include <utility>
 #include <vector>
 
-#include "storage/rocksdb_storage.hpp"
+#include "scalar/id_set_algebra.hpp"
+#include "scalar/scalar_index.hpp"
+#include "storage/legacy_rocksdb_adapters.hpp"
+#include "storage/record_store.hpp"
 #include "utils/metadata_filter.hpp"
 #include "utils/query_utils.hpp"
 #include "utils/scalar_data.hpp"
@@ -44,21 +48,52 @@ class MetadataFilterExecutor {
     kSkip,
   };
 
+  /** @brief Build an executor through compatibility adapters over legacy RocksDB storage. */
   MetadataFilterExecutor(const MetadataFilter &filter,
                          const RocksDBStorage<IDType> *storage,
                          size_t data_num,
                          IndexBuildMode index_build_mode = IndexBuildMode::kBuild)
-      : filter_(filter), storage_(storage), data_num_(data_num), allow_ids_(data_num) {
-    if (storage_ == nullptr) {
+      : filter_(filter), data_num_(data_num), allow_ids_(data_num) {
+    if (storage == nullptr) {
       throw std::invalid_argument("Storage cannot be null");
     }
 
+    owned_scalar_index_ = std::make_shared<LegacyRocksDBScalarIndex<IDType>>(storage);
+    owned_record_store_ = std::make_shared<LegacyRocksDBRecordStore<IDType>>(storage);
+    scalar_index_ = owned_scalar_index_.get();
+    record_store_ = owned_record_store_.get();
+
+    initialize(index_build_mode);
+  }
+
+  /** @brief Build an executor from storage-engine-neutral scalar query providers. */
+  MetadataFilterExecutor(const MetadataFilter &filter,
+                         const ScalarIndex<IDType> *scalar_index,
+                         const RecordStore<IDType> *record_store,
+                         size_t data_num,
+                         IndexBuildMode index_build_mode = IndexBuildMode::kBuild)
+      : filter_(filter),
+        scalar_index_(scalar_index),
+        record_store_(record_store),
+        data_num_(data_num),
+        allow_ids_(data_num) {
+    if (scalar_index_ == nullptr || record_store_ == nullptr) {
+      throw std::invalid_argument("ScalarIndex and RecordStore cannot be null");
+    }
+
+    initialize(index_build_mode);
+  }
+
+ private:
+  /** @brief Collect residual fields and optionally compile the scalar-index fast path. */
+  void initialize(IndexBuildMode index_build_mode) {
     collect_required_fields(filter_, required_fields_);
     if (index_build_mode == IndexBuildMode::kBuild) {
       build_index_fast_path();
     }
   }
 
+ public:
   [[nodiscard]] auto filter() const -> const MetadataFilter & { return filter_; }
 
   /**
@@ -146,7 +181,7 @@ class MetadataFilterExecutor {
       return false;
     }
     std::string raw_value;
-    if (!storage_->get_raw_value(id, raw_value)) {
+    if (!record_store_->get_raw_scalar(id, raw_value)) {
       return false;
     }
     return evaluate_raw_value(raw_value);
@@ -182,7 +217,7 @@ class MetadataFilterExecutor {
       return result;
     }
 
-    auto raw_values = storage_->batch_get_raw_values(ids);
+    auto raw_values = record_store_->batch_get_raw_scalars(ids);
     for (size_t i = 0; i < ids.size(); ++i) {
       if (raw_values[i].empty()) {
         result.blocked_.set(i);
@@ -259,93 +294,12 @@ class MetadataFilterExecutor {
 
  private:
   [[nodiscard]] auto is_indexed_field(const std::string &field) const -> bool {
-    const auto &indexed_fields = storage_->config().indexed_fields_;
-    return std::find(indexed_fields.begin(), indexed_fields.end(), field) != indexed_fields.end();
+    return scalar_index_->is_indexed_field(field);
   }
 
   [[nodiscard]] auto lookup_indexed_ids(const FilterCondition &cond) const
       -> std::optional<std::vector<IDType>> {
-    if (!is_indexed_field(cond.field)) {
-      return std::nullopt;
-    }
-
-    std::vector<IDType> ids;
-    switch (cond.op) {
-      case FilterOp::EQ:
-        return storage_->get_ids_by_field_value(cond.field, cond.value);
-      case FilterOp::IN_SET:
-        ids.reserve(cond.values.size());
-        for (const auto &value : cond.values) {
-          auto partial = storage_->get_ids_by_field_value(cond.field, value);
-          ids.insert(ids.end(), partial.begin(), partial.end());
-        }
-        std::sort(ids.begin(), ids.end());
-        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-        return ids;
-      case FilterOp::GE:
-        if (std::holds_alternative<int64_t>(cond.value)) {
-          return storage_->get_ids_by_int_range(cond.field,
-                                                std::get<int64_t>(cond.value),
-                                                std::numeric_limits<int64_t>::max());
-        }
-        if (std::holds_alternative<double>(cond.value)) {
-          return storage_->get_ids_by_double_range(cond.field,
-                                                   std::get<double>(cond.value),
-                                                   std::numeric_limits<double>::max());
-        }
-        return std::nullopt;
-      case FilterOp::GT:
-        if (std::holds_alternative<int64_t>(cond.value)) {
-          auto value = std::get<int64_t>(cond.value);
-          if (value == std::numeric_limits<int64_t>::max()) {
-            return std::vector<IDType>{};
-          }
-          return storage_->get_ids_by_int_range(cond.field,
-                                                value + 1,
-                                                std::numeric_limits<int64_t>::max());
-        }
-        if (std::holds_alternative<double>(cond.value)) {
-          auto value = std::get<double>(cond.value);
-          return storage_
-              ->get_ids_by_double_range(cond.field,
-                                        std::nextafter(value, std::numeric_limits<double>::max()),
-                                        std::numeric_limits<double>::max());
-        }
-        return std::nullopt;
-      case FilterOp::LE:
-        if (std::holds_alternative<int64_t>(cond.value)) {
-          return storage_->get_ids_by_int_range(cond.field,
-                                                std::numeric_limits<int64_t>::min(),
-                                                std::get<int64_t>(cond.value));
-        }
-        if (std::holds_alternative<double>(cond.value)) {
-          return storage_->get_ids_by_double_range(cond.field,
-                                                   std::numeric_limits<double>::lowest(),
-                                                   std::get<double>(cond.value));
-        }
-        return std::nullopt;
-      case FilterOp::LT:
-        if (std::holds_alternative<int64_t>(cond.value)) {
-          auto value = std::get<int64_t>(cond.value);
-          if (value == std::numeric_limits<int64_t>::min()) {
-            return std::vector<IDType>{};
-          }
-          return storage_->get_ids_by_int_range(cond.field,
-                                                std::numeric_limits<int64_t>::min(),
-                                                value - 1);
-        }
-        if (std::holds_alternative<double>(cond.value)) {
-          auto value = std::get<double>(cond.value);
-          return storage_
-              ->get_ids_by_double_range(cond.field,
-                                        std::numeric_limits<double>::lowest(),
-                                        std::nextafter(value,
-                                                       std::numeric_limits<double>::lowest()));
-        }
-        return std::nullopt;
-      default:
-        return std::nullopt;
-    }
+    return scalar_index_->lookup(cond);
   }
 
   [[nodiscard]] auto simple_direct_index_condition(const MetadataFilter &filter) const
@@ -364,98 +318,7 @@ class MetadataFilterExecutor {
   template <typename Visitor>
   [[nodiscard]] auto visit_indexed_ids(const FilterCondition &cond, Visitor &&visitor) const
       -> bool {
-    if (!is_indexed_field(cond.field)) {
-      return false;
-    }
-
-    switch (cond.op) {
-      case FilterOp::EQ:
-        storage_->visit_ids_by_field_value(cond.field, cond.value, visitor);
-        return true;
-      case FilterOp::IN_SET:
-        for (const auto &value : cond.values) {
-          storage_->visit_ids_by_field_value(cond.field, value, visitor);
-        }
-        return true;
-      case FilterOp::GE:
-        if (std::holds_alternative<int64_t>(cond.value)) {
-          storage_->visit_ids_by_int_range(cond.field,
-                                           std::get<int64_t>(cond.value),
-                                           std::numeric_limits<int64_t>::max(),
-                                           visitor);
-          return true;
-        }
-        if (std::holds_alternative<double>(cond.value)) {
-          storage_->visit_ids_by_double_range(cond.field,
-                                              std::get<double>(cond.value),
-                                              std::numeric_limits<double>::max(),
-                                              visitor);
-          return true;
-        }
-        return false;
-      case FilterOp::GT:
-        if (std::holds_alternative<int64_t>(cond.value)) {
-          auto value = std::get<int64_t>(cond.value);
-          if (value == std::numeric_limits<int64_t>::max()) {
-            return true;
-          }
-          storage_->visit_ids_by_int_range(cond.field,
-                                           value + 1,
-                                           std::numeric_limits<int64_t>::max(),
-                                           visitor);
-          return true;
-        }
-        if (std::holds_alternative<double>(cond.value)) {
-          auto value = std::get<double>(cond.value);
-          storage_->visit_ids_by_double_range(cond.field,
-                                              std::nextafter(value,
-                                                             std::numeric_limits<double>::max()),
-                                              std::numeric_limits<double>::max(),
-                                              visitor);
-          return true;
-        }
-        return false;
-      case FilterOp::LE:
-        if (std::holds_alternative<int64_t>(cond.value)) {
-          storage_->visit_ids_by_int_range(cond.field,
-                                           std::numeric_limits<int64_t>::min(),
-                                           std::get<int64_t>(cond.value),
-                                           visitor);
-          return true;
-        }
-        if (std::holds_alternative<double>(cond.value)) {
-          storage_->visit_ids_by_double_range(cond.field,
-                                              std::numeric_limits<double>::lowest(),
-                                              std::get<double>(cond.value),
-                                              visitor);
-          return true;
-        }
-        return false;
-      case FilterOp::LT:
-        if (std::holds_alternative<int64_t>(cond.value)) {
-          auto value = std::get<int64_t>(cond.value);
-          if (value == std::numeric_limits<int64_t>::min()) {
-            return true;
-          }
-          storage_->visit_ids_by_int_range(cond.field,
-                                           std::numeric_limits<int64_t>::min(),
-                                           value - 1,
-                                           visitor);
-          return true;
-        }
-        if (std::holds_alternative<double>(cond.value)) {
-          auto value = std::get<double>(cond.value);
-          storage_->visit_ids_by_double_range(cond.field,
-                                              std::numeric_limits<double>::lowest(),
-                                              std::nextafter(value,
-                                                             std::numeric_limits<double>::lowest()),
-                                              visitor);
-          return true;
-        }
-        return false;
-      default:
-        return false;
-    }
+    return scalar_index_->visit(cond, std::forward<Visitor>(visitor));
   }
 
   void normalize_indexed_ids(std::vector<IDType> &ids) const {
@@ -489,54 +352,6 @@ class MetadataFilterExecutor {
       default:
         return false;
     }
-  }
-
-  [[nodiscard]] auto intersect_ids(const std::vector<IDType> &lhs,
-                                   const std::vector<IDType> &rhs) const -> std::vector<IDType> {
-    std::vector<IDType> result;
-    result.reserve(std::min(lhs.size(), rhs.size()));
-    std::set_intersection(lhs.begin(),
-                          lhs.end(),
-                          rhs.begin(),
-                          rhs.end(),
-                          std::back_inserter(result));
-    return result;
-  }
-
-  [[nodiscard]] auto union_ids(const std::vector<IDType> &lhs, const std::vector<IDType> &rhs) const
-      -> std::vector<IDType> {
-    std::vector<IDType> result;
-    result.reserve(lhs.size() + rhs.size());
-    std::set_union(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), std::back_inserter(result));
-    return result;
-  }
-
-  [[nodiscard]] auto complement_allow_ids(const std::vector<IDType> &ids) const
-      -> std::pair<DynamicBitset, size_t> {
-    DynamicBitset result(data_num_);
-    result.set_all();
-    size_t excluded_count = 0;
-    for (auto id : ids) {
-      auto raw_id = static_cast<size_t>(id);
-      if (raw_id < data_num_ && result.get(raw_id)) {
-        result.reset(raw_id);
-        ++excluded_count;
-      }
-    }
-    return {std::move(result), data_num_ - excluded_count};
-  }
-
-  [[nodiscard]] auto complement_allow_ids(const DynamicBitset &ids) const
-      -> std::pair<DynamicBitset, size_t> {
-    DynamicBitset result = ids;
-    result.flip_all();
-    size_t matched_count = data_num_;
-    for (size_t raw_id = 0; raw_id < data_num_; ++raw_id) {
-      if (ids.get(raw_id)) {
-        --matched_count;
-      }
-    }
-    return {std::move(result), matched_count};
   }
 
   [[nodiscard]] auto materialize_plan_ids(const IndexedFilterPlan &plan) const
@@ -627,7 +442,7 @@ class MetadataFilterExecutor {
       if (!current_ids.has_value()) {
         current_ids = std::move(plan_ids);
       } else {
-        current_ids = intersect_ids(*current_ids, plan_ids);
+        current_ids = ScalarIdSetAlgebra<IDType>::intersect(*current_ids, plan_ids);
       }
       exact = exact && plan->exact_;
     };
@@ -665,7 +480,7 @@ class MetadataFilterExecutor {
         current_ids = std::move(plan_ids);
         have_plan = true;
       } else {
-        current_ids = union_ids(current_ids, plan_ids);
+        current_ids = ScalarIdSetAlgebra<IDType>::unite(current_ids, plan_ids);
       }
       exact = exact && plan->exact_;
       return true;
@@ -696,10 +511,12 @@ class MetadataFilterExecutor {
       return std::nullopt;
     }
     if (child_plan->allow_ids_.has_value()) {
-      auto [allow_ids, matched_count] = complement_allow_ids(*child_plan->allow_ids_);
+      auto [allow_ids, matched_count] =
+          ScalarIdSetAlgebra<IDType>::complement(*child_plan->allow_ids_, data_num_);
       return IndexedFilterPlan{std::vector<IDType>{}, std::move(allow_ids), matched_count, true};
     }
-    auto [allow_ids, matched_count] = complement_allow_ids(child_plan->ids_);
+    auto [allow_ids, matched_count] =
+        ScalarIdSetAlgebra<IDType>::complement(child_plan->ids_, data_num_);
     return IndexedFilterPlan{std::vector<IDType>{}, std::move(allow_ids), matched_count, true};
   }
 
@@ -750,16 +567,19 @@ class MetadataFilterExecutor {
     }
   }
 
-  const MetadataFilter &filter_;
-  const RocksDBStorage<IDType> *storage_ = nullptr;
-  size_t data_num_ = 0;
-  std::unordered_set<std::string> required_fields_;
-  DynamicBitset allow_ids_;
-  std::vector<IDType> indexed_ids_;
-  size_t indexed_count_ = 0;
-  bool has_index_fast_path_ = false;
-  bool index_fast_path_exact_ = false;
-  bool index_fast_path_uses_materialized_ids_ = true;
+  const MetadataFilter &filter_;  ///< Parsed predicate tree whose lifetime exceeds this executor.
+  std::shared_ptr<ScalarIndex<IDType>> owned_scalar_index_;  ///< Legacy compatibility adapter.
+  std::shared_ptr<RecordStore<IDType>> owned_record_store_;  ///< Legacy compatibility adapter.
+  const ScalarIndex<IDType> *scalar_index_ = nullptr;  ///< Non-owning secondary-index provider.
+  const RecordStore<IDType> *record_store_ = nullptr;  ///< Non-owning canonical-record provider.
+  size_t data_num_ = 0;                              ///< Valid internal-ID universe [0, data_num_).
+  std::unordered_set<std::string> required_fields_;  ///< Fields needed for residual evaluation.
+  DynamicBitset allow_ids_;             ///< Materialized candidates for the current indexed plan.
+  std::vector<IDType> indexed_ids_;     ///< Sorted candidates when vector form is cheaper.
+  size_t indexed_count_ = 0;            ///< Candidate count before residual evaluation.
+  bool has_index_fast_path_ = false;    ///< At least one predicate branch used ScalarIndex.
+  bool index_fast_path_exact_ = false;  ///< Indexed candidates fully decide the predicate.
+  bool index_fast_path_uses_materialized_ids_ = true;  ///< indexed_ids_ is authoritative.
 };
 
 }  // namespace alaya
