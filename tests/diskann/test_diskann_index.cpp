@@ -121,6 +121,15 @@ TEST_F(DiskANNIndexTest, BuildRejectsEmptyInput) {
                std::invalid_argument);
 }
 
+TEST_F(DiskANNIndexTest, BuildRejectsDuplicateExternalLabels) {
+  const auto v = make_vectors(10, 4);
+  auto labels = make_labels(10);
+  labels[7] = labels[2];
+  EXPECT_THROW(DiskANNIndex::build(dir(), v.data(), labels.data(), 10, 4, {}),
+               std::invalid_argument);
+  EXPECT_FALSE(std::filesystem::exists(dir_));
+}
+
 TEST_F(DiskANNIndexTest, BuildRejectsExistingDirectoryBeforeWriting) {
   std::filesystem::create_directories(dir_);
   const auto v = make_vectors(10, 4);

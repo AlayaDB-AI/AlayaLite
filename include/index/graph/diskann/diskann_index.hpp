@@ -200,6 +200,7 @@ class DiskANNIndex {
     if (vectors == nullptr || labels == nullptr) {
       throw std::invalid_argument("DiskANNIndex::build: null vectors/labels");
     }
+    validate_unique_external_labels(labels, n, "build");
     if (params.pq_n_chunks > 0 && dim % params.pq_n_chunks != 0) {
       throw std::invalid_argument("DiskANNIndex::build: dim not divisible by pq_n_chunks");
     }
@@ -794,6 +795,10 @@ class DiskANNIndex {
     std::shared_lock<std::shared_mutex> lock(update_mutex_);
     return slot_alloc_.is_deleted(id);
   }
+  [[nodiscard]] bool contains_label(uint64_t label) const {
+    std::shared_lock<std::shared_mutex> lock(update_mutex_);
+    return label_to_slot_.contains(label);
+  }
 
   /// Sentinel label for padded (missing) result slots.
   static constexpr uint64_t kNoLabel = std::numeric_limits<uint64_t>::max();
@@ -811,6 +816,10 @@ class DiskANNIndex {
       throw std::invalid_argument("DiskANNIndex::insert: null query");
     }
     std::lock_guard<std::mutex> update_guard(update_serial_mutex_);
+    {
+      std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
+      validate_insert_label_unlocked(label);
+    }
     page_io_->clear_cache();
 
     const std::vector<uint32_t> pruned = select_insert_neighbors(query);
@@ -839,6 +848,10 @@ class DiskANNIndex {
     }
 
     std::lock_guard<std::mutex> update_guard(update_serial_mutex_);
+    {
+      std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
+      validate_insert_labels_unlocked(labels, count);
+    }
     page_io_->clear_cache();
 
     const uint32_t workers = std::min({batch_size, count, update_insert_threads_});
@@ -870,6 +883,10 @@ class DiskANNIndex {
     }
 
     std::lock_guard<std::mutex> update_guard(update_serial_mutex_);
+    {
+      std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
+      validate_insert_labels_unlocked(labels, count);
+    }
     page_io_->clear_cache();
     return batch_insert_locked_with_pool(vectors, labels, count, batch_size, pool);
   }
@@ -881,15 +898,21 @@ class DiskANNIndex {
       throw std::runtime_error("DiskANNIndex::remove: index not loaded in updatable mode");
     }
     std::lock_guard<std::mutex> update_guard(update_serial_mutex_);
+    remove_internal_locked(internal_id);
+  }
+
+  /// Lazy-delete by external label.
+  void remove_by_label(uint64_t label) {
+    if (!updatable_) {
+      throw std::runtime_error("DiskANNIndex::remove_by_label: index not loaded in updatable mode");
+    }
+    std::lock_guard<std::mutex> update_guard(update_serial_mutex_);
+    uint32_t internal_id = 0;
     {
       std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
-      validate_removable_slot(internal_id);
+      internal_id = lookup_label_unlocked(label, "remove_by_label");
     }
-    page_io_->clear_cache();
-    remove_unlocked(internal_id);
-    if (maybe_safety_net_reconnect()) {
-      page_io_->flush_dirty_pages();
-    }
+    remove_internal_locked(internal_id);
   }
 
   /// Lazy-delete a batch using a caller-owned coroutine pool. This mirrors
@@ -902,22 +925,7 @@ class DiskANNIndex {
       return;
     }
     std::lock_guard<std::mutex> update_guard(update_serial_mutex_);
-    {
-      std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
-      validate_remove_batch(internal_ids, count);
-    }
-    page_io_->clear_cache();
-    std::vector<std::vector<uint32_t>> old_neighbors =
-        read_delete_neighbors(internal_ids, count, &pool);
-    {
-      std::unique_lock<std::shared_mutex> state_lock(update_mutex_);
-      for (uint32_t i = 0; i < count; ++i) {
-        remove_unlocked_with_neighbors(internal_ids[i], std::move(old_neighbors[i]));
-      }
-    }
-    if (maybe_safety_net_reconnect()) {
-      page_io_->flush_dirty_pages();
-    }
+    batch_remove_internal_locked(internal_ids, count, &pool);
   }
 
   /// Lazy-delete a batch of internal ids using the same semantics as remove().
@@ -934,22 +942,37 @@ class DiskANNIndex {
       throw std::invalid_argument("DiskANNIndex::batch_remove: null ids");
     }
     std::lock_guard<std::mutex> update_guard(update_serial_mutex_);
+    batch_remove_internal_locked(internal_ids, count, nullptr);
+  }
+
+  /// Lazy-delete a batch of external labels using the same semantics as remove_by_label().
+  void batch_remove_by_labels(const uint64_t *labels, uint32_t count) {
+    if (!updatable_) {
+      throw std::runtime_error(
+          "DiskANNIndex::batch_remove_by_labels: index not loaded in updatable mode");
+    }
+    if (count == 0) {
+      return;
+    }
+    if (labels == nullptr) {
+      throw std::invalid_argument("DiskANNIndex::batch_remove_by_labels: null labels");
+    }
+    std::lock_guard<std::mutex> update_guard(update_serial_mutex_);
+    std::vector<uint32_t> internal_ids;
+    internal_ids.reserve(count);
     {
       std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
-      validate_remove_batch(internal_ids, count);
-    }
-    page_io_->clear_cache();
-    std::vector<std::vector<uint32_t>> old_neighbors =
-        read_delete_neighbors(internal_ids, count, nullptr);
-    {
-      std::unique_lock<std::shared_mutex> state_lock(update_mutex_);
+      std::unordered_set<uint64_t> seen;
+      seen.reserve(count);
       for (uint32_t i = 0; i < count; ++i) {
-        remove_unlocked_with_neighbors(internal_ids[i], std::move(old_neighbors[i]));
+        if (!seen.insert(labels[i]).second) {
+          throw std::invalid_argument(
+              "DiskANNIndex::batch_remove_by_labels: duplicate external label");
+        }
+        internal_ids.push_back(lookup_label_unlocked(labels[i], "batch_remove_by_labels"));
       }
     }
-    if (maybe_safety_net_reconnect()) {
-      page_io_->flush_dirty_pages();
-    }
+    batch_remove_internal_locked(internal_ids.data(), count, nullptr);
   }
 
   /**
@@ -1148,6 +1171,7 @@ class DiskANNIndex {
     } else {
       slot_alloc_.reset(static_cast<uint32_t>(max_slot_id_));
     }
+    rebuild_label_lookup_unlocked();
     updatable_ = true;
   }
 
@@ -1469,6 +1493,68 @@ class DiskANNIndex {
     return slot;
   }
 
+  static void validate_unique_external_labels(const uint64_t *labels,
+                                              uint64_t count,
+                                              const char *method) {
+    std::unordered_set<uint64_t> seen;
+    seen.reserve(static_cast<size_t>(count));
+    for (uint64_t i = 0; i < count; ++i) {
+      if (labels[i] == kNoLabel) {
+        throw std::invalid_argument(std::string("DiskANNIndex::") + method +
+                                    ": external label is reserved");
+      }
+      if (!seen.insert(labels[i]).second) {
+        throw std::invalid_argument(std::string("DiskANNIndex::") + method +
+                                    ": duplicate external label");
+      }
+    }
+  }
+
+  void validate_insert_label_unlocked(uint64_t label) const {
+    if (label == kNoLabel) {
+      throw std::invalid_argument("DiskANNIndex::insert: external label is reserved");
+    }
+    if (label_to_slot_.contains(label)) {
+      throw std::invalid_argument("DiskANNIndex::insert: duplicate external label");
+    }
+  }
+
+  void validate_insert_labels_unlocked(const uint64_t *labels, uint32_t count) const {
+    validate_unique_external_labels(labels, count, "batch_insert");
+    for (uint32_t i = 0; i < count; ++i) {
+      if (label_to_slot_.contains(labels[i])) {
+        throw std::invalid_argument("DiskANNIndex::batch_insert: duplicate external label");
+      }
+    }
+  }
+
+  uint32_t lookup_label_unlocked(uint64_t label, const char *method) const {
+    const auto it = label_to_slot_.find(label);
+    if (it == label_to_slot_.end()) {
+      throw std::out_of_range(std::string("DiskANNIndex::") + method +
+                              ": external label not found: " + std::to_string(label));
+    }
+    return it->second;
+  }
+
+  void rebuild_label_lookup_unlocked() {
+    label_to_slot_.clear();
+    label_to_slot_.reserve(static_cast<size_t>(live_count_));
+    for (uint32_t slot = 0; slot < labels_.size(); ++slot) {
+      if (slot_alloc_.is_deleted(slot)) {
+        continue;
+      }
+      const uint64_t label = labels_[slot];
+      if (label == kNoLabel) {
+        throw std::runtime_error("DiskANNIndex::load: live slot has reserved external label");
+      }
+      if (!label_to_slot_.emplace(label, slot).second) {
+        throw std::runtime_error("DiskANNIndex::load: duplicate live external label: " +
+                                 std::to_string(label));
+      }
+    }
+  }
+
   void encode_pq_slot(const float *query, uint32_t slot) {
     if (!has_pq_) {
       return;
@@ -1536,6 +1622,39 @@ class DiskANNIndex {
     remove_unlocked_with_neighbors(internal_id, nd.nbrs);
   }
 
+  void remove_internal_locked(uint32_t internal_id) {
+    {
+      std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
+      validate_removable_slot(internal_id);
+    }
+    page_io_->clear_cache();
+    remove_unlocked(internal_id);
+    if (maybe_safety_net_reconnect()) {
+      page_io_->flush_dirty_pages();
+    }
+  }
+
+  void batch_remove_internal_locked(const uint32_t *internal_ids,
+                                    uint32_t count,
+                                    coro::thread_pool *pool) {
+    {
+      std::shared_lock<std::shared_mutex> state_lock(update_mutex_);
+      validate_remove_batch(internal_ids, count);
+    }
+    page_io_->clear_cache();
+    std::vector<std::vector<uint32_t>> old_neighbors =
+        read_delete_neighbors(internal_ids, count, pool);
+    {
+      std::unique_lock<std::shared_mutex> state_lock(update_mutex_);
+      for (uint32_t i = 0; i < count; ++i) {
+        remove_unlocked_with_neighbors(internal_ids[i], std::move(old_neighbors[i]));
+      }
+    }
+    if (maybe_safety_net_reconnect()) {
+      page_io_->flush_dirty_pages();
+    }
+  }
+
   /// Neighbor lists of a delete batch. With the reactor this is one wave of
   /// concurrent io_uring reads over the batch's unique pages (a single
   /// suspension); without it, the blocking std::thread reader.
@@ -1559,6 +1678,11 @@ class DiskANNIndex {
 
   void remove_unlocked_with_neighbors(uint32_t internal_id, std::vector<uint32_t> old_neighbors) {
     update_ctx_.removed_node_nbrs_[internal_id] = std::move(old_neighbors);
+    const uint64_t label = labels_[internal_id];
+    const auto label_it = label_to_slot_.find(label);
+    if (label_it != label_to_slot_.end() && label_it->second == internal_id) {
+      label_to_slot_.erase(label_it);
+    }
     slot_alloc_.free(internal_id);
     --live_count_;
     ++ops_since_last_insert_;
@@ -1696,6 +1820,7 @@ class DiskANNIndex {
     std::unique_lock<std::shared_mutex> state_lock(update_mutex_);
     for (const uint32_t *it = begin; it != end; ++it) {
       slot_alloc_.publish(*it);
+      label_to_slot_[labels_[*it]] = *it;
     }
   }
 
@@ -2099,6 +2224,7 @@ class DiskANNIndex {
     page_io_.reset();
     update_reactor_.reset();  // after page_io_: it holds a raw pointer to the reactor
     update_ctx_.clear();
+    label_to_slot_.clear();
     updatable_ = false;
     loaded_ = false;
   }
@@ -2221,6 +2347,7 @@ class DiskANNIndex {
 
   // in-memory artifacts
   std::vector<uint64_t> labels_;
+  std::unordered_map<uint64_t, uint32_t> label_to_slot_;  ///< Live external label to slot.
   NodeCache cache_;
   PQTable pq_;
   std::unique_ptr<AlignedFileReader> reader_;

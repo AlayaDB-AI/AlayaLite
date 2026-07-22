@@ -34,6 +34,7 @@
 
 #include "client.hpp"
 #include "disk_collection.hpp"
+#include "diskann.hpp"
 #include "index.hpp"
 
 namespace py = pybind11;
@@ -55,6 +56,9 @@ PYBIND11_MODULE(_alayalitepy, m) {
   // Registered unconditionally; the builder has no Linux-only deps.
   auto vamana_mod = m.def_submodule("vamana", "Vamana graph builder");
   alaya::vamana::bindings::register_vamana_module(vamana_mod);
+
+  auto diskann_mod = m.def_submodule("diskann", "Standalone updatable DiskANN index");
+  alaya::diskann::pybindings::register_diskann(diskann_mod);
 
   // define version info
 #ifdef VERSION_INFO

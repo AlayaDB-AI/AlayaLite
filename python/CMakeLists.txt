@@ -42,6 +42,7 @@ pybind11_add_module(
   MODULE
   NO_EXTRAS
   src/pybind.cpp
+  src/diskann_bindings.cpp
   src/index_factory.cpp
 )
 add_dependencies(${PYTHON_MODULE_NAME} alaya_codegen)

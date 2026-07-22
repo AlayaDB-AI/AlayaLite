@@ -236,6 +236,38 @@ TEST_F(UpdateE2ETest, InsertWithPageCacheIsVisibleToSearchAfterReturn) {
   ASSERT_TRUE(top1_is(nv.data(), id_label_[id]));
 }
 
+TEST_F(UpdateE2ETest, ExternalLabelsSupportLookupDeleteAndReuse) {
+  build_and_load(/*n=*/300, /*dim=*/32, /*r=*/32, {});
+  const uint32_t internal_id = deletable_.front();
+  const uint64_t label = id_label_[internal_id];
+
+  EXPECT_TRUE(idx_->contains_label(label));
+  idx_->remove_by_label(label);
+  EXPECT_FALSE(idx_->contains_label(label));
+  EXPECT_TRUE(idx_->is_deleted(internal_id));
+  EXPECT_THROW(idx_->remove_by_label(label), std::out_of_range);
+
+  const auto replacement = make_vectors(1, 32, /*seed=*/8128);
+  const uint32_t reused_id = idx_->insert(replacement.data(), label);
+  EXPECT_EQ(reused_id, internal_id);
+  EXPECT_TRUE(idx_->contains_label(label));
+  EXPECT_TRUE(top1_is(replacement.data(), label));
+}
+
+TEST_F(UpdateE2ETest, InsertRejectsDuplicateExternalLabelsBeforeMutation) {
+  build_and_load(/*n=*/300, /*dim=*/32, /*r=*/32, {});
+  const auto vectors = make_vectors(2, 32, /*seed=*/2048);
+  const uint64_t live_before = idx_->live_count();
+
+  EXPECT_THROW(idx_->insert(vectors.data(), 1001), std::invalid_argument);
+  EXPECT_EQ(idx_->live_count(), live_before);
+
+  const uint64_t labels[] = {9000, 9000};
+  EXPECT_THROW(idx_->batch_insert(vectors.data(), labels, 2, 2), std::invalid_argument);
+  EXPECT_EQ(idx_->live_count(), live_before);
+  EXPECT_FALSE(idx_->contains_label(9000));
+}
+
 TEST_F(UpdateE2ETest, InsertWithParallelReconnectKeepsVectorsSearchable) {
   DiskANNLoadParams lp;
   lp.page_cache_capacity = 16;
@@ -777,6 +809,24 @@ TEST_F(UpdateE2ETest, BatchRemoveHidesVectorsAndFeedsFreeList) {
   }
 }
 
+TEST_F(UpdateE2ETest, BatchRemoveByLabelsValidatesBeforeMutation) {
+  build_and_load(/*n=*/300, /*dim=*/32, /*r=*/32, {});
+  const uint64_t first_label = id_label_[deletable_[0]];
+  const uint64_t second_label = id_label_[deletable_[1]];
+  const uint64_t live_before = idx_->live_count();
+  const uint64_t invalid_labels[] = {first_label, 999999};
+
+  EXPECT_THROW(idx_->batch_remove_by_labels(invalid_labels, 2), std::out_of_range);
+  EXPECT_EQ(idx_->live_count(), live_before);
+  EXPECT_TRUE(idx_->contains_label(first_label));
+
+  const uint64_t labels[] = {first_label, second_label};
+  idx_->batch_remove_by_labels(labels, 2);
+  EXPECT_EQ(idx_->live_count(), live_before - 2);
+  EXPECT_FALSE(idx_->contains_label(first_label));
+  EXPECT_FALSE(idx_->contains_label(second_label));
+}
+
 // 7.5 -----------------------------------------------------------------------
 TEST_F(UpdateE2ETest, PersistenceAcrossFlushReload) {
   build_and_load(300, 32, 32, {});
@@ -801,8 +851,12 @@ TEST_F(UpdateE2ETest, PersistenceAcrossFlushReload) {
 
   EXPECT_EQ(idx_->live_count(), live_before);
   EXPECT_EQ(idx_->tombstone_count(), tomb_before);
+  for (const uint64_t label : inserted_labels) {
+    EXPECT_TRUE(idx_->contains_label(label));
+  }
   for (const uint32_t id : deleted) {
     EXPECT_TRUE(idx_->is_deleted(id)) << "tombstone for " << id << " must survive reload";
+    EXPECT_FALSE(idx_->contains_label(id_label_[id]));
   }
   for (const uint32_t id : {deleted[0], deleted[12], deleted[23]}) {
     uint64_t out_l[10];
