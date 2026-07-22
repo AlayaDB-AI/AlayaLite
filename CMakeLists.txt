@@ -41,6 +41,7 @@ alaya_preflight()
 include(cmake/AlayaToolchain.cmake)
 include(cmake/AlayaFlags.cmake)
 include(cmake/AlayaDependencies.cmake)
+include(cmake/AlayaDiskANN.cmake)
 include(cmake/AlayaLaser.cmake)
 include(cmake/Codecov.cmake)
 include(cmake/PrintSummary.cmake)
@@ -52,7 +53,7 @@ add_library(AlayaLite INTERFACE)
 target_include_directories(
   AlayaLite INTERFACE $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include> $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(AlayaLite INTERFACE ${THIRD_PARTY_LIBS})
+target_link_libraries(AlayaLite INTERFACE ${THIRD_PARTY_LIBS} alaya_diskann)
 target_compile_features(AlayaLite INTERFACE cxx_std_20)
 
 if(BUILD_TESTING)

@@ -7,22 +7,21 @@
  * @brief Sector-aligned read-modify-write of node records in diskann.index.
  *
  * `DiskPageIO` (design D6) is the single place that writes the disk index during
- * in-place updates. It owns its own `O_DIRECT | O_RDWR` file descriptor (separate
- * from the search reader's read-only descriptor); in serial-update mode (a global
- * mutex serialises search and update) the two descriptors never race, and because
- * both use O_DIRECT a completed pwrite is visible to a subsequent pread.
+ * in-place updates. It owns a read-write file handle separate from the search
+ * reader. Linux uses O_DIRECT, macOS uses positioned POSIX I/O, and Windows uses
+ * overlapped positioned I/O so concurrent page operations never share a mutable
+ * file offset.
  *
  * Each operation read-modify-writes one sector-aligned page so co-resident nodes
- * survive updates. Appends extend the file with ftruncate. Linux O_DIRECT is
- * required for the private syscall path; non-Linux update calls throw loudly.
+ * survive updates. Appends extend the file with the platform's native resize API.
  *
  * Concurrency: state is sharded by page offset (mutex + LRU page cache + RMW
  * scratch per shard), so parallel reconnect workers touching different pages
  * proceed independently — the analog of Yi's per-buffer locks; a single global
  * mutex here was measured to flatline update throughput regardless of worker
  * count. Pages map to exactly one shard, which preserves per-page RMW atomicity.
- * pread/pwrite are positional and thread-safe on one fd; ftruncate extension is
- * serialized by a dedicated file mutex (lock order: shard -> file, always).
+ * Platform reads and writes are positional and thread-safe on one handle; file
+ * extension is serialized by a dedicated mutex (lock order: shard -> file).
  */
 
 #pragma once
@@ -47,7 +46,12 @@
 #include "coro/task.hpp"
 #include "coro/thread_pool.hpp"
 #include "coro/when_all.hpp"
-#if defined(__linux__)
+#if defined(_WIN32)
+  #ifndef NOMINMAX
+    #define NOMINMAX
+  #endif
+  #include <windows.h>
+#else
   #include <fcntl.h>
   #include <sys/stat.h>
   #include <unistd.h>
@@ -109,7 +113,7 @@ class DiskPageIO {
     return node_from_page(shard.page_buf, id);
   }
 
-  /// Attach a UringReactor: page misses in the awaitable paths become
+  /// Attach a Linux UringReactor: page misses in the awaitable paths become
   /// suspending io_uring reads instead of pool-thread-blocking preads.
   /// nullptr (default) keeps every path on blocking pread.
   void set_reactor(UringReactor *reactor) {
@@ -129,7 +133,7 @@ class DiskPageIO {
   }
 
   /// Awaitable single-node read. With a reactor the miss suspends on io_uring;
-  /// otherwise the blocking O_DIRECT pread executes on @p pool.
+  /// otherwise the platform's blocking positioned read executes on @p pool.
   coro::task<NodeData> read_node_async(uint32_t id, coro::thread_pool &pool) {
 #if defined(__linux__)
     if (reactor_ != nullptr) {
@@ -230,7 +234,7 @@ class DiskPageIO {
   }
 
   /// Read multiple node records using coroutine tasks over private page buffers.
-  /// Shared cache state is protected briefly; O_DIRECT pread runs outside the mutex
+  /// Shared cache state is protected briefly; positioned I/O runs outside the mutex
   /// and is guarded by a page epoch before cached state is reused.
   std::vector<NodeData> read_nodes_async(const std::vector<uint32_t> &ids, uint32_t threads) {
     return read_nodes_async(ids.data(), static_cast<uint32_t>(ids.size()), threads);
@@ -485,6 +489,7 @@ class DiskPageIO {
         write_page_to_disk(shard, page_off, page);
       });
     }
+    sync_file();
   }
 
   [[nodiscard]] uint64_t file_size() const { return file_size_.load(std::memory_order_acquire); }
@@ -523,7 +528,7 @@ class DiskPageIO {
     DiskPageCache cache;
     std::unordered_map<uint64_t, uint64_t> versions;
     char *page_buf = nullptr;   ///< RMW scratch, guarded by mutex
-    char *flush_buf = nullptr;  ///< aligned bounce buffer for O_DIRECT cache flushes
+    char *flush_buf = nullptr;  ///< aligned bounce buffer for direct/unbuffered cache flushes
   };
 
   Shard &shard_for(uint64_t page_off) {
@@ -879,7 +884,7 @@ class DiskPageIO {
     {
       std::lock_guard<std::mutex> file_lock(file_mutex_);
       if (page_end > file_size_.load(std::memory_order_acquire)) {
-        extend_to(page_end);  // ftruncate; OS zero-fills the new region
+        extend_to(page_end);  // the platform resize API zero-fills the new region
         std::memset(shard.page_buf, 0, geom_.page_size);
         return;
       }
@@ -887,7 +892,7 @@ class DiskPageIO {
     read_page_locked(shard, id);  // another thread extended past us meanwhile
   }
 
-  // ---- platform-gated syscalls (Linux O_DIRECT) ----
+  // ---- platform file operations ----
   void open_rw(const std::string &path);
   void read_page_locked(Shard &shard, uint32_t id);
   void read_page_locked_off(Shard &shard, uint64_t page_off);
@@ -895,29 +900,39 @@ class DiskPageIO {
   void write_page_locked(Shard &shard, uint32_t id);
   void write_page_to_disk(Shard &shard, uint64_t page_off, const char *page);
   void extend_to(uint64_t new_size);
+  void sync_file();
   void close_fd();
 
   DiskLayoutGeometry geom_;
+#if defined(_WIN32)
+  HANDLE file_handle_ = INVALID_HANDLE_VALUE;
+#else
   int fd_ = -1;
+#endif
   std::atomic<uint64_t> file_size_{0};
   uint32_t num_shards_ = kNumShards;
   bool cache_enabled_ = false;
   std::vector<std::unique_ptr<Shard>> shards_;
   std::unordered_map<uint32_t, std::vector<float>> vec_cache_;
   mutable std::mutex vec_mutex_;
-  std::mutex file_mutex_;  ///< serializes ftruncate extension (after shard lock)
+  std::mutex file_mutex_;  ///< serializes file extension (after shard lock)
 #if defined(__linux__)
   UringReactor *reactor_ = nullptr;  ///< not owned; nullptr = blocking pread paths
 #endif
   uint32_t update_fallback_threads_ = 8;  ///< blocking fallback of read_neighbors_batch_async
 };
 
-#if defined(__linux__)
+#if !defined(_WIN32)
 
 inline void DiskPageIO::open_rw(const std::string &path) {
-  fd_ = ::open(path.c_str(), O_DIRECT | O_RDWR);  // NOLINT(hicpp-vararg)
+  #if defined(__linux__)
+  constexpr int kOpenFlags = O_DIRECT | O_RDWR;
+  #else
+  constexpr int kOpenFlags = O_RDWR;
+  #endif
+  fd_ = ::open(path.c_str(), kOpenFlags);  // NOLINT(hicpp-vararg)
   if (fd_ < 0) {
-    throw std::runtime_error("DiskPageIO::open_rw: cannot open (O_DIRECT|O_RDWR) " + path);
+    throw std::runtime_error("DiskPageIO::open_rw: cannot open read-write " + path);
   }
   struct stat st{};
   if (::fstat(fd_, &st) != 0) {
@@ -992,6 +1007,12 @@ inline void DiskPageIO::extend_to(uint64_t new_size) {
   file_size_.store(new_size, std::memory_order_release);
 }
 
+inline void DiskPageIO::sync_file() {
+  if (::fsync(fd_) != 0) {
+    throw std::runtime_error("DiskPageIO::sync_file: fsync failed");
+  }
+}
+
 inline void DiskPageIO::close_fd() {
   if (fd_ >= 0) {
     ::close(fd_);
@@ -999,31 +1020,161 @@ inline void DiskPageIO::close_fd() {
   }
 }
 
-#else  // !__linux__ : in-place updates require Linux O_DIRECT — fail loudly when used.
+#else
 
-inline void DiskPageIO::open_rw(const std::string &) {
-  throw std::runtime_error("DiskPageIO: in-place DiskANN updates require Linux (O_DIRECT)");
-}
-inline void DiskPageIO::read_page_locked(Shard &, uint32_t) {
-  throw std::runtime_error("DiskPageIO: unsupported platform (needs Linux O_DIRECT)");
-}
-inline void DiskPageIO::read_page_locked_off(Shard &, uint64_t) {
-  throw std::runtime_error("DiskPageIO: unsupported platform (needs Linux O_DIRECT)");
-}
-inline void DiskPageIO::read_page_from_disk(uint64_t, char *) const {
-  throw std::runtime_error("DiskPageIO: unsupported platform (needs Linux O_DIRECT)");
-}
-inline void DiskPageIO::write_page_locked(Shard &, uint32_t) {
-  throw std::runtime_error("DiskPageIO: unsupported platform (needs Linux O_DIRECT)");
-}
-inline void DiskPageIO::write_page_to_disk(Shard &, uint64_t, const char *) {
-  throw std::runtime_error("DiskPageIO: unsupported platform (needs Linux O_DIRECT)");
-}
-inline void DiskPageIO::extend_to(uint64_t) {
-  throw std::runtime_error("DiskPageIO: unsupported platform (needs Linux O_DIRECT)");
-}
-inline void DiskPageIO::close_fd() {}
+inline void DiskPageIO::open_rw(const std::string &path) {
+  const int wide_len = ::MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+  if (wide_len <= 0) {
+    throw std::runtime_error("DiskPageIO::open_rw: invalid UTF-8 path");
+  }
+  std::wstring wide_path(static_cast<size_t>(wide_len), L'\0');
+  ::MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, wide_path.data(), wide_len);
+  if (!wide_path.empty() && wide_path.back() == L'\0') {
+    wide_path.pop_back();
+  }
 
-#endif  // __linux__
+  file_handle_ = ::CreateFileW(wide_path.c_str(),
+                               GENERIC_READ | GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE,
+                               nullptr,
+                               OPEN_EXISTING,
+                               FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED,
+                               nullptr);
+  if (file_handle_ == INVALID_HANDLE_VALUE) {
+    throw std::runtime_error("DiskPageIO::open_rw: CreateFileW failed: Win32 error " +
+                             std::to_string(::GetLastError()));
+  }
+  LARGE_INTEGER size{};
+  if (!::GetFileSizeEx(file_handle_, &size)) {
+    const DWORD error = ::GetLastError();
+    ::CloseHandle(file_handle_);
+    file_handle_ = INVALID_HANDLE_VALUE;
+    throw std::runtime_error("DiskPageIO::open_rw: GetFileSizeEx failed: Win32 error " +
+                             std::to_string(error));
+  }
+  file_size_.store(static_cast<uint64_t>(size.QuadPart), std::memory_order_release);
+}
+
+inline void DiskPageIO::read_page_locked(Shard &shard, uint32_t id) {
+  read_page_locked_off(shard, geom_.get_page_offset(id));
+}
+
+inline void DiskPageIO::read_page_locked_off(Shard &shard, uint64_t page_off) {
+  if (shard.cache.read(page_off, shard.page_buf, geom_.page_size)) {
+    return;
+  }
+  read_page_from_disk(page_off, shard.page_buf);
+  shard.cache.write(page_off,
+                    shard.page_buf,
+                    geom_.page_size,
+                    false,
+                    [this, &shard](uint64_t off, const char *page) {
+                      write_page_to_disk(shard, off, page);
+                    });
+}
+
+inline void DiskPageIO::read_page_from_disk(uint64_t page_off, char *page) const {
+  OVERLAPPED overlapped{};
+  overlapped.Offset = static_cast<DWORD>(page_off & 0xffffffffULL);
+  overlapped.OffsetHigh = static_cast<DWORD>(page_off >> 32U);
+  overlapped.hEvent = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (overlapped.hEvent == nullptr) {
+    throw std::runtime_error("DiskPageIO::read_page: CreateEventW failed: Win32 error " +
+                             std::to_string(::GetLastError()));
+  }
+  DWORD transferred = 0;
+  BOOL ok = ::ReadFile(file_handle_,
+                       page,
+                       static_cast<DWORD>(geom_.page_size),
+                       &transferred,
+                       &overlapped);
+  if (!ok && ::GetLastError() == ERROR_IO_PENDING) {
+    ok = ::GetOverlappedResult(file_handle_, &overlapped, &transferred, TRUE);
+  }
+  const DWORD error = ok ? ERROR_SUCCESS : ::GetLastError();
+  ::CloseHandle(overlapped.hEvent);
+  if (!ok || transferred != geom_.page_size) {
+    throw std::runtime_error("DiskPageIO::read_page: short/failed ReadFile at " +
+                             std::to_string(page_off) + " (got " + std::to_string(transferred) +
+                             ", Win32 error " + std::to_string(error) + ")");
+  }
+}
+
+inline void DiskPageIO::write_page_locked(Shard &shard, uint32_t id) {
+  const uint64_t off = geom_.get_page_offset(id);
+  if (shard.cache.enabled()) {
+    shard.cache.write(off,
+                      shard.page_buf,
+                      geom_.page_size,
+                      true,
+                      [this, &shard](uint64_t page_off, const char *page) {
+                        write_page_to_disk(shard, page_off, page);
+                      });
+    ++shard.versions[off];
+    return;
+  }
+  write_page_to_disk(shard, off, shard.page_buf);
+  ++shard.versions[off];
+}
+
+inline void DiskPageIO::write_page_to_disk(Shard &shard, uint64_t page_off, const char *page) {
+  const char *write_buf = page;
+  if (page != shard.page_buf) {
+    std::memcpy(shard.flush_buf, page, geom_.page_size);
+    write_buf = shard.flush_buf;
+  }
+  OVERLAPPED overlapped{};
+  overlapped.Offset = static_cast<DWORD>(page_off & 0xffffffffULL);
+  overlapped.OffsetHigh = static_cast<DWORD>(page_off >> 32U);
+  overlapped.hEvent = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (overlapped.hEvent == nullptr) {
+    throw std::runtime_error("DiskPageIO::write_page: CreateEventW failed: Win32 error " +
+                             std::to_string(::GetLastError()));
+  }
+  DWORD transferred = 0;
+  BOOL ok = ::WriteFile(file_handle_,
+                        write_buf,
+                        static_cast<DWORD>(geom_.page_size),
+                        &transferred,
+                        &overlapped);
+  if (!ok && ::GetLastError() == ERROR_IO_PENDING) {
+    ok = ::GetOverlappedResult(file_handle_, &overlapped, &transferred, TRUE);
+  }
+  const DWORD error = ok ? ERROR_SUCCESS : ::GetLastError();
+  ::CloseHandle(overlapped.hEvent);
+  if (!ok || transferred != geom_.page_size) {
+    throw std::runtime_error("DiskPageIO::write_page: short/failed WriteFile at " +
+                             std::to_string(page_off) + " (got " + std::to_string(transferred) +
+                             ", Win32 error " + std::to_string(error) + ")");
+  }
+}
+
+inline void DiskPageIO::extend_to(uint64_t new_size) {
+  FILE_END_OF_FILE_INFO end_info{};
+  end_info.EndOfFile.QuadPart = static_cast<LONGLONG>(new_size);
+  if (!::SetFileInformationByHandle(file_handle_, FileEndOfFileInfo, &end_info, sizeof(end_info))) {
+    throw std::runtime_error(
+        "DiskPageIO::extend_to: SetFileInformationByHandle failed: "
+        "Win32 error " +
+        std::to_string(::GetLastError()));
+  }
+  file_size_.store(new_size, std::memory_order_release);
+}
+
+inline void DiskPageIO::sync_file() {
+  if (!::FlushFileBuffers(file_handle_)) {
+    throw std::runtime_error("DiskPageIO::sync_file: FlushFileBuffers failed: Win32 error " +
+                             std::to_string(::GetLastError()));
+  }
+}
+
+inline void DiskPageIO::close_fd() {
+  if (file_handle_ != INVALID_HANDLE_VALUE) {
+    ::CloseHandle(file_handle_);
+    file_handle_ = INVALID_HANDLE_VALUE;
+  }
+}
+
+#endif
 
 }  // namespace alaya::diskann

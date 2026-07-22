@@ -271,7 +271,7 @@ class IOCPFileReader : public AlignedFileReader {
 
     hFile_ = ::CreateFileW(wname.c_str(),
                            GENERIC_READ,
-                           FILE_SHARE_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE,
                            nullptr,
                            OPEN_EXISTING,
                            FILE_FLAG_NO_BUFFERING | FILE_FLAG_OVERLAPPED,

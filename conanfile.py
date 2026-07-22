@@ -42,9 +42,10 @@ class AlayaLiteConan(ConanFile):
         self.requires("lz4/1.9.4")
         self.requires("zstd/1.5.6")
         self.requires("rocksdb/10.5.1")
-        # io_uring and coroutine scheduler support are Linux-only in CMake.
+        # DiskANN uses libcoro's portable task/thread-pool primitives on every
+        # platform; only its io_uring accelerator is Linux-specific.
+        self.requires("libcoro/0.14.1")
         if self.settings.os == "Linux":
-            self.requires("libcoro/0.14.1")
             self.requires("liburing/2.13")
 
         # OpenMP support

@@ -325,6 +325,14 @@ class DiskANNIndex {
     }
 
     read_ids(path(index_dir, "ids.bin"), max_slot_id_);
+    const std::string slots_path = path(index_dir, "slots.bin");
+    if (std::filesystem::exists(slots_path)) {
+      slot_alloc_.load(slots_path);
+      max_slot_id_ = std::max<uint64_t>(max_slot_id_, slot_alloc_.next_fresh_id());
+    } else {
+      slot_alloc_.reset(static_cast<uint32_t>(max_slot_id_));
+    }
+    rebuild_label_lookup_unlocked();
     cache_.load(path(index_dir, "cache_ids.bin"), path(index_dir, "cache_nodes.bin"));
     cache_.configure_geometry(dim_, max_degree_);
     if (has_pq_) {
@@ -1087,7 +1095,7 @@ class DiskANNIndex {
     // zero set bits means the snapshot would be all-live — skip the copy. The
     // bitmap's capacity never shrinks, so after the first update round every
     // query would otherwise pay a full-capacity copy even with no tombstones.
-    if (updatable_ && slot_alloc_.tombstone().count() > 0) {
+    if (slot_alloc_.tombstone().count() > 0) {
       slot_alloc_.tombstone().snapshot_into(snapshot.tombstone);
       snapshot.has_tombstone = true;
     }
@@ -1163,15 +1171,6 @@ class DiskANNIndex {
     }
 #endif
 
-    const std::string slots_path = path(index_dir, "slots.bin");
-    if (std::filesystem::exists(slots_path)) {
-      slot_alloc_.load(slots_path);  // restore free list + next id + tombstones
-      max_slot_id_ = std::max<uint64_t>(max_slot_id_, slot_alloc_.next_fresh_id());
-      resize_thread_data_slot_capacity();
-    } else {
-      slot_alloc_.reset(static_cast<uint32_t>(max_slot_id_));
-    }
-    rebuild_label_lookup_unlocked();
     updatable_ = true;
   }
 

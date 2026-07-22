@@ -88,11 +88,13 @@ class UpdateE2ETest : public ::testing::Test {
     lp.updatable = true;
     // ALAYA_DISKANN_UPDATE_IO=blocking|uring|auto lets CI exercise both update
     // I/O backends with the same suite (default auto = uring when available).
-    if (const char *mode = std::getenv("ALAYA_DISKANN_UPDATE_IO")) {
-      if (std::string_view(mode) == "blocking") {
-        lp.update_io = alaya::diskann::DiskANNUpdateIO::kBlocking;
-      } else if (std::string_view(mode) == "uring") {
-        lp.update_io = alaya::diskann::DiskANNUpdateIO::kUring;
+    if (lp.update_io == alaya::diskann::DiskANNUpdateIO::kAuto) {
+      if (const char *mode = std::getenv("ALAYA_DISKANN_UPDATE_IO")) {
+        if (std::string_view(mode) == "blocking") {
+          lp.update_io = alaya::diskann::DiskANNUpdateIO::kBlocking;
+        } else if (std::string_view(mode) == "uring") {
+          lp.update_io = alaya::diskann::DiskANNUpdateIO::kUring;
+        }
       }
     }
     idx_ = std::make_unique<DiskANNIndex>();
@@ -504,8 +506,34 @@ TEST_F(UpdateE2ETest, PQSearchSkipsDeletedLabels) {
   }
 }
 
+TEST_F(UpdateE2ETest, PipelinedSearchRequiresUring) {
+  DiskANNLoadParams load_params;
+  load_params.update_io = alaya::diskann::DiskANNUpdateIO::kBlocking;
+  build_and_load(/*n=*/100, /*dim=*/16, /*r=*/16, load_params);
+
+  const auto queries = make_vectors(/*n=*/2, /*dim=*/16, /*seed=*/7);
+  std::vector<uint64_t> labels(4);
+  std::vector<float> distances(4);
+  DiskANNSearchParams search_params;
+  search_params.rerank = false;
+  EXPECT_THROW(idx_->search_pipelined(queries.data(),
+                                      /*n_queries=*/2,
+                                      /*top_k=*/2,
+                                      labels.data(),
+                                      distances.data(),
+                                      /*num_threads=*/1,
+                                      /*pipeline=*/2,
+                                      search_params),
+               std::runtime_error);
+}
+
 TEST_F(UpdateE2ETest, PipelinedSearchMatchesBatchSearch) {
-  build_and_load(/*n=*/600, /*dim=*/32, /*r=*/32, {}, /*pq_n_chunks=*/8);
+  if (!alaya::UringReactor::is_available()) {
+    GTEST_SKIP() << "io_uring not available on this kernel";
+  }
+  DiskANNLoadParams load_params;
+  load_params.update_io = alaya::diskann::DiskANNUpdateIO::kUring;
+  build_and_load(/*n=*/600, /*dim=*/32, /*r=*/32, load_params, /*pq_n_chunks=*/8);
   ASSERT_TRUE(idx_->has_pq());
 
   // Post-update state: labels beyond the base range plus live tombstones.
@@ -538,19 +566,16 @@ TEST_F(UpdateE2ETest, PipelinedSearchMatchesBatchSearch) {
 
   std::vector<uint64_t> ref_l(kNq * kK);
   std::vector<float> ref_d(kNq * kK);
-  idx_->batch_search(
-      queries.data(), kNq, kK, ref_l.data(), ref_d.data(), /*num_threads=*/2, ref_sp);
+  idx_->batch_search(queries.data(),
+                     kNq,
+                     kK,
+                     ref_l.data(),
+                     ref_d.data(),
+                     /*num_threads=*/2,
+                     ref_sp);
 
   std::vector<uint64_t> pipe_l(kNq * kK, 0);
   std::vector<float> pipe_d(kNq * kK, 0.0F);
-  const char *mode = std::getenv("ALAYA_DISKANN_UPDATE_IO");
-  if (mode != nullptr && std::string_view(mode) == "blocking") {
-    // No reactor in blocking mode: the pipelined path must refuse loudly.
-    EXPECT_THROW(idx_->search_pipelined(
-                     queries.data(), kNq, kK, pipe_l.data(), pipe_d.data(), 2, 8, sp),
-                 std::runtime_error);
-    return;
-  }
   idx_->search_pipelined(queries.data(),
                          kNq,
                          kK,
