@@ -142,7 +142,7 @@ skip = ["*-musllinux*", "*-manylinux_i686"]
 # package cache warm across the per-python-version builds and across CI runs.
 container-engine = "docker; create_args: -v ~/.conan2:/root/.conan2"
 test-requires = ["pytest", "pytest-asyncio", "pyyaml"]
-test-command = "python -c \"import platform, sys, alayalite; from alayalite import laser, vamana; is_linux_x86 = sys.platform.startswith('linux') and platform.machine() in {'x86_64', 'AMD64'}; is_windows_x86 = sys.platform == 'win32' and platform.machine() in {'x86_64', 'AMD64'}; laser_expected = is_linux_x86 or is_windows_x86; assert not (laser_expected and laser.RawIndex is None), 'LASER should be available on this lane'; simd = laser.selected_simd() if is_linux_x86 else 'not-tested'; print(alayalite.__version__); print(f'laser_simd={simd}', flush=True); assert (not is_linux_x86) or simd in {'avx512', 'avx2'}\""
+test-command = "python -c \"import platform, sys, alayalite; from alayalite import laser, vamana; is_linux_x86 = sys.platform.startswith('linux') and platform.machine() in {'x86_64', 'AMD64'}; is_windows_x86 = sys.platform == 'win32' and platform.machine() in {'x86_64', 'AMD64'}; laser_expected = is_linux_x86 or is_windows_x86; assert not (laser_expected and laser.RawIndex is None), 'LASER should be available on this lane'; simd = laser.selected_simd() if is_linux_x86 else 'not-tested'; print(alayalite.__version__); print(f'laser_simd={simd}', flush=True); assert (not is_linux_x86) or simd in {'avx512', 'avx2'}\" && python -m pytest \"{project}/python/tests/diskann/test_update.py\""
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"

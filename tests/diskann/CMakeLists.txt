@@ -33,6 +33,11 @@ alaya_cc_target(
   GTEST
   SRCS test_diskann_update_trace.cpp
 )
+alaya_cc_target(
+  test_diskann_portable_update
+  GTEST
+  SRCS test_diskann_portable_update.cpp
+)
 
 alaya_add_test(
   NAME test_diskann_layout
@@ -57,6 +62,11 @@ alaya_add_test(
 alaya_add_test(
   NAME test_diskann_update_trace
   TARGET test_diskann_update_trace
+  LABELS diskann
+)
+alaya_add_test(
+  NAME test_diskann_portable_update
+  TARGET test_diskann_portable_update
   LABELS diskann
 )
 

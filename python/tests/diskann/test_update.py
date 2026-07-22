@@ -1,12 +1,8 @@
 """Tests for external-ID based DiskANN update operations."""
 
-import sys
-
 import numpy as np
 import pytest
 from alayalite import diskann
-
-pytestmark = pytest.mark.skipif(sys.platform != "linux", reason="DiskANN updates require Linux")
 
 
 def _build_index(path):
@@ -86,3 +82,33 @@ def test_update_arrays_require_exact_dtype_and_layout(tmp_path):
         index.insert(np.ones(16, dtype=np.float64), 8000)
     with pytest.raises(TypeError, match="uint64"):
         index.batch_remove(np.array([1001], dtype=np.int64))
+
+
+def test_default_open_uses_portable_update_backend(tmp_path):
+    path = tmp_path / "index"
+    built_index, _ = _build_index(path)
+    del built_index
+
+    index = diskann.Index.open(str(path))
+    assert index.updatable
+    vector = np.random.default_rng(10).random(16, dtype=np.float32)
+    index.insert(vector, 9000)
+    assert index.contains(9000)
+    index.remove(9000)
+    index.flush()
+
+
+def test_read_only_reopen_restores_external_id_mapping_and_deletions(tmp_path):
+    path = tmp_path / "index"
+    index, vectors = _build_index(path)
+    index.remove(1001)
+    index.flush()
+    del index
+
+    params = diskann.LoadParams()
+    params.updatable = False
+    reopened = diskann.Index.open(str(path), params)
+    assert reopened.contains(1000)
+    assert not reopened.contains(1001)
+    labels, _ = reopened.search(vectors[1], 10)
+    assert 1001 not in labels
