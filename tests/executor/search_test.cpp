@@ -16,10 +16,12 @@
 #include "index/graph/graph.hpp"
 #include "index/graph/hnsw/hnsw_builder.hpp"
 #include "index/graph/qg/qg_builder.hpp"
+#include "search/blocked_bitset_id_mask.hpp"
 #include "search/legacy_graph_search_backend.hpp"
 #include "space/rabitq_space.hpp"
 #include "space/raw_space.hpp"
 #include "space/sq8_space.hpp"
+#include "storage/rocksdb_scalar_query_provider.hpp"
 #include "utils/dataset_utils.hpp"
 #include "utils/evaluate.hpp"
 #include "utils/locks.hpp"
@@ -501,6 +503,22 @@ class RejectIdMask final : public IdMask<uint32_t> {
   uint32_t rejected_id_;  ///< The single internal ID excluded from emitted results.
 };
 
+TEST(BlockedBitsetIdMaskTest, OwnsBlockedSnapshotAndRejectsOutOfRangeIds) {
+  auto blocked = std::make_shared<DynamicBitset>(5);
+  blocked->set(3);
+  BlockedBitsetIdMask<uint32_t> mask(blocked);
+  blocked.reset();
+
+  EXPECT_TRUE(mask.accepts(0));
+  EXPECT_FALSE(mask.accepts(3));
+  EXPECT_FALSE(mask.accepts(5));
+  EXPECT_EQ(mask.size(), 5U);
+}
+
+TEST(BlockedBitsetIdMaskTest, RejectsNullSnapshot) {
+  EXPECT_THROW(BlockedBitsetIdMask<uint32_t>(nullptr), std::invalid_argument);
+}
+
 TEST(LegacyGraphSearchBackendTest, DirectSearchMatchesGraphJobAndReturnsDistances) {
   auto space = make_one_dim_raw_space({10.0F, 20.0F, 30.0F, 0.0F, 1.0F});
   auto graph = make_graph_from_edges({{3, 1}, {2}, {}, {4}, {}});
@@ -846,6 +864,54 @@ TEST(GraphHybridSearchJobUnitTest, DisableIterativeHintStillUsesBitsetPrefilter)
 
   EXPECT_EQ(mode, HybridJobType::Mode::kBitsetPrefilter);
   space->close_db();
+}
+
+TEST(GraphHybridSearchJobUnitTest, UsesExternalScalarProviderWithScalarlessVectorSpace) {
+  ScopedTempDbDir db_dir("hybrid_external_scalar_provider");
+  auto values = std::vector<float>{10.0F, 11.0F, 12.0F, 0.0F, 1.0F};
+  auto space = make_one_dim_raw_space(values);
+  auto graph = make_graph_from_edges({{1, 2, 3}, {2}, {}, {4}, {}});
+
+  RocksDBRecordStoreConfig config;
+  config.db_path_ = (db_dir.path_ / "record_store").string();
+  config.indexed_fields_ = {"group"};
+  RocksDBRecordStore<uint32_t> record_store(config);
+  for (uint32_t id = 0; id < values.size(); ++id) {
+    auto raw_vector = std::string(reinterpret_cast<const char *>(&values[id]), sizeof(float));
+    ASSERT_TRUE(record_store.upsert(id,
+                                    ScalarData{"external_" + std::to_string(id),
+                                               "doc_" + std::to_string(id),
+                                               {{"group", static_cast<int64_t>(id >= 3 ? 1 : 0)}}},
+                                    raw_vector));
+  }
+  auto provider = std::make_shared<RocksDBScalarQueryProvider<uint32_t>>(&record_store);
+  GraphHybridSearchJob<RawSpaceType> search_job(space, graph, space, provider);
+
+  MetadataFilter filter;
+  filter.add_eq("group", static_cast<int64_t>(1));
+  std::vector<float> query{0.1F};
+  std::vector<uint32_t> ids(2, std::numeric_limits<uint32_t>::max());
+  std::vector<std::string> item_ids(2);
+  search_job.hybrid_search_solo(query.data(),
+                                ids.data(),
+                                SearchInfo{2, 4},
+                                filter,
+                                item_ids.data());
+
+  EXPECT_EQ(ids, (std::vector<uint32_t>{3, 4}));
+  EXPECT_EQ(item_ids, (std::vector<std::string>{"external_3", "external_4"}));
+
+  ASSERT_TRUE(record_store.remove(3));
+  ids.assign(1, std::numeric_limits<uint32_t>::max());
+  item_ids.assign(1, std::string{});
+  auto empty_filter = MetadataFilter::empty();
+  search_job.hybrid_search_solo(query.data(),
+                                ids.data(),
+                                SearchInfo{1, 4},
+                                empty_filter,
+                                item_ids.data());
+  EXPECT_EQ(ids[0], 4U);
+  EXPECT_EQ(item_ids[0], "external_4");
 }
 
 TEST(GraphHybridSearchJobUnitTest, RejectsZeroTopk) {

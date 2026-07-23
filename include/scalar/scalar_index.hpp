@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -29,6 +30,9 @@ class ScalarIndex {
 
   /** @brief Return whether the field has a secondary index. */
   [[nodiscard]] virtual auto is_indexed_field(const std::string &field) const -> bool = 0;
+
+  /** @brief Return the persisted record generation represented by this immutable index view. */
+  [[nodiscard]] virtual auto generation() const -> uint64_t = 0;
 
   /**
    * @brief Resolve an indexable condition to IDs.

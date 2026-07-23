@@ -19,6 +19,7 @@
 #include "../../utils/query_utils.hpp"
 #include "executor/search_info.hpp"
 #include "graph_search_job.hpp"
+#include "scalar/scalar_query_provider.hpp"
 #include "space/rabitq_space.hpp"
 #include "utils/log.hpp"
 #include "utils/metadata_filter.hpp"
@@ -47,6 +48,8 @@ struct GraphHybridSearchJob {
   std::shared_ptr<DistanceSpaceType> space_ = nullptr;
   std::shared_ptr<BuildSpaceType> build_space_ = nullptr;
   std::shared_ptr<Graph<DataType, IDType>> graph_ = nullptr;
+  std::shared_ptr<const ScalarQueryProvider<IDType>> scalar_query_provider_ =
+      nullptr;  ///< Optional scalar owner independent from Space.
 
   // `kPlainSearch` is best when there is no scalar filter.
   // `kBitsetPrefilter` is the default hybrid path and works well when the filter can be pushed
@@ -73,10 +76,15 @@ struct GraphHybridSearchJob {
 
   using PlanStatsHook = std::function<void(const HybridPlanStats &)>;
 
-  explicit GraphHybridSearchJob(std::shared_ptr<DistanceSpaceType> space,
-                                std::shared_ptr<Graph<DataType, IDType>> graph = nullptr,
-                                std::shared_ptr<BuildSpaceType> build_space = nullptr)
-      : space_(std::move(space)), build_space_(std::move(build_space)), graph_(std::move(graph)) {
+  explicit GraphHybridSearchJob(
+      std::shared_ptr<DistanceSpaceType> space,
+      std::shared_ptr<Graph<DataType, IDType>> graph = nullptr,
+      std::shared_ptr<BuildSpaceType> build_space = nullptr,
+      std::shared_ptr<const ScalarQueryProvider<IDType>> scalar_query_provider = nullptr)
+      : space_(std::move(space)),
+        build_space_(std::move(build_space)),
+        graph_(std::move(graph)),
+        scalar_query_provider_(std::move(scalar_query_provider)) {
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       if (graph_ == nullptr) {
         throw std::invalid_argument("graph is required for graph hybrid search");
@@ -96,29 +104,75 @@ struct GraphHybridSearchJob {
    */
   void set_plan_stats_hook(PlanStatsHook hook) { plan_stats_hook_ = std::move(hook); }
 
-  // clang-format off
+  /**
+   * @brief Resolve internal result IDs to external item IDs at the scalar query generation.
+   * @param ids Internal IDs produced by vector search.
+   * @param count Number of valid entries in ids and res.
+   * @param res Output slots receiving external item IDs.
+   * @param scalar_view Optional provider-owned stable view; null selects the legacy Space adapter.
+   */
   void materialize_item_ids(const IDType *ids,
                             uint32_t count,
-                            std::string *res) requires(DistanceSpaceType::has_scalar_data) {
-    auto *storage = space_->get_scalar_storage();
-    auto item_ids = storage->batch_get_item_id_only(std::vector<IDType>(ids, ids + count));
+                            std::string *res,
+                            const ScalarQueryView<IDType> *scalar_view = nullptr) {
+    std::vector<std::string> item_ids;
+    auto result_ids = std::vector<IDType>(ids, ids + count);
+    if (scalar_view != nullptr) {
+      item_ids = scalar_view->batch_get_item_ids(result_ids);
+    } else if constexpr (DistanceSpaceType::has_scalar_data) {
+      item_ids = space_->get_scalar_storage()->batch_get_item_id_only(result_ids);
+    } else {
+      throw std::runtime_error("hybrid search requires a ScalarQueryProvider");
+    }
+    if (item_ids.size() != count) {
+      throw std::runtime_error("scalar query provider returned an invalid item-ID batch size");
+    }
     for (uint32_t i = 0; i < count; ++i) {
       res[i] = std::move(item_ids[i]);
     }
   }
 
-  void initialize_results(IDType *ids,
-                          std::string *res,
-                          uint32_t topk) const requires(DistanceSpaceType::has_scalar_data) {
+  /** @brief Initialize every output slot before executing a hybrid-search strategy. */
+  void initialize_results(IDType *ids, std::string *res, uint32_t topk) const {
     std::fill(ids, ids + topk, std::numeric_limits<IDType>::max());
     std::fill(res, res + topk, std::string{});
   }
 
-  auto make_filter_executor(const MetadataFilter &filter) const
-      -> MetadataFilterExecutor<IDType> requires(DistanceSpaceType::has_scalar_data) {
-    return MetadataFilterExecutor<IDType>(filter,
-                                          space_->get_scalar_storage(),
-                                          space_->get_data_num());
+  /**
+   * @brief Bind filter execution to the supplied stable scalar view or the legacy Space storage.
+   */
+  auto make_filter_executor(const MetadataFilter &filter,
+                            const ScalarQueryView<IDType> *scalar_view = nullptr) const
+      -> MetadataFilterExecutor<IDType> {
+    if (scalar_view != nullptr) {
+      return MetadataFilterExecutor<IDType>(filter,
+                                            &scalar_view->scalar_index(),
+                                            &scalar_view->record_store(),
+                                            scalar_view->universe_size(),
+                                            &scalar_view->live_mask(),
+                                            scalar_view->live_count());
+    }
+    if constexpr (DistanceSpaceType::has_scalar_data) {
+      return MetadataFilterExecutor<IDType>(filter,
+                                            space_->get_scalar_storage(),
+                                            space_->get_data_num());
+    }
+    throw std::runtime_error("hybrid search requires a ScalarQueryProvider");
+  }
+
+  /** @brief Pin one scalar generation and validate its ID universe against vector storage. */
+  [[nodiscard]] auto acquire_scalar_query_view() const -> std::unique_ptr<ScalarQueryView<IDType>> {
+    if (scalar_query_provider_ == nullptr) {
+      return nullptr;
+    }
+    auto view = scalar_query_provider_->acquire();
+    if (view == nullptr) {
+      throw std::runtime_error("ScalarQueryProvider returned a null query view");
+    }
+    if (view->universe_size() != static_cast<size_t>(space_->get_data_num())) {
+      throw std::runtime_error("scalar and vector internal-ID universes do not match");
+    }
+    return view;
   }
 
   static void validate_search_info(const SearchInfo &search_info, const char *search_name) {
@@ -155,7 +209,7 @@ struct GraphHybridSearchJob {
   [[nodiscard]] auto make_plan_stats(Mode mode,
                                      const SearchInfo &search_info,
                                      const MetadataFilterExecutor<IDType> &filter_executor) const
-      -> HybridPlanStats requires(DistanceSpaceType::has_scalar_data) {
+      -> HybridPlanStats {
     HybridPlanStats stats;
     stats.initial_mode_ = mode;
     stats.executed_mode_ = mode;
@@ -175,8 +229,7 @@ struct GraphHybridSearchJob {
   }
 
   [[nodiscard]] auto build_search_mode(const MetadataFilterExecutor<IDType> &filter_executor,
-                                       const SearchInfo &search_info) const
-      -> Mode requires(DistanceSpaceType::has_scalar_data) {
+                                       const SearchInfo &search_info) const -> Mode {
     if (filter_executor.is_trivially_true()) {
       return Mode::kPlainSearch;
     }
@@ -267,8 +320,7 @@ struct GraphHybridSearchJob {
                                   IDType *ids,
                                   uint32_t topk,
                                   const MetadataFilterExecutor<IDType> &filter_executor,
-                                  const char *search_name)
-      -> uint32_t requires(DistanceSpaceType::has_scalar_data) {
+                                  const char *search_name) -> uint32_t {
     SearchBuffer<DistanceType> result_pool(topk);
     std::vector<IDType> batch_ids;
     std::vector<uint8_t> matches;
@@ -349,8 +401,7 @@ struct GraphHybridSearchJob {
                                 const SearchInfo &search_info,
                                 const MetadataFilterExecutor<IDType> &filter_executor,
                                 const char *search_name,
-                                HybridPlanStats *plan_stats = nullptr)
-      -> uint32_t requires(DistanceSpaceType::has_scalar_data) {
+                                HybridPlanStats *plan_stats = nullptr) -> uint32_t {
     GraphSearchJob<DistanceSpaceType, BuildSpaceType> base_job(space_,
                                                                graph_,
                                                                nullptr,
@@ -397,8 +448,7 @@ struct GraphHybridSearchJob {
                                 const SearchInfo &search_info,
                                 const MetadataFilterExecutor<IDType> &filter_executor,
                                 const char *search_name,
-                                HybridPlanStats *plan_stats = nullptr)
-      -> uint32_t requires(DistanceSpaceType::has_scalar_data) {
+                                HybridPlanStats *plan_stats = nullptr) -> uint32_t {
     auto bitset_result = filter_executor.build_blocked_bitset();
     if (plan_stats != nullptr) {
       plan_stats->matched_count_ = bitset_result.matched_count_;
@@ -500,11 +550,12 @@ struct GraphHybridSearchJob {
                           IDType *ids,
                           const SearchInfo &search_info,
                           const MetadataFilter &filter,
-                          std::string *res) requires(DistanceSpaceType::has_scalar_data) {
+                          std::string *res) {
     validate_search_info(search_info, "hybrid_search");
     initialize_results(ids, res, search_info.topk_);
 
-    auto filter_executor = make_filter_executor(filter);
+    auto scalar_view = acquire_scalar_query_view();
+    auto filter_executor = make_filter_executor(filter, scalar_view.get());
     auto mode = build_search_mode(filter_executor, search_info);
     auto plan_stats = make_plan_stats(mode, search_info, filter_executor);
     LOG_DEBUG("hybrid_search: plan={}, topk={}, ef={}, hint={}",
@@ -545,7 +596,7 @@ struct GraphHybridSearchJob {
 
     plan_stats.result_count_ = res_size;
     emit_plan_stats("hybrid_search", plan_stats);
-    materialize_item_ids(ids, res_size, res);
+    materialize_item_ids(ids, res_size, res, scalar_view.get());
     if (res_size < search_info.topk_) {
       LOG_DEBUG("hybrid_search: only found {} results, requested {}", res_size, search_info.topk_);
     }
@@ -556,7 +607,7 @@ struct GraphHybridSearchJob {
                           uint32_t topk,
                           uint32_t ef,
                           const MetadataFilter &filter,
-                          std::string *res) requires(DistanceSpaceType::has_scalar_data) {
+                          std::string *res) {
     hybrid_search_solo(query, ids, SearchInfo{.topk_ = topk, .ef_ = ef}, filter, res);
   }
 
@@ -564,17 +615,17 @@ struct GraphHybridSearchJob {
                                       IDType *ids,
                                       uint32_t topk,
                                       const MetadataFilter &filter,
-                                      std::string *res)
-      requires(DistanceSpaceType::has_scalar_data) {
+                                      std::string *res) {
     if (topk == 0) {
       throw std::invalid_argument("hybrid_search_brute_force: topk must be > 0");
     }
 
     initialize_results(ids, res, topk);
-    auto filter_executor = make_filter_executor(filter);
+    auto scalar_view = acquire_scalar_query_view();
+    auto filter_executor = make_filter_executor(filter, scalar_view.get());
     auto res_size =
         execute_brute_force_filter(query, ids, topk, filter_executor, "hybrid_search_brute_force");
-    materialize_item_ids(ids, res_size, res);
+    materialize_item_ids(ids, res_size, res, scalar_view.get());
     if (res_size < topk) {
       LOG_DEBUG("hybrid_search_brute_force: only found {} results, requested {}", res_size, topk);
     }
@@ -584,7 +635,7 @@ struct GraphHybridSearchJob {
                                  const SearchInfo &search_info,
                                  IDType *ids,
                                  const MetadataFilter &filter,
-                                 std::string *res) requires(DistanceSpaceType::has_scalar_data) {
+                                 std::string *res) {
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");
     }
@@ -592,7 +643,8 @@ struct GraphHybridSearchJob {
     validate_search_info(search_info, "rabitq_hybrid_search");
     initialize_results(ids, res, search_info.topk_);
 
-    auto filter_executor = make_filter_executor(filter);
+    auto scalar_view = acquire_scalar_query_view();
+    auto filter_executor = make_filter_executor(filter, scalar_view.get());
     auto mode = build_search_mode(filter_executor, search_info);
     auto plan_stats = make_plan_stats(mode, search_info, filter_executor);
     LOG_DEBUG("rabitq_hybrid_search: plan={}, topk={}, ef={}, hint={}",
@@ -633,7 +685,7 @@ struct GraphHybridSearchJob {
 
     plan_stats.result_count_ = res_size;
     emit_plan_stats("rabitq_hybrid_search", plan_stats);
-    materialize_item_ids(ids, res_size, res);
+    materialize_item_ids(ids, res_size, res, scalar_view.get());
     if (res_size < search_info.topk_) {
       LOG_DEBUG("rabitq_hybrid_search: only found {} results, requested {}",
                 res_size,
@@ -646,7 +698,7 @@ struct GraphHybridSearchJob {
                                  IDType *ids,
                                  uint32_t ef,
                                  const MetadataFilter &filter,
-                                 std::string *res) requires(DistanceSpaceType::has_scalar_data) {
+                                 std::string *res) {
     rabitq_hybrid_search_solo(query, SearchInfo{.topk_ = topk, .ef_ = ef}, ids, filter, res);
   }
 
@@ -655,8 +707,7 @@ struct GraphHybridSearchJob {
                      IDType *ids,
                      SearchInfo search_info,
                      const MetadataFilter &filter,
-                     std::string *res)
-      -> coro::task<> requires(DistanceSpaceType::has_scalar_data) {
+                     std::string *res) -> coro::task<> {
     hybrid_search_solo(query, ids, search_info, filter, res);
     co_return;
   }
@@ -666,8 +717,7 @@ struct GraphHybridSearchJob {
                      uint32_t topk,
                      uint32_t ef,
                      const MetadataFilter &filter,
-                     std::string *res)
-      -> coro::task<> requires(DistanceSpaceType::has_scalar_data) {
+                     std::string *res) -> coro::task<> {
     hybrid_search_solo(query, ids, topk, ef, filter, res);
     co_return;
   }
@@ -676,8 +726,7 @@ struct GraphHybridSearchJob {
                                  IDType *ids,
                                  uint32_t topk,
                                  const MetadataFilter &filter,
-                                 std::string *res)
-      -> coro::task<> requires(DistanceSpaceType::has_scalar_data) {
+                                 std::string *res) -> coro::task<> {
     hybrid_search_brute_force_solo(query, ids, topk, filter, res);
     co_return;
   }
@@ -686,8 +735,7 @@ struct GraphHybridSearchJob {
                             SearchInfo search_info,
                             IDType *ids,
                             const MetadataFilter &filter,
-                            std::string *res)
-      -> coro::task<> requires(DistanceSpaceType::has_scalar_data) {
+                            std::string *res) -> coro::task<> {
     rabitq_hybrid_search_solo(query, search_info, ids, filter, res);
     co_return;
   }
@@ -697,13 +745,11 @@ struct GraphHybridSearchJob {
                             IDType *ids,
                             uint32_t ef,
                             const MetadataFilter &filter,
-                            std::string *res)
-      -> coro::task<> requires(DistanceSpaceType::has_scalar_data) {
+                            std::string *res) -> coro::task<> {
     rabitq_hybrid_search_solo(query, topk, ids, ef, filter, res);
     co_return;
   }
 #endif
-  // clang-format on
 
  private:
   /** Recomputes pass_rate_ when the executor supplied an exact match count. */

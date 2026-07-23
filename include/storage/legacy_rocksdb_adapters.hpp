@@ -36,6 +36,9 @@ class LegacyRocksDBScalarIndex final : public ScalarIndex<IDType> {
     return std::find(fields.begin(), fields.end(), field) != fields.end();
   }
 
+  /** @copydoc ScalarIndex::generation */
+  [[nodiscard]] auto generation() const -> uint64_t override { return 0; }
+
   /** @copydoc ScalarIndex::lookup */
   [[nodiscard]] auto lookup(const FilterCondition &condition) const
       -> std::optional<std::vector<IDType>> override {
@@ -151,6 +154,9 @@ class LegacyRocksDBRecordStore final : public RecordStore<IDType> {
 
   /** @copydoc RecordStore::size */
   [[nodiscard]] auto size() const -> size_t override { return storage_->count(); }
+
+  /** @copydoc RecordStore::generation */
+  [[nodiscard]] auto generation() const -> uint64_t override { return 0; }
 
  private:
   const RocksDBStorage<IDType> *storage_;  ///< Non-owning canonical record provider.

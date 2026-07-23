@@ -80,6 +80,37 @@ class MetadataFilterExecutor {
     if (scalar_index_ == nullptr || record_store_ == nullptr) {
       throw std::invalid_argument("ScalarIndex and RecordStore cannot be null");
     }
+    if (scalar_index_->generation() != record_store_->generation()) {
+      throw std::invalid_argument("ScalarIndex and RecordStore generations do not match");
+    }
+
+    initialize(index_build_mode);
+  }
+
+  /** @brief Build an executor over a generation-stable provider view with explicit live IDs. */
+  MetadataFilterExecutor(const MetadataFilter &filter,
+                         const ScalarIndex<IDType> *scalar_index,
+                         const RecordStore<IDType> *record_store,
+                         size_t data_num,
+                         const DynamicBitset *live_mask,
+                         size_t live_count,
+                         IndexBuildMode index_build_mode = IndexBuildMode::kBuild)
+      : filter_(filter),
+        scalar_index_(scalar_index),
+        record_store_(record_store),
+        data_num_(data_num),
+        live_mask_(live_mask),
+        live_count_(live_count),
+        allow_ids_(data_num) {
+    if (scalar_index_ == nullptr || record_store_ == nullptr || live_mask_ == nullptr) {
+      throw std::invalid_argument("ScalarIndex, RecordStore and live mask cannot be null");
+    }
+    if (scalar_index_->generation() != record_store_->generation()) {
+      throw std::invalid_argument("ScalarIndex and RecordStore generations do not match");
+    }
+    if (live_mask_->size() != data_num_ || live_count_ > data_num_) {
+      throw std::invalid_argument("Live mask does not match the scalar ID universe");
+    }
 
     initialize(index_build_mode);
   }
@@ -102,7 +133,9 @@ class MetadataFilterExecutor {
    * This says nothing about scalar-index availability. A non-empty unindexed filter returns false
    * and must still be evaluated through the residual/full-scan path.
    */
-  [[nodiscard]] auto is_trivially_true() const -> bool { return filter_.is_empty(); }
+  [[nodiscard]] auto is_trivially_true() const -> bool {
+    return filter_.is_empty() && live_count_ == data_num_;
+  }
   [[nodiscard]] auto has_index_fast_path() const -> bool { return has_index_fast_path_; }
   [[nodiscard]] auto index_fast_path_is_exact() const -> bool { return index_fast_path_exact_; }
   [[nodiscard]] auto index_fast_path_uses_materialized_ids() const -> bool {
@@ -149,7 +182,7 @@ class MetadataFilterExecutor {
     result.blocked_.set_all();
     bool indexed = visit_indexed_ids(*condition, [&](IDType id) {
       auto raw_id = static_cast<size_t>(id);
-      if (raw_id >= data_num_ || !result.blocked_.get(raw_id)) {
+      if (!is_live(id) || !result.blocked_.get(raw_id)) {
         return;
       }
       result.blocked_.reset(raw_id);
@@ -162,12 +195,15 @@ class MetadataFilterExecutor {
   }
 
   [[nodiscard]] auto match(IDType id) const -> bool {
+    if (!is_live(id)) {
+      return false;
+    }
     if (filter_.is_empty()) {
       return true;
     }
 
     if (has_index_fast_path_) {
-      if (static_cast<size_t>(id) >= data_num_ || !allow_ids_.get(id)) {
+      if (!allow_ids_.get(id)) {
         return false;
       }
       return index_fast_path_exact_ || match_raw_value(id);
@@ -177,7 +213,7 @@ class MetadataFilterExecutor {
   }
 
   [[nodiscard]] auto match_raw_value(IDType id) const -> bool {
-    if (static_cast<size_t>(id) >= data_num_) {
+    if (!is_live(id)) {
       return false;
     }
     std::string raw_value;
@@ -200,13 +236,19 @@ class MetadataFilterExecutor {
     BlockedBitsetResult result(ids.size());
 
     if (filter_.is_empty()) {
-      result.matched_count_ = ids.size();
+      for (size_t i = 0; i < ids.size(); ++i) {
+        if (is_live(ids[i])) {
+          ++result.matched_count_;
+        } else {
+          result.blocked_.set(i);
+        }
+      }
       return result;
     }
 
     if (has_index_fast_path_) {
       for (size_t i = 0; i < ids.size(); ++i) {
-        if (static_cast<size_t>(ids[i]) >= data_num_ || !allow_ids_.get(ids[i])) {
+        if (!is_live(ids[i]) || !allow_ids_.get(ids[i])) {
           result.blocked_.set(i);
         } else if (index_fast_path_exact_ || match_raw_value(ids[i])) {
           ++result.matched_count_;
@@ -219,7 +261,7 @@ class MetadataFilterExecutor {
 
     auto raw_values = record_store_->batch_get_raw_scalars(ids);
     for (size_t i = 0; i < ids.size(); ++i) {
-      if (raw_values[i].empty()) {
+      if (!is_live(ids[i]) || raw_values[i].empty()) {
         result.blocked_.set(i);
         continue;
       }
@@ -237,13 +279,23 @@ class MetadataFilterExecutor {
     BlockedBitsetResult result(data_num_);
 
     if (filter_.is_empty()) {
-      result.matched_count_ = data_num_;
+      result.matched_count_ = live_count_;
+      if (live_mask_ != nullptr) {
+        for (size_t raw_id = 0; raw_id < data_num_; ++raw_id) {
+          if (!live_mask_->get(raw_id)) {
+            result.blocked_.set(raw_id);
+          }
+        }
+      }
       return result;
     }
 
     if (has_index_fast_path_) {
       result.blocked_.set_all();
       visit_index_fast_path_ids([&](IDType id) {
+        if (!is_live(id)) {
+          return;
+        }
         if (index_fast_path_exact_) {
           result.blocked_.reset(id);
           ++result.matched_count_;
@@ -293,6 +345,12 @@ class MetadataFilterExecutor {
   }
 
  private:
+  /** @brief Return whether an ID belongs to the provider generation rather than a deleted hole. */
+  [[nodiscard]] auto is_live(IDType id) const -> bool {
+    auto raw_id = static_cast<size_t>(id);
+    return raw_id < data_num_ && (live_mask_ == nullptr || live_mask_->get(raw_id));
+  }
+
   [[nodiscard]] auto is_indexed_field(const std::string &field) const -> bool {
     return scalar_index_->is_indexed_field(field);
   }
@@ -325,7 +383,7 @@ class MetadataFilterExecutor {
     ids.erase(std::remove_if(ids.begin(),
                              ids.end(),
                              [this](IDType id) {
-                               return static_cast<size_t>(id) >= data_num_;
+                               return !is_live(id);
                              }),
               ids.end());
     std::sort(ids.begin(), ids.end());
@@ -336,9 +394,21 @@ class MetadataFilterExecutor {
     ids.erase(std::remove_if(ids.begin(),
                              ids.end(),
                              [this](IDType id) {
-                               return static_cast<size_t>(id) >= data_num_;
+                               return !is_live(id);
                              }),
               ids.end());
+  }
+
+  /** @brief Intersect an allow bitset with the live IDs and refresh its cardinality. */
+  void restrict_to_live_ids(DynamicBitset &allow_ids, size_t &matched_count) const {
+    matched_count = 0;
+    for (size_t raw_id = 0; raw_id < data_num_; ++raw_id) {
+      if (!is_live(static_cast<IDType>(raw_id))) {
+        allow_ids.reset(raw_id);
+      } else if (allow_ids.get(raw_id)) {
+        ++matched_count;
+      }
+    }
   }
 
   [[nodiscard]] static auto simple_condition_ids_are_unique(FilterOp op) -> bool {
@@ -384,10 +454,10 @@ class MetadataFilterExecutor {
 
   void apply_index_plan(IndexedFilterPlan &&indexed_plan) {
     indexed_ids_ = std::move(indexed_plan.ids_);
-    indexed_count_ = indexed_plan.matched_count_;
     index_fast_path_exact_ = indexed_plan.exact_;
     allow_ids_.clear();
     if (indexed_plan.allow_ids_.has_value()) {
+      restrict_to_live_ids(*indexed_plan.allow_ids_, indexed_plan.matched_count_);
       allow_ids_ = std::move(*indexed_plan.allow_ids_);
       index_fast_path_uses_materialized_ids_ = false;
     } else {
@@ -398,6 +468,7 @@ class MetadataFilterExecutor {
       }
       index_fast_path_uses_materialized_ids_ = true;
     }
+    indexed_count_ = indexed_plan.matched_count_;
     has_index_fast_path_ = true;
   }
 
@@ -513,10 +584,12 @@ class MetadataFilterExecutor {
     if (child_plan->allow_ids_.has_value()) {
       auto [allow_ids, matched_count] =
           ScalarIdSetAlgebra<IDType>::complement(*child_plan->allow_ids_, data_num_);
+      restrict_to_live_ids(allow_ids, matched_count);
       return IndexedFilterPlan{std::vector<IDType>{}, std::move(allow_ids), matched_count, true};
     }
     auto [allow_ids, matched_count] =
         ScalarIdSetAlgebra<IDType>::complement(child_plan->ids_, data_num_);
+    restrict_to_live_ids(allow_ids, matched_count);
     return IndexedFilterPlan{std::vector<IDType>{}, std::move(allow_ids), matched_count, true};
   }
 
@@ -572,7 +645,9 @@ class MetadataFilterExecutor {
   std::shared_ptr<RecordStore<IDType>> owned_record_store_;  ///< Legacy compatibility adapter.
   const ScalarIndex<IDType> *scalar_index_ = nullptr;  ///< Non-owning secondary-index provider.
   const RecordStore<IDType> *record_store_ = nullptr;  ///< Non-owning canonical-record provider.
-  size_t data_num_ = 0;                              ///< Valid internal-ID universe [0, data_num_).
+  size_t data_num_ = 0;                       ///< Valid internal-ID universe [0, data_num_).
+  const DynamicBitset *live_mask_ = nullptr;  ///< Non-owning immutable mask; null means all live.
+  size_t live_count_ = data_num_;             ///< Live IDs represented by live_mask_.
   std::unordered_set<std::string> required_fields_;  ///< Fields needed for residual evaluation.
   DynamicBitset allow_ids_;             ///< Materialized candidates for the current indexed plan.
   std::vector<IDType> indexed_ids_;     ///< Sorted candidates when vector form is cheaper.

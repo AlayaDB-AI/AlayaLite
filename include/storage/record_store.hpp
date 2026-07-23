@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -36,6 +37,9 @@ class RecordStore {
 
   /** @brief Return the number of persisted scalar records visible to this store. */
   [[nodiscard]] virtual auto size() const -> size_t = 0;
+
+  /** @brief Return the atomic mutation generation visible to record reads. */
+  [[nodiscard]] virtual auto generation() const -> uint64_t = 0;
 };
 
 }  // namespace alaya
