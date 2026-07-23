@@ -38,6 +38,8 @@ struct SearchDomain {
 struct SearchCapabilities {
   bool supports_accept_mask_ = false;       ///< Can reject output IDs without pruning traversal.
   bool supports_candidate_cursor_ = false;  ///< Can continue an existing search incrementally.
+  bool supports_candidate_expansion_ =
+      false;  ///< Larger top-k/budget requests can expose additional nearest candidates.
   bool returns_approx_distance_ = false;    ///< Returned distances require exact reranking.
   bool supports_partition_domain_ = false;  ///< Can search a physically restricted domain.
 };

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -27,8 +28,8 @@ namespace alaya {
  * @brief Selects and executes scalar-vector hybrid strategies over a vector backend contract.
  *
  * Scalar predicate compilation and residual evaluation belong to MetadataFilterExecutor. This
- * planner only chooses between exact, mask-pushdown and incremental candidate execution; it has no
- * knowledge of graph layout, vector quantization, or Space ownership.
+ * planner only chooses between exact, post-filter, mask-pushdown and incremental candidate
+ * execution; it has no knowledge of graph layout, vector quantization, or Space ownership.
  */
 template <typename DataType, typename IDType, typename DistanceType>
 class HybridSearchPlanner {
@@ -36,9 +37,21 @@ class HybridSearchPlanner {
   static constexpr float kKnnBFFilterThreshold =
       0.93F;                                       ///< Exact search when filter rejects >= 93%.
   static constexpr float kBFTopkThreshold = 0.5F;  ///< Exact search when top-k covers >= 50%.
+  static constexpr double kPostFilterPassRateThreshold =
+      0.70;  ///< Post-filter only when an exact indexed predicate accepts at least 70%.
+  static constexpr double kPostFilterOversamplingFactor =
+      1.25;  ///< Safety margin over top-k divided by the known predicate pass rate.
+  static constexpr uint32_t kPostFilterMaxAttempts =
+      3;  ///< Maximum independent unmasked ANN requests before safe fallback.
 
   /** @brief Strategy selected for one hybrid query. */
-  enum class Mode : uint8_t { kPlainSearch, kBitsetPrefilter, kIterativeFilter, kIndexedExact };
+  enum class Mode : uint8_t {
+    kPlainSearch,
+    kPostFilter,
+    kBitsetPrefilter,
+    kIterativeFilter,
+    kIndexedExact,
+  };
 
   /** @brief Planner decisions and runtime fallback information for one query. */
   struct PlanStats {
@@ -51,9 +64,13 @@ class HybridSearchPlanner {
     uint32_t effective_ef_ = 0;                ///< Candidate budget after selectivity adjustment.
     uint32_t fanout_ = 0;                      ///< Physical partitions searched; zero for global.
     uint32_t result_count_ = 0;                ///< Valid results produced by the query.
-    bool matched_count_known_ = false;         ///< Whether matched_count and pass_rate are valid.
-    bool fallback_ = false;                    ///< Whether execution switched modes at runtime.
-    std::string fallback_reason_;              ///< Stable reason code; empty without fallback.
+    size_t post_filter_candidates_examined_ =
+        0;  ///< Candidate rows scalar-tested across all post-filter attempts.
+    uint32_t post_filter_retry_count_ =
+        0;                              ///< Additional post-filter ANN requests after the first.
+    bool matched_count_known_ = false;  ///< Whether matched_count and pass_rate are valid.
+    bool fallback_ = false;             ///< Whether execution switched modes at runtime.
+    std::string fallback_reason_;       ///< Stable reason code; empty without fallback.
   };
 
   /** @brief Vector candidates plus the plan observation produced by one execution. */
@@ -79,6 +96,8 @@ class HybridSearchPlanner {
     switch (mode) {
       case Mode::kPlainSearch:
         return "plain_search";
+      case Mode::kPostFilter:
+        return "post_filter";
       case Mode::kBitsetPrefilter:
         return "bitset_prefilter";
       case Mode::kIterativeFilter:
@@ -98,9 +117,18 @@ class HybridSearchPlanner {
 
     switch (search_info.filter_exec_hint_) {
       case FilterExecHint::kAuto:
-        if (filter_executor.has_index_fast_path() &&
-            should_use_brute_force_search(search_info, filter_executor.indexed_count())) {
-          return Mode::kIndexedExact;
+        if (filter_executor.has_index_fast_path()) {
+          auto indexed_count = filter_executor.indexed_count();
+          if (filter_executor.index_fast_path_is_exact() &&
+              indexed_count == backend_->universe_size()) {
+            return Mode::kPlainSearch;
+          }
+          if (should_use_brute_force_search(search_info, indexed_count)) {
+            return Mode::kIndexedExact;
+          }
+          if (filter_executor.index_fast_path_is_exact() && should_use_post_filter(indexed_count)) {
+            return Mode::kPostFilter;
+          }
         }
         return Mode::kBitsetPrefilter;
       case FilterExecHint::kIterativeFilter:
@@ -126,7 +154,8 @@ class HybridSearchPlanner {
     if (filter_executor.is_trivially_true()) {
       stats.matched_count_ = stats.data_count_;
       stats.matched_count_known_ = true;
-    } else if (filter_executor.has_index_fast_path()) {
+    } else if (filter_executor.has_index_fast_path() &&
+               filter_executor.index_fast_path_is_exact()) {
       stats.matched_count_ = filter_executor.indexed_count();
       stats.matched_count_known_ = true;
     }
@@ -166,6 +195,10 @@ class HybridSearchPlanner {
     switch (mode) {
       case Mode::kPlainSearch:
         result.candidates_ = execute_plain_search(query, search_info);
+        break;
+      case Mode::kPostFilter:
+        result.candidates_ =
+            execute_post_filter(query, search_info, filter_executor, search_name, result.stats_);
         break;
       case Mode::kIndexedExact:
         result.candidates_ =
@@ -320,6 +353,93 @@ class HybridSearchPlanner {
         .candidate_budget_ = search_info.ef_,
     });
     return normalize_candidates(query, std::move(batch.candidates_), search_info.topk_, nullptr);
+  }
+
+  /**
+   * @brief Expand unmasked ANN candidates, then batch-evaluate a high-pass scalar predicate.
+   *
+   * Each retry starts a larger one-shot request because this strategy must also work with backends
+   * that do not expose a continuation cursor. Backend-reported distances are retained unless the
+   * backend explicitly declares them approximate; this preserves RaBitQ implicit reranking.
+   */
+  [[nodiscard]] auto execute_post_filter(const DataType *query,
+                                         const SearchInfo &search_info,
+                                         const MetadataFilterExecutor<IDType> &filter_executor,
+                                         const char *search_name,
+                                         PlanStats &plan_stats) const
+      -> std::vector<SearchCandidate<IDType, DistanceType>> {
+    auto required = std::min<size_t>(search_info.topk_, filter_executor.indexed_count());
+    if (required == 0) {
+      return {};
+    }
+
+    auto max_candidates =
+        std::min<size_t>(backend_->universe_size(), std::numeric_limits<uint32_t>::max());
+    auto expected = static_cast<size_t>(std::ceil(
+        (static_cast<double>(required) / plan_stats.pass_rate_) * kPostFilterOversamplingFactor));
+    auto candidate_count = std::min(max_candidates, std::max<size_t>(search_info.topk_, expected));
+    auto candidate_budget =
+        std::min(max_candidates, std::max<size_t>(search_info.ef_, candidate_count));
+
+    for (uint32_t attempt = 0; attempt < kPostFilterMaxAttempts; ++attempt) {
+      plan_stats.effective_ef_ = static_cast<uint32_t>(candidate_budget);
+      auto batch = backend_->search(VectorSearchRequest<DataType, IDType>{
+          .query_ = query,
+          .topk_ = static_cast<uint32_t>(candidate_count),
+          .candidate_budget_ = static_cast<uint32_t>(candidate_budget),
+      });
+      plan_stats.post_filter_candidates_examined_ += batch.candidates_.size();
+
+      std::vector<IDType> candidate_ids;
+      candidate_ids.reserve(batch.candidates_.size());
+      for (const auto &candidate : batch.candidates_) {
+        validate_candidate_id(candidate.id_);
+        candidate_ids.push_back(candidate.id_);
+      }
+
+      std::vector<uint8_t> matches;
+      filter_executor.eval_offsets(candidate_ids, matches);
+      BoundedCandidates result_pool(search_info.topk_);
+      for (size_t i = 0; i < batch.candidates_.size(); ++i) {
+        if (matches[i] == 0) {
+          continue;
+        }
+        auto candidate = batch.candidates_[i];
+        if (backend_->capabilities().returns_approx_distance_) {
+          candidate.distance_ = backend_->exact_distance(query, candidate.id_);
+        }
+        result_pool.insert(std::move(candidate));
+      }
+      if (result_pool.size() >= required) {
+        LOG_DEBUG("{}: post_filter candidates={}, retries={}, results={}",
+                  search_name,
+                  plan_stats.post_filter_candidates_examined_,
+                  plan_stats.post_filter_retry_count_,
+                  result_pool.size());
+        return result_pool.take_ordered();
+      }
+      if (attempt + 1 >= kPostFilterMaxAttempts) {
+        break;
+      }
+
+      auto next_candidate_count =
+          std::min(max_candidates, std::max(candidate_count + 1, candidate_count * 2));
+      auto next_candidate_budget =
+          std::min(max_candidates, std::max(next_candidate_count, candidate_budget * 2));
+      if (next_candidate_count == candidate_count && next_candidate_budget == candidate_budget) {
+        break;
+      }
+      candidate_count = next_candidate_count;
+      candidate_budget = next_candidate_budget;
+      ++plan_stats.post_filter_retry_count_;
+    }
+
+    LOG_DEBUG("{}: post_filter underfilled after {} candidates and {} retries; use mask fallback",
+              search_name,
+              plan_stats.post_filter_candidates_examined_,
+              plan_stats.post_filter_retry_count_);
+    mark_fallback(plan_stats, Mode::kBitsetPrefilter, "post_filter_underfill");
+    return execute_bitset_prefilter(query, search_info, filter_executor, search_name, plan_stats);
   }
 
   /** @brief Continue ANN candidate generation and evaluate scalar predicates per emitted batch. */
@@ -500,6 +620,18 @@ class HybridSearchPlanner {
       return true;
     }
     return topk >= static_cast<size_t>(static_cast<double>(matched_count) * kBFTopkThreshold);
+  }
+
+  /** @brief Return whether known selectivity and backend behavior favor post-filter execution. */
+  [[nodiscard]] auto should_use_post_filter(size_t matched_count) const -> bool {
+    auto data_count = backend_->universe_size();
+    if (!backend_->capabilities().supports_candidate_expansion_ || data_count == 0 ||
+        matched_count >= data_count) {
+      return false;
+    }
+    auto pass_rate =
+        static_cast<double>(matched_count) / static_cast<double>(backend_->universe_size());
+    return pass_rate >= kPostFilterPassRateThreshold;
   }
 
   /** @brief Record one runtime strategy transition. */

@@ -105,6 +105,7 @@ class LegacyGraphSearchBackend final : public VectorSearchBackend<DataType, IDTy
     return SearchCapabilities{
         .supports_accept_mask_ = true,
         .supports_candidate_cursor_ = true,
+        .supports_candidate_expansion_ = true,
         .returns_approx_distance_ = false,
         .supports_partition_domain_ = false,
     };

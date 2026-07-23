@@ -539,6 +539,233 @@ class ExactOnlyVectorBackend final : public VectorSearchBackend<float, uint32_t,
   std::vector<float> values_;  ///< Raw one-dimensional vectors keyed by internal ID.
 };
 
+/** @brief Deterministic expanding backend used to observe adaptive post-filter requests. */
+class RecordingExpandableVectorBackend final : public VectorSearchBackend<float, uint32_t, float> {
+ public:
+  /** @brief Captured request fields whose pointer values must not escape search(). */
+  struct SearchCall {
+    uint32_t topk_ = 0;              ///< Requested result capacity.
+    uint32_t candidate_budget_ = 0;  ///< Requested traversal budget.
+    bool had_accept_mask_ = false;   ///< Whether result admission was pushed into the backend.
+  };
+
+  /**
+   * @brief Build an ordered candidate source over IDs [0, universe_size).
+   * @param universe_size Number of valid internal IDs.
+   * @param per_call_limit Optional artificial underfill limit; zero returns up to request.topk_.
+   */
+  explicit RecordingExpandableVectorBackend(size_t universe_size, size_t per_call_limit = 0)
+      : universe_size_(universe_size), per_call_limit_(per_call_limit) {}
+
+  /** @copydoc VectorSearchBackend::capabilities */
+  [[nodiscard]] auto capabilities() const -> SearchCapabilities override {
+    return SearchCapabilities{
+        .supports_accept_mask_ = true,
+        .supports_candidate_cursor_ = false,
+        .supports_candidate_expansion_ = true,
+        .returns_approx_distance_ = false,
+        .supports_partition_domain_ = false,
+    };
+  }
+
+  /** @copydoc VectorSearchBackend::universe_size */
+  [[nodiscard]] auto universe_size() const -> size_t override { return universe_size_; }
+
+  /** @copydoc VectorSearchBackend::search */
+  [[nodiscard]] auto search(const VectorSearchRequest<float, uint32_t> &request) const
+      -> CandidateBatch<uint32_t, float> override {
+    calls_.push_back(
+        SearchCall{request.topk_, request.candidate_budget_, request.accept_mask_ != nullptr});
+    CandidateBatch<uint32_t, float> result;
+    auto result_limit = static_cast<size_t>(request.topk_);
+    if (per_call_limit_ != 0) {
+      result_limit = std::min(result_limit, per_call_limit_);
+    }
+    for (size_t raw_id = 0; raw_id < universe_size_ && result.candidates_.size() < result_limit;
+         ++raw_id) {
+      auto id = static_cast<uint32_t>(raw_id);
+      if (request.accept_mask_ != nullptr && !request.accept_mask_->accepts(id)) {
+        continue;
+      }
+      result.candidates_.push_back({id, static_cast<float>(id) + 0.25F});
+    }
+    result.exhausted_ = result.candidates_.size() < request.topk_;
+    return result;
+  }
+
+  /** @copydoc VectorSearchBackend::open_cursor */
+  [[nodiscard]] auto open_cursor(const VectorSearchRequest<float, uint32_t> &) const
+      -> std::unique_ptr<CandidateCursor<uint32_t, float>> override {
+    return nullptr;
+  }
+
+  /** @copydoc VectorSearchBackend::exact_distance */
+  [[nodiscard]] auto exact_distance(const float *, uint32_t id) const -> float override {
+    ++exact_distance_calls_;
+    return 1000.0F + static_cast<float>(id);
+  }
+
+  /** @brief Return all direct-search requests in execution order. */
+  [[nodiscard]] auto calls() const -> const std::vector<SearchCall> & { return calls_; }
+
+  /** @brief Return the number of explicit exact-distance requests. */
+  [[nodiscard]] auto exact_distance_calls() const -> size_t { return exact_distance_calls_; }
+
+ private:
+  size_t universe_size_ = 0;                 ///< Exclusive upper bound of emitted internal IDs.
+  size_t per_call_limit_ = 0;                ///< Artificial response cap used to force fallback.
+  mutable std::vector<SearchCall> calls_;    ///< Request observations recorded by const search().
+  mutable size_t exact_distance_calls_ = 0;  ///< Explicit rerank/brute-force distance evaluations.
+};
+
+/** @brief Build indexed scalar rows used by deterministic post-filter planner tests. */
+auto make_post_filter_record_store(const std::filesystem::path &db_path, uint32_t count)
+    -> std::unique_ptr<RocksDBRecordStore<uint32_t>> {
+  RocksDBRecordStoreConfig config;
+  config.db_path_ = db_path.string();
+  config.indexed_fields_ = {"eligible", "rank"};
+  auto store = std::make_unique<RocksDBRecordStore<uint32_t>>(std::move(config));
+  for (uint32_t id = 0; id < count; ++id) {
+    float vector_value = static_cast<float>(id);
+    auto raw_vector =
+        std::string(reinterpret_cast<const char *>(&vector_value), sizeof(vector_value));
+    if (!store->upsert(id,
+                       ScalarData{"item_" + std::to_string(id),
+                                  "doc_" + std::to_string(id),
+                                  {{"eligible", static_cast<int64_t>(id >= 4)},
+                                   {"rank", static_cast<int64_t>(id)},
+                                   {"parity", static_cast<int64_t>(id % 2)}}},
+                       raw_vector)) {
+      throw std::runtime_error("failed to populate post-filter test record store");
+    }
+  }
+  return store;
+}
+
+TEST(HybridSearchPlannerTest, PostFilterExpandsUnmaskedCandidatesAndPreservesDistances) {
+  ScopedTempDbDir db_dir("post_filter_expansion");
+  auto store = make_post_filter_record_store(db_dir.path_, 20);
+  auto view = store->acquire_query_view();
+  MetadataFilter filter;
+  filter.add_eq("eligible", static_cast<int64_t>(1));
+  auto &index = view->scalar_index();
+  MetadataFilterExecutor<uint32_t> filter_executor(filter,
+                                                   &index,
+                                                   view.get(),
+                                                   index.universe_size(),
+                                                   &index.live_mask(),
+                                                   index.live_count());
+  auto backend = std::make_shared<RecordingExpandableVectorBackend>(20);
+  HybridSearchPlanner<float, uint32_t, float> planner(backend);
+  float query = 0.0F;
+
+  auto execution = planner.execute(&query, SearchInfo{4, 4}, filter_executor, "post_filter_test");
+
+  ASSERT_EQ(execution.candidates_.size(), 4U);
+  EXPECT_EQ(execution.stats_.initial_mode_, decltype(planner)::Mode::kPostFilter);
+  EXPECT_EQ(execution.stats_.executed_mode_, decltype(planner)::Mode::kPostFilter);
+  EXPECT_EQ(execution.stats_.post_filter_retry_count_, 1U);
+  EXPECT_EQ(execution.stats_.post_filter_candidates_examined_, 21U);
+  EXPECT_FALSE(execution.stats_.fallback_);
+  ASSERT_EQ(backend->calls().size(), 2U);
+  EXPECT_EQ(backend->calls()[0].topk_, 7U);
+  EXPECT_EQ(backend->calls()[1].topk_, 14U);
+  EXPECT_LT(backend->calls()[0].candidate_budget_, backend->calls()[1].candidate_budget_);
+  EXPECT_FALSE(backend->calls()[0].had_accept_mask_);
+  EXPECT_FALSE(backend->calls()[1].had_accept_mask_);
+  EXPECT_EQ(backend->exact_distance_calls(), 0U);
+  for (size_t i = 0; i < execution.candidates_.size(); ++i) {
+    EXPECT_EQ(execution.candidates_[i].id_, i + 4);
+    EXPECT_FLOAT_EQ(execution.candidates_[i].distance_, static_cast<float>(i + 4) + 0.25F);
+  }
+}
+
+TEST(HybridSearchPlannerTest, PostFilterUnderfillUsesExistingPrefilterAndExactFallback) {
+  ScopedTempDbDir db_dir("post_filter_fallback");
+  auto store = make_post_filter_record_store(db_dir.path_, 20);
+  auto view = store->acquire_query_view();
+  MetadataFilter filter;
+  filter.add_eq("eligible", static_cast<int64_t>(1));
+  auto &index = view->scalar_index();
+  MetadataFilterExecutor<uint32_t> filter_executor(filter,
+                                                   &index,
+                                                   view.get(),
+                                                   index.universe_size(),
+                                                   &index.live_mask(),
+                                                   index.live_count());
+  auto backend = std::make_shared<RecordingExpandableVectorBackend>(20, 2);
+  HybridSearchPlanner<float, uint32_t, float> planner(backend);
+  float query = 0.0F;
+
+  auto execution = planner.execute(&query, SearchInfo{4, 4}, filter_executor, "post_filter_test");
+
+  ASSERT_EQ(execution.candidates_.size(), 4U);
+  EXPECT_EQ(execution.stats_.initial_mode_, decltype(planner)::Mode::kPostFilter);
+  EXPECT_EQ(execution.stats_.executed_mode_, decltype(planner)::Mode::kIndexedExact);
+  EXPECT_EQ(execution.stats_.post_filter_retry_count_, 2U);
+  EXPECT_EQ(execution.stats_.post_filter_candidates_examined_, 6U);
+  EXPECT_TRUE(execution.stats_.fallback_);
+  EXPECT_EQ(execution.stats_.fallback_reason_, "ann_underfill");
+  ASSERT_EQ(backend->calls().size(), 4U);
+  EXPECT_FALSE(backend->calls()[0].had_accept_mask_);
+  EXPECT_FALSE(backend->calls()[1].had_accept_mask_);
+  EXPECT_FALSE(backend->calls()[2].had_accept_mask_);
+  EXPECT_TRUE(backend->calls()[3].had_accept_mask_);
+  EXPECT_EQ(backend->exact_distance_calls(), 16U);
+  for (size_t i = 0; i < execution.candidates_.size(); ++i) {
+    EXPECT_EQ(execution.candidates_[i].id_, i + 4);
+  }
+}
+
+TEST(HybridSearchPlannerTest, AutoModeRequiresExactSelectivityForPostFilter) {
+  ScopedTempDbDir db_dir("post_filter_strategy_bands");
+  auto store = make_post_filter_record_store(db_dir.path_, 20);
+  auto view = store->acquire_query_view();
+  auto &index = view->scalar_index();
+  auto backend = std::make_shared<RecordingExpandableVectorBackend>(20);
+  HybridSearchPlanner<float, uint32_t, float> planner(backend);
+
+  MetadataFilter medium_filter;
+  medium_filter.add_lt("rank", static_cast<int64_t>(10));
+  MetadataFilterExecutor<uint32_t> medium_executor(medium_filter,
+                                                   &index,
+                                                   view.get(),
+                                                   index.universe_size(),
+                                                   &index.live_mask(),
+                                                   index.live_count());
+  EXPECT_EQ(planner.build_search_mode(medium_executor, SearchInfo{2, 4}),
+            decltype(planner)::Mode::kBitsetPrefilter);
+
+  MetadataFilter sparse_filter;
+  sparse_filter.add_lt("rank", static_cast<int64_t>(1));
+  MetadataFilterExecutor<uint32_t> sparse_executor(sparse_filter,
+                                                   &index,
+                                                   view.get(),
+                                                   index.universe_size(),
+                                                   &index.live_mask(),
+                                                   index.live_count());
+  EXPECT_EQ(planner.build_search_mode(sparse_executor, SearchInfo{1, 4}),
+            decltype(planner)::Mode::kIndexedExact);
+
+  MetadataFilter residual_filter;
+  residual_filter.add_eq("eligible", static_cast<int64_t>(1));
+  residual_filter.add_eq("parity", static_cast<int64_t>(0));
+  MetadataFilterExecutor<uint32_t> residual_executor(residual_filter,
+                                                     &index,
+                                                     view.get(),
+                                                     index.universe_size(),
+                                                     &index.live_mask(),
+                                                     index.live_count());
+  EXPECT_TRUE(residual_executor.has_index_fast_path());
+  EXPECT_FALSE(residual_executor.index_fast_path_is_exact());
+  EXPECT_EQ(planner.build_search_mode(residual_executor, SearchInfo{2, 4}),
+            decltype(planner)::Mode::kBitsetPrefilter);
+  auto stats = planner.make_plan_stats(decltype(planner)::Mode::kBitsetPrefilter,
+                                       SearchInfo{2, 4},
+                                       residual_executor);
+  EXPECT_FALSE(stats.matched_count_known_);
+}
+
 TEST(BlockedBitsetIdMaskTest, OwnsBlockedSnapshotAndRejectsOutOfRangeIds) {
   auto blocked = std::make_shared<DynamicBitset>(5);
   blocked->set(3);
@@ -1256,6 +1483,36 @@ TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithCategoryFilter) {
 
   for (uint32_t i = 0; i < topk; ++i) {
     EXPECT_EQ(ids[i] % 5, 2U);
+    EXPECT_FALSE(results[i].empty());
+  }
+}
+
+TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchUsesPostFilterForHighPassPredicate) {
+  constexpr uint32_t topk = 5;
+  constexpr uint32_t ef = 86;
+  auto hybrid_search_job = make_job(resources().category_space_);
+  HybridJobType::HybridPlanStats observed_stats;
+  hybrid_search_job->set_plan_stats_hook([&](const auto &stats) {
+    observed_stats = stats;
+  });
+
+  MetadataFilter filter;
+  filter.add_ge("category", static_cast<int64_t>(1));
+  std::vector<uint32_t> ids(topk);
+  std::vector<std::string> results(topk);
+  auto query = resources().ds_.queries_.data();
+
+  hybrid_search_job->rabitq_hybrid_search_solo(query,
+                                               SearchInfo{topk, ef},
+                                               ids.data(),
+                                               filter,
+                                               results.data());
+
+  EXPECT_EQ(observed_stats.initial_mode_, HybridJobType::Mode::kPostFilter);
+  EXPECT_EQ(observed_stats.executed_mode_, HybridJobType::Mode::kPostFilter);
+  EXPECT_GE(observed_stats.post_filter_candidates_examined_, topk);
+  for (uint32_t i = 0; i < topk; ++i) {
+    EXPECT_GE(ids[i] % 5, 1U);
     EXPECT_FALSE(results[i].empty());
   }
 }

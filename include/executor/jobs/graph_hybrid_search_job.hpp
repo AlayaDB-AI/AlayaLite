@@ -377,8 +377,8 @@ struct GraphHybridSearchJob {
   void emit_plan_stats(const char *search_name, const HybridPlanStats &stats) const {
     LOG_DEBUG(
         "{}: plan_stats initial={}, executed={}, matched_count={}, matched_known={}, "
-        "pass_rate={}, requested_ef={}, effective_ef={}, fanout={}, results={}, fallback={}, "
-        "fallback_reason={}",
+        "pass_rate={}, requested_ef={}, effective_ef={}, fanout={}, results={}, "
+        "post_filter_candidates={}, post_filter_retries={}, fallback={}, fallback_reason={}",
         search_name,
         mode_name(stats.initial_mode_),
         mode_name(stats.executed_mode_),
@@ -389,6 +389,8 @@ struct GraphHybridSearchJob {
         stats.effective_ef_,
         stats.fanout_,
         stats.result_count_,
+        stats.post_filter_candidates_examined_,
+        stats.post_filter_retry_count_,
         stats.fallback_,
         stats.fallback_reason_);
     if (plan_stats_hook_) {
