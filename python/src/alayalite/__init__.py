@@ -16,7 +16,7 @@ from ._alayalitepy import DiskCollection, MetricType  # noqa: E402
 from .client import Client  # noqa: E402
 from .collection import Collection  # noqa: E402
 from .index import Index  # noqa: E402
-from .utils import calc_gt, calc_recall, load_fvecs, load_ivecs  # noqa: E402
+from .utils import ColumnarDataset, calc_gt, calc_recall, load_fvecs, load_ivecs, load_npy_jsonl_dataset  # noqa: E402
 
 # The extension module is compiled with -Ofast (fast-math), so loading it enables flush-to-zero /
 # denormals-are-zero on the calling thread. numpy notices the changed FPU state and emits "smallest
@@ -40,8 +40,10 @@ __all__ = [
     "MetricType",
     "diskann",
     # utils
+    "ColumnarDataset",
     "load_fvecs",
     "load_ivecs",
+    "load_npy_jsonl_dataset",
     "calc_recall",
     "calc_gt",
 ]

@@ -34,7 +34,7 @@ class TestRecovery(unittest.TestCase):
         if os.path.exists(self.temp_dir):
             shutil.rmtree(self.temp_dir)
 
-    def _run_crashing_child(self, body: str, exit_code: int = 91) -> subprocess.CompletedProcess[str]:
+    def _run_crashing_child(self, body: str, exit_code: int = 91) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env["ALAYALITE_ROCKSDB_DIR"] = self.rocksdb_root
 

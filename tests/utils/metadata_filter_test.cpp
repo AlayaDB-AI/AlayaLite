@@ -2,7 +2,6 @@
 //
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#include "utils/metadata_filter_matcher.hpp"
 #include <gtest/gtest.h>
 #include <algorithm>
 #include <filesystem>
@@ -10,6 +9,9 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "scalar/id_set_algebra.hpp"
+#include "scalar/scalar_index_snapshot.hpp"
+#include "utils/metadata_filter_matcher.hpp"
 
 namespace alaya {
 namespace fs = std::filesystem;
@@ -94,7 +96,164 @@ void expect_matches(const std::vector<uint8_t> &matches, const std::vector<uint8
   }
 }
 
+class FakeScalarIndex final : public ScalarIndex<TestID> {
+ public:
+  [[nodiscard]] auto generation() const -> uint64_t override { return 0; }
+
+  [[nodiscard]] auto is_indexed_field(const std::string &field) const -> bool override {
+    return field == "category";
+  }
+
+  [[nodiscard]] auto lookup(const FilterCondition &condition) const
+      -> std::optional<std::vector<TestID>> override {
+    if (condition.field == "category" && condition.op == FilterOp::EQ &&
+        condition.value == MetadataValue{std::string("books")}) {
+      return std::vector<TestID>{0, 2};
+    }
+    return std::nullopt;
+  }
+};
+
+class FakeRecordStore final : public RecordStore<TestID> {
+ public:
+  explicit FakeRecordStore(const std::vector<ScalarData> &records, uint64_t generation = 0)
+      : generation_(generation) {
+    for (const auto &record : records) {
+      auto bytes = record.serialize();
+      records_.emplace_back(bytes.begin(), bytes.end());
+    }
+  }
+
+  auto get_raw_scalar(TestID id, std::string &value) const -> bool override {
+    if (id >= records_.size()) {
+      return false;
+    }
+    value = records_[id];
+    return true;
+  }
+
+  [[nodiscard]] auto batch_get_raw_scalars(const std::vector<TestID> &ids) const
+      -> std::vector<std::string> override {
+    std::vector<std::string> result;
+    result.reserve(ids.size());
+    for (auto id : ids) {
+      std::string value;
+      get_raw_scalar(id, value);
+      result.push_back(std::move(value));
+    }
+    return result;
+  }
+
+  [[nodiscard]] auto find_by_item_id(const std::string &item_id) const
+      -> std::optional<TestID> override {
+    const auto records = make_sample_records();
+    for (TestID id = 0; id < records.size(); ++id) {
+      if (records[id].item_id == item_id) {
+        return id;
+      }
+    }
+    return std::nullopt;
+  }
+
+  [[nodiscard]] auto size() const -> size_t override { return records_.size(); }
+
+  [[nodiscard]] auto generation() const -> uint64_t override { return generation_; }
+
+ private:
+  std::vector<std::string> records_;  ///< Serialized canonical rows used by residual evaluation.
+  uint64_t generation_ = 0;           ///< Generation exposed for provider consistency tests.
+};
+
 }  // namespace
+
+TEST(ScalarIdSetAlgebraTest, ComputesSortedSetOperationsAndComplement) {
+  EXPECT_EQ(ScalarIdSetAlgebra<TestID>::intersect({0, 2, 3}, {1, 2, 3}),
+            (std::vector<TestID>{2, 3}));
+  EXPECT_EQ(ScalarIdSetAlgebra<TestID>::unite({0, 2}, {1, 2, 3}),
+            (std::vector<TestID>{0, 1, 2, 3}));
+
+  auto [allow, matched_count] = ScalarIdSetAlgebra<TestID>::complement({1, 3}, 5);
+  EXPECT_EQ(matched_count, 3U);
+  EXPECT_TRUE(allow.get(0));
+  EXPECT_FALSE(allow.get(1));
+  EXPECT_TRUE(allow.get(2));
+  EXPECT_FALSE(allow.get(3));
+  EXPECT_TRUE(allow.get(4));
+}
+
+TEST(ScalarIndexSnapshotTest, BuildsTypedPostingsAndTracksLiveIds) {
+  std::vector<ScalarIndexSnapshot<TestID>::Record> records{
+      {0, ScalarData{"id_0", "doc", {{"category", "books"}, {"price", int64_t(100)}}}},
+      {2, ScalarData{"id_2", "doc", {{"category", "books"}, {"price", int64_t(2500)}}}},
+      {4, ScalarData{"id_4", "doc", {{"category", "games"}, {"price", int64_t(3000)}}}},
+      {5, ScalarData{"id_5", "doc", {{"category", "games"}}}},
+  };
+  auto snapshot = ScalarIndexSnapshot<TestID>::build(7, 6, {"category", "price"}, records);
+
+  EXPECT_EQ(snapshot->generation(), 7U);
+  EXPECT_EQ(snapshot->live_count(), 4U);
+  EXPECT_TRUE(snapshot->live_mask().get(0));
+  EXPECT_FALSE(snapshot->live_mask().get(1));
+  EXPECT_TRUE(snapshot->live_mask().get(5));
+  EXPECT_EQ(snapshot->lookup(make_condition("category", FilterOp::EQ, std::string("books"))),
+            (std::vector<TestID>{0, 2}));
+  EXPECT_EQ(snapshot->lookup(make_condition("category", FilterOp::NE, std::string("books"))),
+            (std::vector<TestID>{4, 5}));
+  EXPECT_EQ(snapshot->lookup(make_condition("price", FilterOp::GT, int64_t(2000))),
+            (std::vector<TestID>{2, 4}));
+  EXPECT_EQ(snapshot->lookup(make_condition("price",
+                                            FilterOp::NOT_IN_SET,
+                                            int64_t(0),
+                                            {int64_t(100), int64_t(3000)})),
+            (std::vector<TestID>{2}));
+  EXPECT_FALSE(
+      snapshot->lookup(make_condition("document", FilterOp::EQ, std::string("doc"))).has_value());
+}
+
+TEST(ScalarIndexSnapshotTest, RejectsDuplicateAndOutOfUniverseIds) {
+  auto scalar = ScalarData{"id", "doc", {{"category", "books"}}};
+  EXPECT_THROW(ScalarIndexSnapshot<TestID>::build(1, 1, {"category"}, {{1, scalar}}),
+               std::invalid_argument);
+  EXPECT_THROW(ScalarIndexSnapshot<TestID>::build(1, 1, {"category"}, {{0, scalar}, {0, scalar}}),
+               std::invalid_argument);
+}
+
+TEST(MetadataFilterExecutorProviderTest, RejectsMixedGenerations) {
+  auto records = make_sample_records();
+  auto snapshot = ScalarIndexSnapshot<TestID>::build(4,
+                                                     records.size(),
+                                                     {"category"},
+                                                     {{0, records[0]},
+                                                      {1, records[1]},
+                                                      {2, records[2]},
+                                                      {3, records[3]}});
+  FakeRecordStore store(records, 3);
+  auto filter = make_single_condition_filter("category", FilterOp::EQ, std::string("books"));
+
+  EXPECT_THROW(MetadataFilterExecutor<TestID>(filter, snapshot.get(), &store, records.size()),
+               std::invalid_argument);
+}
+
+TEST(MetadataFilterExecutorInterfaceTest, UsesIndexCandidatesAndRecordStoreResiduals) {
+  FakeScalarIndex scalar_index;
+  FakeRecordStore record_store(make_sample_records());
+  MetadataFilter filter;
+  filter.add_eq("category", std::string("books")).add_gt("score", 2.0);
+
+  MetadataFilterExecutor<TestID> executor(filter,
+                                          &scalar_index,
+                                          &record_store,
+                                          record_store.size());
+
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_FALSE(executor.index_fast_path_is_exact());
+  EXPECT_FALSE(executor.match(0));
+  EXPECT_TRUE(executor.match(2));
+  EXPECT_FALSE(executor.match(3));
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 1U);
+  expect_mask(result, {true, true, false, true});
+}
 
 TEST(MetadataFilterConditionTest, EvaluatesAllComparisonOperators) {
   const MetadataMap metadata = {
@@ -251,7 +410,7 @@ TEST_F(MetadataFilterExecutorTest, EmptyFilterMatchesEverything) {
   EXPECT_FALSE(executor.has_index_fast_path());
   EXPECT_EQ(executor.data_num(), 4U);
   EXPECT_TRUE(executor.match(0));
-  EXPECT_TRUE(executor.match(99));
+  EXPECT_FALSE(executor.match(99));
 
   const std::vector<TestID> ids = {0, 1, 3};
   const auto subset_result = executor.build_blocked_bitset(ids);
@@ -310,6 +469,172 @@ TEST_F(MetadataFilterExecutorTest, FullBitsetUsesIndexFastPathForIndexedFilters)
   expect_mask(result, {false, true, false, true});
 }
 
+TEST_F(MetadataFilterExecutorTest, DirectIndexedBitsetAvoidsMaterializingCandidateIds) {
+  auto storage = make_storage({"category", "age"});
+  using IndexBuildMode = MetadataFilterExecutor<TestID>::IndexBuildMode;
+
+  auto exact_filter = make_single_condition_filter("category", FilterOp::EQ, std::string("books"));
+  MetadataFilterExecutor<TestID> exact_executor(exact_filter,
+                                                storage.get(),
+                                                4,
+                                                IndexBuildMode::kSkip);
+  EXPECT_FALSE(exact_executor.has_index_fast_path());
+  EXPECT_TRUE(exact_executor.indexed_ids().empty());
+
+  auto exact_result = exact_executor.build_direct_indexed_blocked_bitset();
+  ASSERT_TRUE(exact_result.has_value());
+  EXPECT_EQ(exact_result->matched_count_, 2U);
+  expect_mask(*exact_result, {false, true, false, true});
+  EXPECT_FALSE(exact_executor.has_index_fast_path());
+  EXPECT_TRUE(exact_executor.indexed_ids().empty());
+
+  auto range_filter = make_single_condition_filter("age", FilterOp::LT, int64_t(30));
+  MetadataFilterExecutor<TestID> range_executor(range_filter,
+                                                storage.get(),
+                                                4,
+                                                IndexBuildMode::kSkip);
+  auto range_result = range_executor.build_direct_indexed_blocked_bitset();
+  ASSERT_TRUE(range_result.has_value());
+  EXPECT_EQ(range_result->matched_count_, 2U);
+  expect_mask(*range_result, {false, false, true, true});
+}
+
+TEST_F(MetadataFilterExecutorTest, IndexedAndFiltersIntersectCandidateSets) {
+  auto storage = make_storage({"category", "age"});
+
+  MetadataFilter filter;
+  filter.add_eq("category", std::string("books")).add_ge("age", int64_t(30));
+
+  MetadataFilterExecutor<TestID> executor(filter, storage.get(), 4);
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_TRUE(executor.index_fast_path_is_exact());
+  EXPECT_EQ(executor.indexed_ids(), (std::vector<TestID>{2}));
+
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 1U);
+  expect_mask(result, {true, true, false, true});
+}
+
+TEST_F(MetadataFilterExecutorTest, IndexedOrFiltersUnionCandidateSets) {
+  auto storage = make_storage({"category", "age"});
+
+  MetadataFilter filter;
+  filter.logic_op = LogicOp::OR;
+  filter.add_eq("category", std::string("games")).add_ge("age", int64_t(40));
+
+  MetadataFilterExecutor<TestID> executor(filter, storage.get(), 4);
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_TRUE(executor.index_fast_path_is_exact());
+  EXPECT_TRUE(executor.index_fast_path_uses_materialized_ids());
+  EXPECT_EQ(executor.indexed_ids(), (std::vector<TestID>{1, 3}));
+  EXPECT_EQ(executor.indexed_count(), 2U);
+  EXPECT_FALSE(executor.match(0));
+  EXPECT_TRUE(executor.match(1));
+  EXPECT_FALSE(executor.match(2));
+  EXPECT_TRUE(executor.match(3));
+
+  std::vector<TestID> visited_ids;
+  executor.visit_index_fast_path_ids([&visited_ids](TestID id) {
+    visited_ids.push_back(id);
+  });
+  EXPECT_EQ(visited_ids, (std::vector<TestID>{1, 3}));
+
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 2U);
+  expect_mask(result, {true, false, true, false});
+}
+
+TEST_F(MetadataFilterExecutorTest, IndexedNotFiltersComplementCandidateSet) {
+  auto storage = make_storage({"category"});
+
+  MetadataFilter filter;
+  filter.logic_op = LogicOp::NOT;
+  filter.add_eq("category", std::string("books"));
+
+  MetadataFilterExecutor<TestID> executor(filter, storage.get(), 4);
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_TRUE(executor.index_fast_path_is_exact());
+  EXPECT_FALSE(executor.index_fast_path_uses_materialized_ids());
+  EXPECT_TRUE(executor.indexed_ids().empty());
+  EXPECT_EQ(executor.indexed_count(), 2U);
+  EXPECT_FALSE(executor.match(0));
+  EXPECT_TRUE(executor.match(1));
+  EXPECT_FALSE(executor.match(2));
+  EXPECT_TRUE(executor.match(3));
+
+  std::vector<TestID> visited_ids;
+  executor.visit_index_fast_path_ids([&visited_ids](TestID id) {
+    visited_ids.push_back(id);
+  });
+  EXPECT_EQ(visited_ids, (std::vector<TestID>{1, 3}));
+
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 2U);
+  expect_mask(result, {true, false, true, false});
+}
+
+TEST(MetadataFilterExecutorProviderTest, IndexedNotExcludesDeletedIdsFromComplement) {
+  auto records = make_sample_records();
+  auto snapshot =
+      ScalarIndexSnapshot<TestID>::build(0, 3, {"category"}, {{0, records[0]}, {1, records[1]}});
+  FakeRecordStore store(records);
+  MetadataFilter filter;
+  filter.logic_op = LogicOp::NOT;
+  filter.add_eq("category", std::string("books"));
+
+  MetadataFilterExecutor<TestID> executor(filter,
+                                          snapshot.get(),
+                                          &store,
+                                          snapshot->universe_size(),
+                                          &snapshot->live_mask(),
+                                          snapshot->live_count());
+
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_TRUE(executor.index_fast_path_is_exact());
+  EXPECT_EQ(executor.indexed_count(), 1U);
+  EXPECT_FALSE(executor.match(0));
+  EXPECT_TRUE(executor.match(1));
+  EXPECT_FALSE(executor.match(2));
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 1U);
+  expect_mask(result, {true, false, true});
+}
+
+TEST_F(MetadataFilterExecutorTest, IndexedAndWithResidualEvaluatesOnlyCandidateSet) {
+  auto storage = make_storage({"category"});
+
+  MetadataFilter filter;
+  filter.add_eq("category", std::string("books"));
+  filter.conditions.push_back(make_condition("title", FilterOp::CONTAINS, std::string("notes")));
+
+  MetadataFilterExecutor<TestID> executor(filter, storage.get(), 4);
+  EXPECT_TRUE(executor.has_index_fast_path());
+  EXPECT_FALSE(executor.index_fast_path_is_exact());
+  EXPECT_EQ(executor.indexed_ids(), (std::vector<TestID>{0, 2}));
+  EXPECT_FALSE(executor.match(0));
+  EXPECT_TRUE(executor.match(2));
+
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 1U);
+  expect_mask(result, {true, true, false, true});
+}
+
+TEST_F(MetadataFilterExecutorTest, OrWithUnindexedBranchFallsBackToRawEvaluation) {
+  auto storage = make_storage({"category"});
+
+  MetadataFilter filter;
+  filter.logic_op = LogicOp::OR;
+  filter.add_eq("category", std::string("books"));
+  filter.conditions.push_back(make_condition("title", FilterOp::CONTAINS, std::string("gamma")));
+
+  MetadataFilterExecutor<TestID> executor(filter, storage.get(), 4);
+  EXPECT_FALSE(executor.has_index_fast_path());
+
+  const auto result = executor.build_blocked_bitset();
+  EXPECT_EQ(result.matched_count_, 3U);
+  expect_mask(result, {false, true, false, false});
+}
+
 TEST_F(MetadataFilterExecutorTest, IntegerRangeFiltersUseIndexFastPathAndHandleEdges) {
   auto storage = make_storage({"age"});
 
@@ -322,8 +647,8 @@ TEST_F(MetadataFilterExecutorTest, IntegerRangeFiltersUseIndexFastPathAndHandleE
   MetadataFilterExecutor<TestID> gt_executor(gt_filter, storage.get(), 4);
   EXPECT_EQ(gt_executor.indexed_ids(), (std::vector<TestID>{2, 3}));
 
-  auto gt_max_filter = make_single_condition_filter(
-      "age", FilterOp::GT, std::numeric_limits<int64_t>::max());
+  auto gt_max_filter =
+      make_single_condition_filter("age", FilterOp::GT, std::numeric_limits<int64_t>::max());
   MetadataFilterExecutor<TestID> gt_max_executor(gt_max_filter, storage.get(), 4);
   EXPECT_TRUE(gt_max_executor.has_index_fast_path());
   EXPECT_TRUE(gt_max_executor.indexed_ids().empty());
@@ -337,8 +662,8 @@ TEST_F(MetadataFilterExecutorTest, IntegerRangeFiltersUseIndexFastPathAndHandleE
   MetadataFilterExecutor<TestID> lt_executor(lt_filter, storage.get(), 4);
   EXPECT_EQ(lt_executor.indexed_ids(), (std::vector<TestID>{0, 1}));
 
-  auto lt_min_filter = make_single_condition_filter(
-      "age", FilterOp::LT, std::numeric_limits<int64_t>::min());
+  auto lt_min_filter =
+      make_single_condition_filter("age", FilterOp::LT, std::numeric_limits<int64_t>::min());
   MetadataFilterExecutor<TestID> lt_min_executor(lt_min_filter, storage.get(), 4);
   EXPECT_TRUE(lt_min_executor.has_index_fast_path());
   EXPECT_TRUE(lt_min_executor.indexed_ids().empty());

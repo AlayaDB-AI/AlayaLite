@@ -127,6 +127,14 @@ class SearchBuffer {
     }
   }
 
+  /** @brief Copy ordered IDs and their already-computed distances into caller-owned arrays. */
+  void copy_results_to(PID *knn, T *distances, size_t knn_size) const {
+    for (size_t i = 0; i < std::min(size_, knn_size); ++i) {
+      knn[i] = data_[i].id_;
+      distances[i] = data_[i].distance_;
+    }
+  }
+
   void copy_results_to(PID *knn) const {
     for (size_t i = 0; i < size_; ++i) {
       knn[i] = data_[i].id_;
