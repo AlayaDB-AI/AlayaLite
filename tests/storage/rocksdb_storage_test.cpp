@@ -10,7 +10,6 @@
 #include <unordered_set>
 #include <vector>
 
-#include "storage/record_store_migration.hpp"
 #include "storage/rocksdb_record_store.hpp"
 #include "storage/rocksdb_storage.hpp"
 #include "utils/scalar_data.hpp"
@@ -57,8 +56,10 @@ auto make_condition(std::string field,
   return FilterCondition{std::move(field), op, std::move(value), std::move(values)};
 }
 
-/** @brief Overwrite one v2 metadata value to exercise restart corruption checks. */
-void overwrite_v2_metadata(const fs::path &path, std::string_view key, std::string_view value) {
+/** @brief Overwrite one v3 metadata value to exercise restart corruption checks. */
+void overwrite_record_store_metadata(const fs::path &path,
+                                     std::string_view key,
+                                     std::string_view value) {
   rocksdb::Options options;
   options.create_if_missing = false;
   auto names = RocksDBRecordStoreSchema::column_families();
@@ -116,62 +117,31 @@ class RocksDBStorageTest : public ::testing::Test {
 
 class RocksDBRecordStoreTest : public RocksDBStorageTest {
  protected:
-  auto v2_config(const fs::path &path = {}) const -> RocksDBRecordStoreConfig {
+  auto record_store_config(const fs::path &path = {}) const -> RocksDBRecordStoreConfig {
     RocksDBRecordStoreConfig config;
-    config.db_path_ = (path.empty() ? temp_dir_ / "v2" : path).string();
+    config.db_path_ = (path.empty() ? temp_dir_ / "record_store" : path).string();
     config.indexed_fields_ = {"category", "price"};
     return config;
   }
 };
 
-TEST(RecordStoreManifestTest, RequiresEveryFieldExactlyOnce) {
-  EXPECT_TRUE(RecordStoreManifest::deserialize("format_version=1\n"
-                                               "schema_version=2\n"
-                                               "store_directory=stores/migrated\n"
-                                               "generation=3\n"
-                                               "live_count=2\n")
-                  .has_value());
-  EXPECT_FALSE(RecordStoreManifest::deserialize("schema_version=2\n"
-                                                "store_directory=stores/migrated\n"
-                                                "generation=3\n"
-                                                "live_count=2\n")
-                   .has_value());
-  EXPECT_FALSE(RecordStoreManifest::deserialize("format_version=1\n"
-                                                "schema_version=2\n"
-                                                "store_directory=stores/migrated\n"
-                                                "live_count=2\n")
-                   .has_value());
-  EXPECT_FALSE(RecordStoreManifest::deserialize("format_version=1\n"
-                                                "schema_version=2\n"
-                                                "store_directory=stores/migrated\n"
-                                                "generation=3\n"
-                                                "live_count=2\n"
-                                                "generation=4\n")
-                   .has_value());
-}
-
 TEST_F(RocksDBRecordStoreTest, PersistsCompleteRowsAndRebuildsOneGenerationOnRestart) {
-  auto path = temp_dir_ / "v2";
+  auto path = temp_dir_ / "record_store";
   {
-    RocksDBRecordStore<> store(v2_config(path));
+    RocksDBRecordStore<> store(record_store_config(path));
     ScalarData scalar{"item-7",
                       "document",
                       {{"category", std::string("target")}, {"price", int64_t(2500)}}};
     auto raw = vector_bytes(7.0F);
-    auto quantized = std::string("q7");
-
-    ASSERT_TRUE(store.upsert(7, scalar, raw, quantized));
+    ASSERT_TRUE(store.upsert(7, scalar, raw));
     EXPECT_EQ(store.generation(), 1U);
     EXPECT_EQ(store.size(), 1U);
     EXPECT_EQ(store.universe_size(), 8U);
     EXPECT_EQ(store.find_by_item_id("item-7"), 7U);
 
     std::string stored_raw;
-    std::string stored_quantized;
     EXPECT_TRUE(store.get_raw_vector(7, stored_raw));
-    EXPECT_TRUE(store.get_quantized_vector(7, stored_quantized));
     EXPECT_EQ(stored_raw, raw);
-    EXPECT_EQ(stored_quantized, quantized);
 
     auto view = store.acquire_query_view();
     EXPECT_EQ(view->generation(), store.generation());
@@ -182,7 +152,7 @@ TEST_F(RocksDBRecordStoreTest, PersistsCompleteRowsAndRebuildsOneGenerationOnRes
               (std::vector<uint32_t>{7}));
   }
 
-  RocksDBRecordStore<> reopened(v2_config(path));
+  RocksDBRecordStore<> reopened(record_store_config(path));
   EXPECT_EQ(reopened.generation(), 1U);
   EXPECT_EQ(reopened.size(), 1U);
   EXPECT_EQ(reopened.universe_size(), 8U);
@@ -191,39 +161,43 @@ TEST_F(RocksDBRecordStoreTest, PersistsCompleteRowsAndRebuildsOneGenerationOnRes
 }
 
 TEST_F(RocksDBRecordStoreTest, RejectsIndexedFieldConfigurationChangesOnRestart) {
-  auto path = temp_dir_ / "v2";
-  {
-    RocksDBRecordStore<> store(v2_config(path));
-  }
+  auto path = temp_dir_ / "record_store";
+  { RocksDBRecordStore<> store(record_store_config(path)); }
 
-  auto changed = v2_config(path);
+  auto changed = record_store_config(path);
   changed.indexed_fields_ = {"different"};
   EXPECT_THROW(RocksDBRecordStore<>{changed}, std::runtime_error);
 }
 
+TEST_F(RocksDBRecordStoreTest, RejectsPriorSchemaInsteadOfMigratingIt) {
+  auto path = temp_dir_ / "record_store";
+  { RocksDBRecordStore<> store(record_store_config(path)); }
+
+  overwrite_record_store_metadata(path, "schema_version", "2");
+  EXPECT_THROW(RocksDBRecordStore<>(record_store_config(path)), std::runtime_error);
+}
+
 TEST_F(RocksDBRecordStoreTest, RejectsPersistedUniverseSmallerThanCanonicalRecordIds) {
-  auto path = temp_dir_ / "v2";
+  auto path = temp_dir_ / "record_store";
   {
-    RocksDBRecordStore<> store(v2_config(path));
+    RocksDBRecordStore<> store(record_store_config(path));
     ASSERT_TRUE(store.upsert(7, ScalarData{"item-7", "document", {}}, vector_bytes(7.0F)));
   }
 
-  overwrite_v2_metadata(path, "universe_size", "7");
-  EXPECT_THROW(RocksDBRecordStore<>(v2_config(path)), std::invalid_argument);
+  overwrite_record_store_metadata(path, "universe_size", "7");
+  EXPECT_THROW(RocksDBRecordStore<>(record_store_config(path)), std::invalid_argument);
 }
 
 TEST_F(RocksDBRecordStoreTest, QueryViewKeepsScalarAndVectorReadsAtItsCapturedGeneration) {
-  RocksDBRecordStore<> store(v2_config());
+  RocksDBRecordStore<> store(record_store_config());
   ASSERT_TRUE(store.upsert(0,
                            ScalarData{"item-0", "old-document", {{"category", std::string("old")}}},
-                           vector_bytes(1.0F),
-                           std::string_view("old-q")));
+                           vector_bytes(1.0F)));
   auto old_view = store.acquire_query_view();
 
   ASSERT_TRUE(store.upsert(0,
                            ScalarData{"item-0", "new-document", {{"category", std::string("new")}}},
-                           vector_bytes(2.0F),
-                           std::string_view("new-q")));
+                           vector_bytes(2.0F)));
   auto new_view = store.acquire_query_view();
 
   EXPECT_EQ(old_view->generation(), 1U);
@@ -252,15 +226,13 @@ TEST_F(RocksDBRecordStoreTest, QueryViewKeepsScalarAndVectorReadsAtItsCapturedGe
 }
 
 TEST_F(RocksDBRecordStoreTest, RejectsDuplicateItemIdsAndDeletesEveryRowComponent) {
-  RocksDBRecordStore<> store(v2_config());
+  RocksDBRecordStore<> store(record_store_config());
   ASSERT_TRUE(store.upsert(0,
                            ScalarData{"same", "doc-0", {{"category", std::string("a")}}},
-                           vector_bytes(0.0F),
-                           std::string_view("q0")));
+                           vector_bytes(0.0F)));
   EXPECT_FALSE(store.upsert(1,
                             ScalarData{"same", "doc-1", {{"category", std::string("b")}}},
-                            vector_bytes(1.0F),
-                            std::string_view("q1")));
+                            vector_bytes(1.0F)));
   EXPECT_EQ(store.generation(), 1U);
   EXPECT_EQ(store.size(), 1U);
 
@@ -272,33 +244,28 @@ TEST_F(RocksDBRecordStoreTest, RejectsDuplicateItemIdsAndDeletesEveryRowComponen
   std::string value;
   EXPECT_FALSE(store.get_raw_scalar(0, value));
   EXPECT_FALSE(store.get_raw_vector(0, value));
-  EXPECT_FALSE(store.get_quantized_vector(0, value));
   EXPECT_FALSE(store.current_scalar_snapshot()->live_mask().get(0));
 }
 
 TEST_F(RocksDBRecordStoreTest, CheckpointRestoresAllColumnFamiliesAtOneGeneration) {
   auto checkpoint = temp_dir_ / "checkpoint";
   {
-    RocksDBRecordStore<> store(v2_config());
+    RocksDBRecordStore<> store(record_store_config());
     ASSERT_TRUE(store.upsert(3,
                              ScalarData{"item-3", "doc", {{"category", std::string("target")}}},
-                             vector_bytes(3.0F),
-                             std::string_view("q3")));
+                             vector_bytes(3.0F)));
     store.save_checkpoint(checkpoint.string());
   }
 
-  auto restored_config = v2_config(checkpoint);
+  auto restored_config = record_store_config(checkpoint);
   restored_config.create_if_missing_ = false;
   RocksDBRecordStore<> restored(restored_config);
   EXPECT_EQ(restored.generation(), 1U);
   EXPECT_EQ(restored.size(), 1U);
   EXPECT_EQ(restored.find_by_item_id("item-3"), 3U);
   std::string raw;
-  std::string quantized;
   EXPECT_TRUE(restored.get_raw_vector(3, raw));
-  EXPECT_TRUE(restored.get_quantized_vector(3, quantized));
   EXPECT_EQ(raw, vector_bytes(3.0F));
-  EXPECT_EQ(quantized, "q3");
 }
 
 TEST_F(RocksDBRecordStoreTest, RefusesLegacyDirectoryWithoutModifyingIt) {
@@ -310,77 +277,10 @@ TEST_F(RocksDBRecordStoreTest, RefusesLegacyDirectoryWithoutModifyingIt) {
     ASSERT_TRUE(legacy.insert(0, ScalarData{"legacy-item", "doc", {}}));
   }
 
-  EXPECT_THROW(RocksDBRecordStore<>(v2_config(legacy_path)), std::runtime_error);
+  EXPECT_THROW(RocksDBRecordStore<>(record_store_config(legacy_path)), std::runtime_error);
   RocksDBStorage<> reopened_legacy(legacy_config);
   EXPECT_EQ(reopened_legacy.count(), 1U);
   EXPECT_EQ(reopened_legacy[0].item_id, "legacy-item");
-}
-
-TEST_F(RocksDBRecordStoreTest, MigrationPublishesOnlyAfterEveryLegacyRowHasVectors) {
-  RecordStoreLayout layout(temp_dir_ / "layout");
-  auto old_path = layout.store_path("old");
-  {
-    RocksDBRecordStore<> old_store(v2_config(old_path));
-    ASSERT_TRUE(old_store.upsert(0, ScalarData{"old-item", "old-doc", {}}, vector_bytes(-1.0F)));
-    layout.publish(RecordStoreManifest{
-        .store_directory_ = layout.store_relative_path("old").generic_string(),
-        .generation_ = old_store.generation(),
-        .live_count_ = old_store.size(),
-    });
-  }
-
-  auto legacy_config = config_;
-  legacy_config.db_path_ = (temp_dir_ / "legacy-source").string();
-  RocksDBStorage<> legacy(legacy_config);
-  ASSERT_TRUE(
-      legacy.insert(0, ScalarData{"item-0", "doc-0", {{"category", std::string("target")}}}));
-  ASSERT_TRUE(
-      legacy.insert(1, ScalarData{"item-1", "doc-1", {{"category", std::string("other")}}}));
-
-  EXPECT_THROW(migrate_legacy_record_store<
-                   uint32_t>(legacy,
-                             layout,
-                             "incomplete",
-                             {"category"},
-                             [](uint32_t id) -> std::optional<MigratedVectorPayload> {
-                               if (id == 1) {
-                                 return std::nullopt;
-                               }
-                               return MigratedVectorPayload{vector_bytes(static_cast<float>(id)),
-                                                            std::nullopt};
-                             }),
-               std::runtime_error);
-  ASSERT_TRUE(layout.current_manifest().has_value());
-  EXPECT_EQ(layout.current_manifest()->store_directory_,
-            layout.store_relative_path("old").generic_string());
-  EXPECT_FALSE(fs::exists(layout.store_path("incomplete")));
-
-  auto manifest = migrate_legacy_record_store<
-      uint32_t>(legacy,
-                layout,
-                "migrated",
-                {"category"},
-                [](uint32_t id) -> std::optional<MigratedVectorPayload> {
-                  return MigratedVectorPayload{vector_bytes(static_cast<float>(id)),
-                                               std::string("q") + std::to_string(id)};
-                });
-  EXPECT_EQ(manifest.live_count_, 2U);
-  EXPECT_EQ(layout.current_manifest()->store_directory_,
-            layout.store_relative_path("migrated").generic_string());
-
-  auto migrated_config = v2_config(*layout.current_store_path());
-  migrated_config.indexed_fields_ = {"category"};
-  migrated_config.create_if_missing_ = false;
-  RocksDBRecordStore<> migrated(migrated_config);
-  EXPECT_EQ(migrated.size(), 2U);
-  EXPECT_EQ(migrated.generation(), manifest.generation_);
-  EXPECT_EQ(migrated.find_by_item_id("item-1"), 1U);
-  std::string raw;
-  std::string quantized;
-  EXPECT_TRUE(migrated.get_raw_vector(1, raw));
-  EXPECT_TRUE(migrated.get_quantized_vector(1, quantized));
-  EXPECT_EQ(raw, vector_bytes(1.0F));
-  EXPECT_EQ(quantized, "q1");
 }
 
 // ============================================================================

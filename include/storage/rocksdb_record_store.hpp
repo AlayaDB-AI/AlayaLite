@@ -35,41 +35,38 @@
 
 namespace alaya {
 
-/** @brief Stable v2 column-family names shared by storage, migration and recovery code. */
+/** @brief Stable v3 column-family names shared by storage and recovery code. */
 struct RocksDBRecordStoreSchema {
-  static constexpr uint32_t kVersion = 2;  ///< On-disk schema version stored in metadata.
-  static constexpr std::string_view kRecords = "records";  ///< ID -> serialized ScalarData.
-  static constexpr std::string_view kVectors = "vectors";  ///< ID -> exact/raw vector bytes.
-  static constexpr std::string_view kQuantizedVectors =
-      "quantized_vectors";  ///< ID -> optional quantized vector bytes used by ANN search.
+  static constexpr uint32_t kVersion = 3;  ///< Raw-vector-only on-disk schema version.
+  static constexpr std::string_view kRecords = "records";   ///< ID -> serialized ScalarData.
+  static constexpr std::string_view kVectors = "vectors";   ///< ID -> exact/raw vector bytes.
   static constexpr std::string_view kItemIds = "item_ids";  ///< External item ID -> internal ID.
   static constexpr std::string_view kScalarIndexes =
       "scalar_indexes";  ///< Durable field/value/ID mirror; memory currently rebuilds from records.
   static constexpr std::string_view kMetadata =
       "metadata";  ///< Schema version, generation, live count and ID universe.
 
-  /** @brief Return every CF required to open a v2 database, including RocksDB's default CF. */
+  /** @brief Return every CF required to open a v3 database, including RocksDB's default CF. */
   [[nodiscard]] static auto column_families() -> std::vector<std::string> {
     return {rocksdb::kDefaultColumnFamilyName,
             std::string(kRecords),
             std::string(kVectors),
-            std::string(kQuantizedVectors),
             std::string(kItemIds),
             std::string(kScalarIndexes),
             std::string(kMetadata)};
   }
 };
 
-/** @brief Configuration for the v2 canonical record store. */
+/** @brief Configuration for the v3 canonical record store. */
 struct RocksDBRecordStoreConfig {
-  std::string db_path_;  ///< Dedicated v2 directory; legacy single-CF directories are rejected.
+  std::string db_path_;  ///< Dedicated v3 directory; incompatible layouts are rejected.
   std::vector<std::string> indexed_fields_;  ///< Metadata fields copied into the memory snapshot.
-  bool create_if_missing_ = true;  ///< Create a fresh v2 directory when CURRENT is absent.
+  bool create_if_missing_ = true;  ///< Create a fresh v3 directory when CURRENT is absent.
   bool sync_writes_ = false;  ///< Fsync each atomic mutation in addition to RocksDB WAL ordering.
 };
 
 /**
- * @brief Canonical v2 RocksDB store for scalar rows, raw vectors and quantized vectors.
+ * @brief Canonical v3 RocksDB store for scalar rows and exact/raw vectors.
  *
  * Every logical row mutation is one cross-CF WriteBatch. The batch also advances generation, so a
  * recovered database cannot expose scalar/vector/item-ID components from different mutations. An
@@ -144,14 +141,6 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
       return owner_->get_cf_value(owner_->vectors_cf_, encode_id(id), value, read_options());
     }
 
-    /** @brief Read optional quantized vector bytes from this generation. */
-    auto get_quantized_vector(IDType id, std::string &value) const -> bool {
-      return owner_->get_cf_value(owner_->quantized_vectors_cf_,
-                                  encode_id(id),
-                                  value,
-                                  read_options());
-    }
-
    private:
     friend class RocksDBRecordStore;
 
@@ -174,7 +163,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
     std::shared_ptr<const ScalarSnapshot> scalar_snapshot_;  ///< Immutable in-memory postings.
   };
 
-  /** @brief Open or create a dedicated v2 record-store directory. */
+  /** @brief Open or create a dedicated v3 record-store directory. */
   explicit RocksDBRecordStore(RocksDBRecordStoreConfig config) : config_(std::move(config)) {
     if (config_.db_path_.empty()) {
       throw std::invalid_argument("RocksDBRecordStore path cannot be empty");
@@ -198,13 +187,9 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
    * @param id Stable internal ID shared by scalar and vector indexes.
    * @param scalar Canonical external ID, document and metadata payload.
    * @param raw_vector Exact vector bytes required for reranking and brute force.
-   * @param quantized_vector Optional ANN representation; absence deletes an older representation.
    * @return false for duplicate item IDs or a failed RocksDB commit.
    */
-  auto upsert(IDType id,
-              const ScalarData &scalar,
-              std::string_view raw_vector,
-              std::optional<std::string_view> quantized_vector = std::nullopt) -> bool {
+  auto upsert(IDType id, const ScalarData &scalar, std::string_view raw_vector) -> bool {
     if (raw_vector.empty()) {
       throw std::invalid_argument("Raw vector bytes cannot be empty");
     }
@@ -244,13 +229,6 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
     auto serialized = scalar.serialize();
     batch.Put(records_cf_, key, rocksdb::Slice(serialized.data(), serialized.size()));
     batch.Put(vectors_cf_, key, rocksdb::Slice(raw_vector.data(), raw_vector.size()));
-    if (quantized_vector.has_value()) {
-      batch.Put(quantized_vectors_cf_,
-                key,
-                rocksdb::Slice(quantized_vector->data(), quantized_vector->size()));
-    } else {
-      batch.Delete(quantized_vectors_cf_, key);
-    }
     put_item_id_entry(batch, scalar.item_id, id);
     put_scalar_index_entries(batch, id, scalar);
     put_metadata(batch, next_generation, next_count, next_universe);
@@ -282,7 +260,6 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
     rocksdb::WriteBatch batch;
     batch.Delete(records_cf_, key);
     batch.Delete(vectors_cf_, key);
-    batch.Delete(quantized_vectors_cf_, key);
     delete_item_id_entry(batch, old_scalar.item_id);
     delete_scalar_index_entries(batch, id, old_scalar);
     put_metadata(batch, next_generation, next_count, next_universe);
@@ -342,12 +319,6 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
     return get_cf_value(vectors_cf_, encode_id(id), value, rocksdb::ReadOptions{});
   }
 
-  /** @brief Read current quantized vector bytes without pinning a multi-read query view. */
-  auto get_quantized_vector(IDType id, std::string &value) const -> bool {
-    std::lock_guard<std::mutex> lock(publication_mutex_);
-    return get_cf_value(quantized_vectors_cf_, encode_id(id), value, rocksdb::ReadOptions{});
-  }
-
   /** @brief Acquire a generation-stable RecordStore and ScalarIndex pair for one query. */
   [[nodiscard]] auto acquire_query_view() const -> std::unique_ptr<QueryView> {
     std::lock_guard<std::mutex> lock(publication_mutex_);
@@ -365,7 +336,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
     return std::atomic_load_explicit(&scalar_snapshot_, std::memory_order_acquire);
   }
 
-  /** @brief Create a RocksDB checkpoint containing every v2 column family. */
+  /** @brief Create a RocksDB checkpoint containing every v3 column family. */
   void save_checkpoint(const std::string &path) const {
     rocksdb::Checkpoint *raw_checkpoint = nullptr;
     auto status = rocksdb::Checkpoint::Create(db_.get(), &raw_checkpoint);
@@ -403,7 +374,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
   /** @brief Decode one fixed-width big-endian internal-ID key. */
   [[nodiscard]] static auto decode_id(const rocksdb::Slice &key) -> IDType {
     if (key.size() != sizeof(UnsignedIDType)) {
-      throw std::runtime_error("Invalid v2 internal-ID key width");
+      throw std::runtime_error("Invalid v3 internal-ID key width");
     }
     UnsignedIDType value = 0;
     for (size_t offset = 0; offset < key.size(); ++offset) {
@@ -421,7 +392,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
     auto [end, error] = std::from_chars(raw.data(), raw.data() + raw.size(), result);
     if (error != std::errc{} ||  // NOLINT(whitespace/braces)
         end != raw.data() + raw.size()) {
-      throw std::runtime_error(std::string("Invalid v2 metadata value for ") + name);
+      throw std::runtime_error(std::string("Invalid v3 metadata value for ") + name);
     }
     return result;
   }
@@ -437,7 +408,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
     return encoded;
   }
 
-  /** @brief Open all required CFs or reject a legacy/partial directory before modifying it. */
+  /** @brief Open all required CFs or reject an incompatible directory before modifying it. */
   void open() {
     namespace fs = std::filesystem;
     auto current_path = fs::path(config_.db_path_) / "CURRENT";
@@ -457,10 +428,10 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
       std::sort(sorted_expected.begin(), sorted_expected.end());
       if (sorted_actual != sorted_expected) {
         throw std::runtime_error(
-            "Refusing to open a legacy or partial RocksDB directory as v2; migrate to a new path");
+            "Refusing to open an incompatible RocksDB record store as v3; use a new empty path");
       }
     } else if (!config_.create_if_missing_) {
-      throw std::runtime_error("v2 RocksDB record store does not exist");
+      throw std::runtime_error("v3 RocksDB record store does not exist");
     }
 
     auto parent = fs::path(config_.db_path_).parent_path();
@@ -483,18 +454,17 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
                                     &handles_,
                                     &db_);
     if (!status.ok()) {
-      throw std::runtime_error("Failed to open v2 RocksDB record store: " + status.ToString());
+      throw std::runtime_error("Failed to open v3 RocksDB record store: " + status.ToString());
     }
     try {
       if (handles_.size() != expected.size()) {
-        throw std::runtime_error("RocksDB returned an incomplete v2 column-family handle set");
+        throw std::runtime_error("RocksDB returned an incomplete v3 column-family handle set");
       }
       for (size_t i = 0; i < expected.size(); ++i) {
         handles_by_name_.emplace(expected[i], handles_[i]);
       }
       records_cf_ = require_cf(RocksDBRecordStoreSchema::kRecords);
       vectors_cf_ = require_cf(RocksDBRecordStoreSchema::kVectors);
-      quantized_vectors_cf_ = require_cf(RocksDBRecordStoreSchema::kQuantizedVectors);
       item_ids_cf_ = require_cf(RocksDBRecordStoreSchema::kItemIds);
       scalar_indexes_cf_ = require_cf(RocksDBRecordStoreSchema::kScalarIndexes);
       metadata_cf_ = require_cf(RocksDBRecordStoreSchema::kMetadata);
@@ -502,7 +472,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
       initialize_or_load_metadata(existing);
       auto records = load_all_records();
       if (records.size() != live_count_.load(std::memory_order_relaxed)) {
-        throw std::runtime_error("v2 live_count does not match canonical records CF");
+        throw std::runtime_error("v3 live_count does not match canonical records CF");
       }
       auto snapshot = ScalarSnapshot::build(generation_.load(std::memory_order_relaxed),
                                             universe_size_.load(std::memory_order_relaxed),
@@ -515,7 +485,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
     }
   }
 
-  /** @brief Initialize metadata for a new directory or validate and load an existing v2 store. */
+  /** @brief Initialize metadata for a new directory or validate and load an existing v3 store. */
   void initialize_or_load_metadata(bool existing) {
     if (!existing) {
       rocksdb::WriteBatch batch;
@@ -525,7 +495,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
                 std::to_string(RocksDBRecordStoreSchema::kVersion));
       batch.Put(metadata_cf_, kIndexedFieldsKey, encode_indexed_fields());
       if (!write(batch)) {
-        throw std::runtime_error("Failed to initialize v2 RocksDB metadata");
+        throw std::runtime_error("Failed to initialize v3 RocksDB metadata");
       }
       return;
     }
@@ -536,7 +506,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
     }
     if (require_metadata(kIndexedFieldsKey) != encode_indexed_fields()) {
       throw std::runtime_error(
-          "Configured indexed fields do not match the persisted v2 record-store schema");
+          "Configured indexed fields do not match the persisted v3 record-store schema");
     }
     generation_.store(parse_unsigned<uint64_t>(require_metadata(kGenerationKey), "generation"),
                       std::memory_order_relaxed);
@@ -568,7 +538,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
   [[nodiscard]] auto require_cf(std::string_view name) const -> rocksdb::ColumnFamilyHandle * {
     auto handle = handles_by_name_.find(std::string(name));
     if (handle == handles_by_name_.end()) {
-      throw std::runtime_error("Missing v2 RocksDB column family: " + std::string(name));
+      throw std::runtime_error("Missing v3 RocksDB column family: " + std::string(name));
     }
     return handle->second;
   }
@@ -584,16 +554,16 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
       return false;
     }
     if (!status.ok()) {
-      throw std::runtime_error("RocksDB v2 read failed: " + status.ToString());
+      throw std::runtime_error("RocksDB v3 read failed: " + status.ToString());
     }
     return true;
   }
 
-  /** @brief Read one required metadata value or fail opening a corrupt/partial v2 store. */
+  /** @brief Read one required metadata value or fail opening a corrupt/partial v3 store. */
   [[nodiscard]] auto require_metadata(std::string_view key) const -> std::string {
     std::string value;
     if (!get_cf_value(metadata_cf_, std::string(key), value, rocksdb::ReadOptions{})) {
-      throw std::runtime_error("Missing v2 RocksDB metadata key: " + std::string(key));
+      throw std::runtime_error("Missing v3 RocksDB metadata key: " + std::string(key));
     }
     return value;
   }
@@ -624,7 +594,7 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
       records.emplace_back(id, ScalarData::deserialize(value.data(), value.size()));
     }
     if (!iterator->status().ok()) {
-      throw std::runtime_error("Failed to scan v2 records CF: " + iterator->status().ToString());
+      throw std::runtime_error("Failed to scan v3 records CF: " + iterator->status().ToString());
     }
     return records;
   }
@@ -742,11 +712,10 @@ class RocksDBRecordStore final : public RecordStore<IDType> {
   std::vector<rocksdb::ColumnFamilyHandle *> handles_;  ///< All handles in open descriptor order.
   std::unordered_map<std::string, rocksdb::ColumnFamilyHandle *>
       handles_by_name_;  ///< Name lookup used only during initialization.
-  rocksdb::ColumnFamilyHandle *records_cf_ = nullptr;            ///< Canonical ScalarData CF.
-  rocksdb::ColumnFamilyHandle *vectors_cf_ = nullptr;            ///< Exact/raw vector CF.
-  rocksdb::ColumnFamilyHandle *quantized_vectors_cf_ = nullptr;  ///< Optional ANN vector CF.
-  rocksdb::ColumnFamilyHandle *item_ids_cf_ = nullptr;           ///< External-to-internal ID CF.
-  rocksdb::ColumnFamilyHandle *scalar_indexes_cf_ = nullptr;     ///< Durable scalar postings CF.
+  rocksdb::ColumnFamilyHandle *records_cf_ = nullptr;         ///< Canonical ScalarData CF.
+  rocksdb::ColumnFamilyHandle *vectors_cf_ = nullptr;         ///< Exact/raw vector CF.
+  rocksdb::ColumnFamilyHandle *item_ids_cf_ = nullptr;        ///< External-to-internal ID CF.
+  rocksdb::ColumnFamilyHandle *scalar_indexes_cf_ = nullptr;  ///< Durable scalar postings CF.
   rocksdb::ColumnFamilyHandle *metadata_cf_ = nullptr;  ///< Schema and generation metadata CF.
   mutable std::mutex publication_mutex_;  ///< Serializes writes and paired query-view acquisition.
   std::atomic<uint64_t> generation_{0};   ///< Latest committed and published logical generation.
