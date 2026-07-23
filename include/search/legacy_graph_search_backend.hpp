@@ -110,6 +110,11 @@ class LegacyGraphSearchBackend final : public VectorSearchBackend<DataType, IDTy
     };
   }
 
+  /** @copydoc VectorSearchBackend::universe_size */
+  [[nodiscard]] auto universe_size() const -> size_t override {
+    return static_cast<size_t>(job_->space_->get_data_num());
+  }
+
   /** @copydoc VectorSearchBackend::search */
   [[nodiscard]] auto search(const VectorSearchRequest<DataType, IDType> &request) const
       -> CandidateBatch<IDType, DistanceType> override {
@@ -129,9 +134,9 @@ class LegacyGraphSearchBackend final : public VectorSearchBackend<DataType, IDTy
       job_->rabitq_search_solo(request.query_,
                                request.topk_,
                                ids.data(),
+                               distances.data(),
                                SearchInfo{request.topk_, budget},
                                blocked_mask);
-      fill_exact_distances(request.query_, ids, distances);
     } else if (blocked_mask == nullptr) {
       job_->search_solo(const_cast<DataType *>(request.query_),
                         ids.data(),

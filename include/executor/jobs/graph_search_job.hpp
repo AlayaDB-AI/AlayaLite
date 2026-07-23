@@ -346,7 +346,24 @@ struct GraphSearchJob {
     fill_invalid_distances(distances, result_count, topk);
   }
 
+  /** @brief Run RaBitQ search and return IDs while discarding its implicit-rerank distances. */
   void rabitq_search_solo(const DataType *query, uint32_t k, IDType *ids, uint32_t ef) {
+    rabitq_search_solo(query, k, ids, nullptr, ef);
+  }
+
+  /**
+   * @brief Run RaBitQ search and preserve exact distances produced by implicit reranking.
+   * @param query Raw query vector.
+   * @param k Number of nearest neighbors requested.
+   * @param ids Output internal IDs ordered by exact distance.
+   * @param distances Optional output exact distances paired with ids; may be null.
+   * @param ef RaBitQ traversal breadth; must be at least k.
+   */
+  void rabitq_search_solo(const DataType *query,
+                          uint32_t k,
+                          IDType *ids,
+                          DistanceType *distances,
+                          uint32_t ef) {
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");
     }
@@ -409,8 +426,17 @@ struct GraphSearchJob {
 
     visited_pool_->release(vis);
 
-    // return result
-    res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids));
+    // Return the exact centroid distances already computed by load_centroid().
+    auto result_count = static_cast<uint32_t>(std::min<size_t>(res_pool.size(), k));
+    if (distances == nullptr) {
+      res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids), result_count);
+    } else {
+      res_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids), distances, result_count);
+    }
+    fill_invalid_ids(ids, result_count, k);
+    if (distances != nullptr) {
+      fill_invalid_distances(distances, result_count, k);
+    }
   }
 
 #if defined(__linux__)
@@ -864,12 +890,30 @@ struct GraphSearchJob {
                           IDType *ids,
                           const SearchInfo &search_info,
                           const DynamicBitset *blocked_mask = nullptr) {
+    rabitq_search_solo(query, topk, ids, nullptr, search_info, blocked_mask);
+  }
+
+  /**
+   * @brief Run masked RaBitQ traversal and return iterator-computed exact distances.
+   * @param query Raw query vector.
+   * @param topk Number of accepted neighbors requested.
+   * @param ids Output internal IDs.
+   * @param distances Optional output exact distances paired with ids; may be null.
+   * @param search_info Query breadth and result count.
+   * @param blocked_mask Optional rejected internal IDs; traversal may cross blocked nodes.
+   */
+  void rabitq_search_solo(const DataType *query,
+                          uint32_t topk,
+                          IDType *ids,
+                          DistanceType *distances,
+                          const SearchInfo &search_info,
+                          const DynamicBitset *blocked_mask = nullptr) {
     if constexpr (!is_rabitq_space_v<DistanceSpaceType>) {
       throw std::invalid_argument("Only support RaBitQSpace instance!");
     }
 
     if (blocked_mask == nullptr) {
-      rabitq_search_solo(query, topk, ids, search_info.ef_);
+      rabitq_search_solo(query, topk, ids, distances, search_info.ef_);
       return;
     }
 
@@ -883,8 +927,16 @@ struct GraphSearchJob {
       result_pool.insert(candidate->id_, candidate->distance_);
     }
 
-    std::fill(ids, ids + topk, std::numeric_limits<IDType>::max());
-    result_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids), topk);
+    auto result_count = static_cast<uint32_t>(std::min<size_t>(result_pool.size(), topk));
+    if (distances == nullptr) {
+      result_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids), result_count);
+    } else {
+      result_pool.copy_results_to(reinterpret_cast<uint32_t *>(ids), distances, result_count);
+    }
+    fill_invalid_ids(ids, result_count, topk);
+    if (distances != nullptr) {
+      fill_invalid_distances(distances, result_count, topk);
+    }
   }
 };
 

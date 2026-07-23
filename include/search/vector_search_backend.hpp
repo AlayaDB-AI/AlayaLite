@@ -97,6 +97,9 @@ class VectorSearchBackend {
   /** @brief Return immutable capabilities for this backend instance. */
   [[nodiscard]] virtual auto capabilities() const -> SearchCapabilities = 0;
 
+  /** @brief Return the exclusive upper bound of internal IDs visible to vector search. */
+  [[nodiscard]] virtual auto universe_size() const -> size_t = 0;
+
   /** @brief Execute a one-shot vector search. */
   [[nodiscard]] virtual auto search(const VectorSearchRequest<DataType, IDType> &request) const
       -> CandidateBatch<IDType, DistanceType> = 0;

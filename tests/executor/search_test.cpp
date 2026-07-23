@@ -8,8 +8,10 @@
 #include <filesystem>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #include "executor/jobs/graph_hybrid_search_job.hpp"
 #include "executor/jobs/graph_search_job.hpp"
@@ -503,6 +505,40 @@ class RejectIdMask final : public IdMask<uint32_t> {
   uint32_t rejected_id_;  ///< The single internal ID excluded from emitted results.
 };
 
+/** @brief Exact-distance-only backend used to verify planner capability fallback. */
+class ExactOnlyVectorBackend final : public VectorSearchBackend<float, uint32_t, float> {
+ public:
+  /** @brief Bind exact distance evaluation to one-dimensional raw values. */
+  explicit ExactOnlyVectorBackend(std::vector<float> values) : values_(std::move(values)) {}
+
+  /** @copydoc VectorSearchBackend::capabilities */
+  [[nodiscard]] auto capabilities() const -> SearchCapabilities override { return {}; }
+
+  /** @copydoc VectorSearchBackend::universe_size */
+  [[nodiscard]] auto universe_size() const -> size_t override { return values_.size(); }
+
+  /** @copydoc VectorSearchBackend::search */
+  [[nodiscard]] auto search(const VectorSearchRequest<float, uint32_t> &) const
+      -> CandidateBatch<uint32_t, float> override {
+    throw std::logic_error("exact-only backend does not implement ANN search");
+  }
+
+  /** @copydoc VectorSearchBackend::open_cursor */
+  [[nodiscard]] auto open_cursor(const VectorSearchRequest<float, uint32_t> &) const
+      -> std::unique_ptr<CandidateCursor<uint32_t, float>> override {
+    return nullptr;
+  }
+
+  /** @copydoc VectorSearchBackend::exact_distance */
+  [[nodiscard]] auto exact_distance(const float *query, uint32_t id) const -> float override {
+    auto difference = *query - values_.at(id);
+    return difference * difference;
+  }
+
+ private:
+  std::vector<float> values_;  ///< Raw one-dimensional vectors keyed by internal ID.
+};
+
 TEST(BlockedBitsetIdMaskTest, OwnsBlockedSnapshotAndRejectsOutOfRangeIds) {
   auto blocked = std::make_shared<DynamicBitset>(5);
   blocked->set(3);
@@ -540,6 +576,7 @@ TEST(LegacyGraphSearchBackendTest, DirectSearchMatchesGraphJobAndReturnsDistance
   EXPECT_FLOAT_EQ(result.candidates_[0].distance_, expected_distances[0]);
   EXPECT_FLOAT_EQ(result.candidates_[1].distance_, expected_distances[1]);
   EXPECT_TRUE(result.exhausted_);
+  EXPECT_EQ(backend.universe_size(), space->get_data_num());
 }
 
 TEST(LegacyGraphSearchBackendTest, QuantizedSearchUsesRawSpaceForExactDistances) {
@@ -914,6 +951,52 @@ TEST(GraphHybridSearchJobUnitTest, UsesExternalScalarProviderWithScalarlessVecto
   EXPECT_EQ(item_ids[0], "external_4");
 }
 
+TEST(GraphHybridSearchJobUnitTest, InjectedBackendFallsBackWithoutConstructingGraphJob) {
+  ScopedTempDbDir db_dir("hybrid_injected_exact_backend");
+  auto values = std::vector<float>{10.0F, 11.0F, 12.0F, 0.0F, 1.0F};
+  auto space = make_one_dim_raw_space(values);
+
+  RocksDBRecordStoreConfig config;
+  config.db_path_ = (db_dir.path_ / "record_store").string();
+  config.indexed_fields_ = {"group"};
+  RocksDBRecordStore<uint32_t> record_store(config);
+  for (uint32_t id = 0; id < values.size(); ++id) {
+    auto raw_vector = std::string(reinterpret_cast<const char *>(&values[id]), sizeof(float));
+    ASSERT_TRUE(record_store.upsert(id,
+                                    ScalarData{"external_" + std::to_string(id),
+                                               "doc_" + std::to_string(id),
+                                               {{"group", static_cast<int64_t>(id < 4 ? 1 : 0)}}},
+                                    raw_vector));
+  }
+  auto provider = std::make_shared<RocksDBScalarQueryProvider<uint32_t>>(&record_store);
+  auto backend = std::make_shared<ExactOnlyVectorBackend>(values);
+  using HybridJobType = GraphHybridSearchJob<RawSpaceType>;
+  HybridJobType search_job(space, nullptr, nullptr, provider, backend);
+
+  HybridJobType::HybridPlanStats observed_stats;
+  search_job.set_plan_stats_hook([&](const auto &stats) {
+    observed_stats = stats;
+  });
+  MetadataFilter filter;
+  filter.add_eq("group", static_cast<int64_t>(1));
+  std::vector<float> query{0.1F};
+  std::vector<uint32_t> ids(1, std::numeric_limits<uint32_t>::max());
+  std::vector<std::string> item_ids(1);
+
+  search_job.hybrid_search_solo(query.data(),
+                                ids.data(),
+                                SearchInfo{1, 4},
+                                filter,
+                                item_ids.data());
+
+  EXPECT_EQ(ids[0], 3U);
+  EXPECT_EQ(item_ids[0], "external_3");
+  EXPECT_EQ(observed_stats.initial_mode_, HybridJobType::Mode::kBitsetPrefilter);
+  EXPECT_EQ(observed_stats.executed_mode_, HybridJobType::Mode::kIndexedExact);
+  EXPECT_TRUE(observed_stats.fallback_);
+  EXPECT_EQ(observed_stats.fallback_reason_, "accept_mask_unsupported");
+}
+
 TEST(GraphHybridSearchJobUnitTest, RejectsZeroTopk) {
   ScopedTempDbDir db_dir("hybrid_zero_topk");
   auto space = make_one_dim_scalar_space({10.0F, 11.0F, 12.0F, 0.0F, 1.0F}, db_dir.path_, {"id"});
@@ -1132,6 +1215,28 @@ TEST_F(RaBitQHybridSearchTest, LegacyBackendSupportsDirectAndCursorSearch) {
   EXPECT_FALSE(result.candidates_.empty());
   EXPECT_FALSE(first_batch.candidates_.empty());
   EXPECT_EQ(cursor->stats().emitted_, first_batch.candidates_.size());
+}
+
+TEST_F(RaBitQHybridSearchTest, LegacyBackendPreservesImplicitRerankDistances) {
+  using SearchJobType = GraphSearchJob<RaBitQSpaceWithScalar>;
+  auto search_job = std::make_shared<SearchJobType>(resources().plain_space_, nullptr);
+  LegacyGraphSearchBackend<RaBitQSpaceWithScalar> backend(search_job);
+  constexpr uint32_t kTopk = 5;
+  constexpr uint32_t kEf = 86;
+  auto query = resources().ds_.queries_.data();
+  std::vector<uint32_t> expected_ids(kTopk);
+  std::vector<float> expected_distances(kTopk);
+
+  search_job->rabitq_search_solo(query, kTopk, expected_ids.data(), expected_distances.data(), kEf);
+  auto result = backend.search(VectorSearchRequest<float, uint32_t>{.query_ = query,
+                                                                    .topk_ = kTopk,
+                                                                    .candidate_budget_ = kEf});
+
+  ASSERT_EQ(result.candidates_.size(), kTopk);
+  for (size_t i = 0; i < kTopk; ++i) {
+    EXPECT_EQ(result.candidates_[i].id_, expected_ids[i]);
+    EXPECT_FLOAT_EQ(result.candidates_[i].distance_, expected_distances[i]);
+  }
 }
 
 TEST_F(RaBitQHybridSearchTest, RaBitQHybridSearchSoloWithCategoryFilter) {
